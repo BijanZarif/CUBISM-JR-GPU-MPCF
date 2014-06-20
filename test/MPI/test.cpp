@@ -12,171 +12,50 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <cmath>
 using namespace std;
 
 #include "ArgumentParser.h"
 #include "GridMPI.h"
 #include "Timer.h"
+#include "HDF5Dumper_MPI.h"
 
 #ifndef _BLOCKSIZE_
 #define _BLOCKSIZE_ 16
 #endif
 
 
-// global cartesian communicator
-
-
-// main data
-/* template <typename T> */
-/* struct Data */
-/* { */
-/*     const unsigned int N, Nx, Ny, Nz; */
-/*     vector<T> data; */
-/*     vector<T> xghost_l, xghost_r; */
-/*     vector<T> yghost_l, yghost_r; */
-/*     vector<T> zghost_l, zghost_r; */
-
-/*     Data(const unsigned int _Nx, const unsigned int _Ny, const unsigned int _Nz) */
-/*         : */
-/*             N(_Nx * _Ny * _Nz), Nx(_Nx), Ny(_Ny), Nz(_Nz), */
-/*             data(N, -1), */
-/*             xghost_l(3 * _Ny * _Nz, -1), xghost_r(3 * _Ny * _Nz, -1), */
-/*             yghost_l(_Nx * 3 * _Nz, -1), yghost_r(_Nx * 3 * _Nz, -1), */
-/*             zghost_l(_Nx * _Ny * 3, -1), zghost_r(_Nx * _Ny * 3, -1) */
-/*     { } */
-
-/*     T& operator()(const int ix, const int iy, const int iz) */
-/*     { */
-/*         return data[ix + Nx * (iy + Ny * iz)]; */
-/*     } */
-/* }; */
-
-
-#if 0
-void get_nbr_ranks(int nbr_ranks[6], const int mycoords[3], const int dims[3])
+template <typename TGrid>
+struct myStreamer
 {
-    /* *
-     * Returns ranks of the neighbor processes in the (periodic) 3D cartesian
-     * topology in nbr_ranks = {xrank_l, xrank_r, yrank_l, yrank_r, zrank_l,
-     * zrank_r}
-     * */
-    int coords_l[3], coords_r[3];
-    for (int i = 0; i < 3; ++i)
+    static const int NCHANNELS = 9;
+
+    const std::vector<Real *>& soa_data;
+    const int NX = TGrid::sizeX;
+    const int NY = TGrid::sizeY;
+    const int NZ = TGrid::sizeZ;
+
+    myStreamer(const TGrid& grid) : soa_data(grid.pdata()) {}
+
+    void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
     {
-        const int im1 = (i-1 + 3) % 3;
-        const int ip1 = (i+1 + 3) % 3;
-        coords_l[i]   = (mycoords[i]-1 + dims[i]) % dims[i];
-        coords_l[im1] = mycoords[im1];
-        coords_l[ip1] = mycoords[ip1];
-        coords_r[i]   = (mycoords[i]+1 + dims[i]) % dims[i];
-        coords_r[im1] = mycoords[im1];
-        coords_r[ip1] = mycoords[ip1];
-        MPI_Cart_rank(cart_world, coords_l, &nbr_ranks[i*2 + 0]);
-        MPI_Cart_rank(cart_world, coords_r, &nbr_ranks[i*2 + 1]);
+        const int idx = ix + NX * (iy + NY * iz);
+        assert(idx < NX * NY * NZ);
+        for (int i = 0; i < 7; ++i)
+            out[i] = soa_data[i][idx];
     }
-}
 
-
-// send and receive
-template <typename T>
-void send_receive(T *ghost_l, T *ghost_r, const int Ng, const int myrank, const int left, const int right)
-{
-    vector<T> recv_buffer_l(Ng);
-    vector<T> recv_buffer_r(Ng);
-
-    MPI_Status status;
-    MPI_Sendrecv(ghost_l, Ng, _MPI_DATA_TYPE_, left,  1, &recv_buffer_r[0], Ng, _MPI_DATA_TYPE_, right, MPI_ANY_TAG, cart_world, &status);
-    MPI_Sendrecv(ghost_r, Ng, _MPI_DATA_TYPE_, right, 2, &recv_buffer_l[0], Ng, _MPI_DATA_TYPE_, left,  MPI_ANY_TAG, cart_world, &status);
-
-    //copy back
-    for (int i = 0; i < Ng; ++i)
+    void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz) const
     {
-        ghost_l[i] = recv_buffer_l[i];
-        ghost_r[i] = recv_buffer_r[i];
+        const int idx = ix + NX * (iy + NY * iz);
+        assert(idx < NX * NY * NZ);
+        const Real * const pRHO = soa_data[0];
+        pRHO[idx] = input[0];
     }
-}
 
-template <typename T>
-void send_receive_all(NodeBlock& myblock, const int myrank, const int mycoords[3], const int dims[3])
-{
-    int nbr[6];
-    get_nbr_ranks(nbr, mycoords, dims);
-
-    const int Ng = myblock.size_ghost();
-
-    send_receive<T>(myblock.pxghost_l()[0], myblock.pxghost_r()[0], Ng, myrank, nbr[0], nbr[1]);
-    send_receive<T>(myblock.pyghost_l()[0], myblock.pyghost_r()[0], Ng, myrank, nbr[2], nbr[3]);
-    send_receive<T>(myblock.pzghost_l()[0], myblock.pzghost_r()[0], Ng, myrank, nbr[4], nbr[5]);
-}
-#endif
-
-
-// utils
-/* template <typename T> */
-/* void dump(Data<T>& mydata, const int rank) */
-/* { */
-/*     ostringstream fname; */
-/*     fname << "rank_" << rank; */
-/*     ofstream out(fname.str().c_str()); */
-
-/*     for (int iz = 0; iz < mydata.Nz; ++iz) */
-/*     { */
-/*         for (int iy = 0; iy < mydata.Ny; ++iy) */
-/*         { */
-/*             for (int ix = 0; ix < mydata.Nx; ++ix) */
-/*                 out << mydata(ix,iy,iz) << '\t'; */
-/*             out << endl; */
-/*         } */
-/*         out << endl; */
-/*     } */
-/*     out.close(); */
-/* } */
-
-
-/* template <typename T> */
-/* void dump_ghosts(Data<T>& mydata, const int rank) */
-/* { */
-/*     ostringstream fname; */
-/*     fname << "ghosts_rank_" << rank; */
-/*     ofstream out(fname.str().c_str()); */
-
-/*     out << "XGHOSTS:" << endl; */
-/*     out << "===LEFT===" << endl; */
-/*     for (int i = 0; i < 3*_BLOCKSIZE_*_BLOCKSIZE_; ++i) */
-/*         out << mydata.xghost_l[i] << '\t'; */
-/*     out << endl; */
-/*     out << "===RIGHT===" << endl; */
-/*     for (int i = 0; i < 3*_BLOCKSIZE_*_BLOCKSIZE_; ++i) */
-/*         out << mydata.xghost_r[i] << '\t'; */
-/*     out << endl; */
-
-/*     out << endl; */
-
-/*     out << "YGHOSTS:" << endl; */
-/*     out << "===LEFT===" << endl; */
-/*     for (int i = 0; i < 3*_BLOCKSIZE_*_BLOCKSIZE_; ++i) */
-/*         out << mydata.yghost_l[i] << '\t'; */
-/*     out << endl; */
-/*     out << "===RIGHT===" << endl; */
-/*     for (int i = 0; i < 3*_BLOCKSIZE_*_BLOCKSIZE_; ++i) */
-/*         out << mydata.yghost_r[i] << '\t'; */
-/*     out << endl; */
-
-/*     out << endl; */
-
-/*     out << "ZGHOSTS:" << endl; */
-/*     out << "===LEFT===" << endl; */
-/*     for (int i = 0; i < 3*_BLOCKSIZE_*_BLOCKSIZE_; ++i) */
-/*         out << mydata.zghost_l[i] << '\t'; */
-/*     out << endl; */
-/*     out << "===RIGHT===" << endl; */
-/*     for (int i = 0; i < 3*_BLOCKSIZE_*_BLOCKSIZE_; ++i) */
-/*         out << mydata.zghost_r[i] << '\t'; */
-/*     out << endl; */
-
-/*     out.close(); */
-/* } */
-
+    static const char * getAttributeName() { return "Tensor"; }
+    /* static const char * getAttributeName() { return "Scalar"; } */
+};
 
 
 
@@ -229,54 +108,49 @@ int main(int argc, const char *argv[])
     grid.send_receive_all();
     const double tS = t1.stop();
     /* printf("Rank %d init send-receive %f\n", world_rank, tS); */
-    /* GridMPI<NodeBlock> grid(npex, npey, npez); */
 
+#if 1
+    /* //funky test */
+    /* Real *prho = grid.pdata()[0]; */
+    /* for (int i = 0; i < grid.size(); ++i) */
+    /*     prho[i] = world_rank; */
+    /*     /1* prho[i] = world_rank*grid.size() + i; *1/ */
 
-    /* assert(nx_proc * ny_proc * nz_proc == world_size); */
+    // groovy test
+    double pos[3];
+    typedef NodeBlock::PRIM var;
+    for (int iz = 0; iz < GridMPI::sizeZ; ++iz)
+        for (int iy = 0; iy < GridMPI::sizeY; ++iy)
+            for (int ix = 0; ix < GridMPI::sizeX; ++ix)
+            {
+                const unsigned int idx = ix + GridMPI::sizeX * (iy + GridMPI::sizeY * iz);
+                grid.get_pos(ix, iy, iz, pos);
 
-    /* int dims[3]  = {nx_proc, ny_proc, nz_proc}; */
-    /* int periodic[3] = {1, 1, 1}; */
-    /* MPI_Cart_create(MPI_COMM_WORLD, 3, dims, periodic, true, &cart_world); */
+                Real val;
+                if (pos[0] < 0.5)
+                    val = 1.0;
+                else
+                    val = 0.0;
 
-    /* int mysize, myrank; */
-    /* int mycoords[3]; */
-    /* MPI_Comm_size(cart_world, &mysize); */
-    /* MPI_Comm_rank(cart_world, &myrank); */
-    /* MPI_Cart_coords(cart_world, myrank, 3, mycoords); */
+                grid(ix, iy, iz, var::R) = val;
+                /* grid(ix, iy, iz, var::R) = std::sqrt(pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2]); */
+                /* grid(ix, iy, iz, var::U) = pos[0]; */
+                /* grid(ix, iy, iz, var::V) = pos[1]; */
+                /* grid(ix, iy, iz, var::W) = pos[2]; */
+            }
+#endif
+
+    DumpHDF5_MPI<GridMPI, myStreamer<GridMPI> >(grid, 0, "test");
+
 
 #if 0
     printf("Rank %i coords (%i,%i,%i)\n", cart_rank, coords[0], coords[1], coords[2]);
 #endif
 
-    // init block data for local process
-    /* Data<data_t> mydata(_BLOCKSIZE_, _BLOCKSIZE_, _BLOCKSIZE_); */
-    /* for (int i = 0; i < mydata.N; ++i) */
-    /*     mydata.data[i] = myrank; */
-    /* for (int i = 0; i < 3*_BLOCKSIZE_*_BLOCKSIZE_; ++i) */
-    /* { */
-    /*     mydata.xghost_l[i] = mydata.xghost_r[i] = myrank; */
-    /*     mydata.yghost_l[i] = mydata.yghost_r[i] = myrank; */
-    /*     mydata.zghost_l[i] = mydata.zghost_r[i] = myrank; */
-    /* } */
-    /* NodeBlock myblock; */
-    /* myblock.clear(); */
-
-
-    // send/receive ghosts
-    /* send_receive_all<Real>(myblock, myrank, mycoords, dims); */
-
-
     // test MPI_Allreduce
     /* int maxRank; */
     /* MPI_Allreduce(&myrank, &maxRank, 1, MPI_INT, MPI_MAX, cart_world); */
     /* printf("Rank %d received maxRank %d\n", myrank, maxRank); */
-
-
-
-    /* // dump */
-    /* dump<data_t>(mydata, myrank); */
-    /* dump_ghosts<data_t>(mydata, myrank); */
-
 
     MPI_Finalize();
 

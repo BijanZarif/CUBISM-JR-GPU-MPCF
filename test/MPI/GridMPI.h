@@ -3,7 +3,7 @@
  *  FacesMPI
  *
  *  Created by Diego Rossinelli on 10/21/11.
- *  Modified for SOA representation by Fabian Wermelinger on 6/19/14
+ *  Modified for SOA/GPU representation by Fabian Wermelinger on 6/19/14
  *  Copyright 2011/14 ETH Zurich. All rights reserved.
  *
  */
@@ -16,11 +16,11 @@
 using namespace std;
 
 #define _MPI_REAL_ MPI_FLOAT
+#define _mymax(a,b) ((a) > (b) ? (a) : (b))
 
 /* #include "StencilInfo.h" */
 /* #include "SynchronizerMPI.h" */
 
-/* template < typename TNode > */
 class GridMPI : public NodeBlock
 {
     size_t timestamp;
@@ -33,6 +33,8 @@ class GridMPI : public NodeBlock
     int nbrrank[6];
     int periodic[3];
     int blocksize[3];
+
+    const double gextent;
 
     /* map<StencilInfo, SynchronizerMPI *> SynchronizerMPIs; */
 
@@ -82,10 +84,8 @@ class GridMPI : public NodeBlock
 
     public:
 
-    /* typedef TNode BlockType; */
-
     GridMPI(const int npeX, const int npeY, const int npeZ, const double maxextent = 1):
-        NodeBlock(), timestamp(0)
+        NodeBlock(), gextent(maxextent), timestamp(0)
     {
         NodeBlock::clear();
 
@@ -101,6 +101,9 @@ class GridMPI : public NodeBlock
         pesize[1] = npeY;
         pesize[2] = npeZ;
 
+        const double h = maxextent / (_mymax(pesize[0]*blocksize[0], _mymax(pesize[1]*blocksize[1], pesize[2]*blocksize[2])) - 1);
+        _set_gridspacing(h);
+
         int world_size;
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
         assert(npeX*npeY*npeZ == world_size);
@@ -112,26 +115,9 @@ class GridMPI : public NodeBlock
 
         _get_nbr_ranks();
 
-        /* vector<BlockInfo> vInfo = TGrid::getBlocksInfo(); */
-
-        /* for(int i=0; i<vInfo.size(); ++i) */
-        /* { */
-        /*     BlockInfo info = vInfo[i]; */
-
-        /*     info.h_gridpoint = maxextent / (double)max (getBlocksPerDimension(0)*blocksize[0], */
-        /*                                                 max(getBlocksPerDimension(1)*blocksize[1], */
-        /*                                                     getBlocksPerDimension(2)*blocksize[2])); */
-
-        /*     info.h = info.h_gridpoint * blocksize[0];// only for blocksize[0]=blocksize[1]=blocksize[2] */
-
-        /*     for(int j=0; j<3; ++j) */
-        /*     { */
-        /*         info.index[j] += mypeindex[j]*mybpd[j]; */
-        /*         info.origin[j] = info.index[j]*info.h; */
-        /*     } */
-
-        /*     cached_blockinfo.push_back(info); */
-        /* } */
+        const double offset = bextent + h;
+        for (int i = 0; i < 3; ++i)
+            origin[i] += offset * mypeindex[i];
     }
 
     ~GridMPI()
@@ -154,6 +140,37 @@ class GridMPI : public NodeBlock
             _send_receive(zghost_l[i], zghost_r[i], Ng, nbrrank[4], nbrrank[5]);
         }
     }
+/* // send and receive */
+/* template <typename T> */
+/* void send_receive(T *ghost_l, T *ghost_r, const int Ng, const int myrank, const int left, const int right) */
+/* { */
+/*     vector<T> recv_buffer_l(Ng); */
+/*     vector<T> recv_buffer_r(Ng); */
+
+/*     MPI_Status status; */
+/*     MPI_Sendrecv(ghost_l, Ng, _MPI_DATA_TYPE_, left,  1, &recv_buffer_r[0], Ng, _MPI_DATA_TYPE_, right, MPI_ANY_TAG, cart_world, &status); */
+/*     MPI_Sendrecv(ghost_r, Ng, _MPI_DATA_TYPE_, right, 2, &recv_buffer_l[0], Ng, _MPI_DATA_TYPE_, left,  MPI_ANY_TAG, cart_world, &status); */
+
+/*     //copy back */
+/*     for (int i = 0; i < Ng; ++i) */
+/*     { */
+/*         ghost_l[i] = recv_buffer_l[i]; */
+/*         ghost_r[i] = recv_buffer_r[i]; */
+/*     } */
+/* } */
+
+/* template <typename T> */
+/* void send_receive_all(NodeBlock& myblock, const int myrank, const int mycoords[3], const int dims[3]) */
+/* { */
+/*     int nbr[6]; */
+/*     get_nbr_ranks(nbr, mycoords, dims); */
+
+/*     const int Ng = myblock.size_ghost(); */
+
+/*     send_receive<T>(myblock.pxghost_l()[0], myblock.pxghost_r()[0], Ng, myrank, nbr[0], nbr[1]); */
+/*     send_receive<T>(myblock.pyghost_l()[0], myblock.pyghost_r()[0], Ng, myrank, nbr[2], nbr[3]); */
+/*     send_receive<T>(myblock.pzghost_l()[0], myblock.pzghost_r()[0], Ng, myrank, nbr[4], nbr[5]); */
+/* } */
 
     /* vector<BlockInfo> getBlocksInfo() const */
     /* { */
@@ -243,38 +260,36 @@ class GridMPI : public NodeBlock
     /*     return *SynchronizerMPIs.find(p.stencil)->second; */
     /* } */
 
-    int getResidentBlocksPerDimension(int idim) const
-    {
-        assert(idim>=0 && idim<3);
-        return 1;
-    }
+    /* int getResidentBlocksPerDimension(int idim) const */
+    /* { */
+    /*     assert(idim>=0 && idim<3); */
+    /*     return 1; */
+    /* } */
 
-    int getBlocksPerDimension(int idim) const
+    inline int getBlocksPerDimension(int idim) const
     {
         assert(idim>=0 && idim<3);
         return pesize[idim];
     }
 
-    void peindex(int mypeindex[3]) const
+    inline void peindex(int mypeindex[3]) const
     {
         for(int i=0; i<3; ++i)
             mypeindex[i] = this->mypeindex[i];
     }
 
-    size_t getTimeStamp() const
+    inline size_t getTimeStamp() const
     {
         return timestamp;
     }
 
-    MPI_Comm getCartComm() const
+    inline MPI_Comm getCartComm() const
     {
         return cart_world;
     }
 
-    /* double getH() const */
-    /* { */
-    /*     vector<BlockInfo> vInfo = this->getBlocksInfo(); */
-    /*     BlockInfo info = vInfo[0]; */
-    /*     return info.h_gridpoint; */
-    /* } */
+    inline double getH() const
+    {
+        return h_gridpoint();
+    }
 };
