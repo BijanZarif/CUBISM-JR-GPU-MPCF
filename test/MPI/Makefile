@@ -21,8 +21,11 @@ endif
 
 CPPFLAGS += -std=c++11 -fopenmp $(extra)
 
-all: test.cpp NodeBlock.h NodeBlock.cpp
-	mpic++ $(CPPFLAGS) test.cpp NodeBlock.cpp -o test $(LIBS) -lz
+all: test.cpp NodeBlock.h NodeBlock.cpp WaveletCompressor.o
+	mpic++ $(CPPFLAGS) test.cpp NodeBlock.cpp WaveletCompressor.o -o test $(LIBS) -lz
+
+WaveletCompressor.o: WaveletCompressor.h WaveletCompressor.cpp
+	g++ $(CPPFLAGS) $(extra)  -c WaveletCompressor.cpp -o WaveletCompressor.o
 
 clean:
 	rm -f lsf.* ghosts_rank_* rank_* *~ *.o test

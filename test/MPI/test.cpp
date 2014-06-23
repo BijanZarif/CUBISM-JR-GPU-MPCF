@@ -19,10 +19,40 @@ using namespace std;
 #include "GridMPI.h"
 #include "Timer.h"
 #include "HDF5Dumper_MPI.h"
+#include "SerializerIO_WaveletCompression_MPI_Simple.h"
 
 #ifndef _BLOCKSIZE_
 #define _BLOCKSIZE_ 16
 #endif
+
+
+struct StreamerGridPointIterative //dummy
+{
+    static const int channels = 1;
+
+    const std::vector<Real *>& soa_data;
+    static const int NX = GridMPI::sizeX;
+    static const int NY = GridMPI::sizeY;
+    static const int NZ = GridMPI::sizeZ;
+
+    StreamerGridPointIterative() : soa_data(std::vector<Real *>(7,NULL)) {} // can not access data!
+    StreamerGridPointIterative(const std::vector<Real *>& pdata) : soa_data(pdata) {}
+
+    template<int channel>
+    inline Real operate(const int ix, const int iy, const int iz) { abort(); return 0; }
+
+    const char * name() { return "StreamerGridPointIterative" ; }
+};
+
+
+template<> inline Real StreamerGridPointIterative::operate<0>(const int ix, const int iy, const int iz) { const int idx = ix + NX * (iy + NY * iz); return soa_data[0][idx]; }
+/* template<> inline Real StreamerGridPointIterative::operate<1>(const FluidElement& e) { return e.u/e.rho; } */
+/* template<> inline Real StreamerGridPointIterative::operate<2>(const FluidElement& e) { return e.v/e.rho; } */
+/* template<> inline Real StreamerGridPointIterative::operate<3>(const FluidElement& e) { return e.w/e.rho; } */
+/* template<> inline Real StreamerGridPointIterative::operate<4>(const FluidElement& e) { return (e.energy-0.5*(e.u*e.u+e.v*e.v+e.w*e.w)/e.rho - e.P)/e.G; } */
+/* template<> inline Real StreamerGridPointIterative::operate<5>(const FluidElement& e) { return e.G; } */
+/* template<> inline Real StreamerGridPointIterative::operate<6>(const FluidElement& e) { return e.P; } */
+/* template<> inline Real StreamerGridPointIterative::operate<7>(const FluidElement& e) { return e.dummy; } */
 
 
 template <typename TGrid>
@@ -140,7 +170,12 @@ int main(int argc, const char *argv[])
             }
 #endif
 
-    DumpHDF5_MPI<GridMPI, myStreamer<GridMPI> >(grid, 0, "test");
+    SerializerIO_WaveletCompression_MPI_SimpleBlocking<GridMPI, StreamerGridPointIterative> mywaveletdumper;
+    mywaveletdumper.verbose();
+    mywaveletdumper.set_threshold(5e-2);
+    mywaveletdumper.Write<0>(grid, "test");
+
+    /* DumpHDF5_MPI<GridMPI, myStreamer<GridMPI> >(grid, 0, "test"); */
 
 
 #if 0
