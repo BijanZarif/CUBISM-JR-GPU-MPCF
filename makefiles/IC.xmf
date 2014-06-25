@@ -1,0 +1,23 @@
+<?xml version="1.0" ?>
+<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>
+<Xdmf Version="2.0">
+ <Domain>
+   <Grid GridType="Uniform">
+     <Time Value="00000"/>
+     <Topology TopologyType="3DCORECTMesh" Dimensions="16 16 16"/>
+     <Geometry GeometryType="ORIGIN_DXDYDZ">
+       <DataItem Name="Origin" Dimensions="3" NumberType="Float" Precision="4" Format="XML">
+        0.000000e+00 0.000000e+00 0.000000e+00
+       </DataItem>
+       <DataItem Name="Spacing" Dimensions="3" NumberType="Float" Precision="4" Format="XML">
+        6.666667e-02 6.666667e-02 6.666667e-02
+       </DataItem>
+     </Geometry>
+     <Attribute Name="data" AttributeType="Tensor" Center="Node">
+       <DataItem Dimensions="16 16 16 9" NumberType="Float" Precision="4" Format="HDF">
+        IC.h5:/data
+       </DataItem>
+     </Attribute>
+   </Grid>
+ </Domain>
+</Xdmf>

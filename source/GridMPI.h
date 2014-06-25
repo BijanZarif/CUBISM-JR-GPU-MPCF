@@ -15,7 +15,7 @@
 
 using namespace std;
 
-#ifdef _FLOAT_PRECISION_ || _SP_COMP_
+#ifdef _FLOAT_PRECISION_
 #define _MPI_REAL_ MPI_FLOAT
 #else
 #define _MPI_REAL_ MPI_DOUBLE

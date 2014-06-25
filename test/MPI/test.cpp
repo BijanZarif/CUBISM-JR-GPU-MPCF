@@ -30,13 +30,18 @@ struct StreamerGridPointIterative //dummy
 {
     static const int channels = 1;
 
-    const std::vector<Real *>& soa_data;
     static const int NX = GridMPI::sizeX;
     static const int NY = GridMPI::sizeY;
     static const int NZ = GridMPI::sizeZ;
 
-    StreamerGridPointIterative() : soa_data(std::vector<Real *>(7,NULL)) {} // can not access data!
-    StreamerGridPointIterative(const std::vector<Real *>& pdata) : soa_data(pdata) {}
+    inline int _id(const int ix, const int iy, const int iz) const { assert(ix + NX * (iy + NY * iz) < NX*NY*NZ); return ix + NX * (iy + NY * iz); }
+
+    //direct primitives
+    typedef const Real * const const_ptr;
+    const_ptr r, u, v, w, e, G, P;
+
+    StreamerGridPointIterative() : r(NULL), u(NULL), v(NULL), w(NULL), e(NULL), G(NULL), P(NULL) {} // can not access data, only name().. not a clean solution!
+    StreamerGridPointIterative(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
 
     template<int channel>
     inline Real operate(const int ix, const int iy, const int iz) { abort(); return 0; }
@@ -44,15 +49,13 @@ struct StreamerGridPointIterative //dummy
     const char * name() { return "StreamerGridPointIterative" ; }
 };
 
-
-template<> inline Real StreamerGridPointIterative::operate<0>(const int ix, const int iy, const int iz) { const int idx = ix + NX * (iy + NY * iz); return soa_data[0][idx]; }
-/* template<> inline Real StreamerGridPointIterative::operate<1>(const FluidElement& e) { return e.u/e.rho; } */
-/* template<> inline Real StreamerGridPointIterative::operate<2>(const FluidElement& e) { return e.v/e.rho; } */
-/* template<> inline Real StreamerGridPointIterative::operate<3>(const FluidElement& e) { return e.w/e.rho; } */
-/* template<> inline Real StreamerGridPointIterative::operate<4>(const FluidElement& e) { return (e.energy-0.5*(e.u*e.u+e.v*e.v+e.w*e.w)/e.rho - e.P)/e.G; } */
-/* template<> inline Real StreamerGridPointIterative::operate<5>(const FluidElement& e) { return e.G; } */
-/* template<> inline Real StreamerGridPointIterative::operate<6>(const FluidElement& e) { return e.P; } */
-/* template<> inline Real StreamerGridPointIterative::operate<7>(const FluidElement& e) { return e.dummy; } */
+template<> inline Real StreamerGridPointIterative::operate<0>(const int ix, const int iy, const int iz) { return r[_id(ix,iy,iz)]; }
+template<> inline Real StreamerGridPointIterative::operate<1>(const int ix, const int iy, const int iz) { const int idx = _id(ix,iy,iz); return u[idx]/r[idx]; }
+template<> inline Real StreamerGridPointIterative::operate<2>(const int ix, const int iy, const int iz) { const int idx = _id(ix,iy,iz); return v[idx]/r[idx]; }
+template<> inline Real StreamerGridPointIterative::operate<3>(const int ix, const int iy, const int iz) { const int idx = _id(ix,iy,iz); return w[idx]/r[idx]; }
+template<> inline Real StreamerGridPointIterative::operate<4>(const int ix, const int iy, const int iz) { const int idx = _id(ix,iy,iz); return (e[idx]-0.5*(u[idx]*u[idx]+v[idx]*v[idx]+w[idx]*w[idx])/r[idx] - P[idx])/G[idx]; }
+template<> inline Real StreamerGridPointIterative::operate<5>(const int ix, const int iy, const int iz) { return G[_id(ix,iy,iz)]; }
+template<> inline Real StreamerGridPointIterative::operate<6>(const int ix, const int iy, const int iz) { return P[_id(ix,iy,iz)]; }
 
 
 template <typename TGrid>
@@ -140,11 +143,12 @@ int main(int argc, const char *argv[])
     /* printf("Rank %d init send-receive %f\n", world_rank, tS); */
 
 #if 1
-    /* //funky test */
+    //funky test
     /* Real *prho = grid.pdata()[0]; */
     /* for (int i = 0; i < grid.size(); ++i) */
-    /*     prho[i] = world_rank; */
-    /*     /1* prho[i] = world_rank*grid.size() + i; *1/ */
+    /*     /1* prho[i] = 1.0f; *1/ */
+    /*     /1* prho[i] = world_rank; *1/ */
+    /*     prho[i] = world_rank*grid.size() + i; */
 
     // groovy test
     double pos[3];
@@ -162,11 +166,11 @@ int main(int argc, const char *argv[])
                 else
                     val = 0.0;
 
-                grid(ix, iy, iz, var::R) = val;
-                /* grid(ix, iy, iz, var::R) = std::sqrt(pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2]); */
-                /* grid(ix, iy, iz, var::U) = pos[0]; */
-                /* grid(ix, iy, iz, var::V) = pos[1]; */
-                /* grid(ix, iy, iz, var::W) = pos[2]; */
+                /* grid(ix, iy, iz, var::R) = val; */
+                grid(ix, iy, iz, var::R) = std::sqrt(pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2]);
+                grid(ix, iy, iz, var::U) = pos[0];
+                grid(ix, iy, iz, var::V) = pos[1];
+                grid(ix, iy, iz, var::W) = pos[2];
             }
 #endif
 
@@ -175,7 +179,7 @@ int main(int argc, const char *argv[])
     mywaveletdumper.set_threshold(5e-2);
     mywaveletdumper.Write<0>(grid, "test");
 
-    /* DumpHDF5_MPI<GridMPI, myStreamer<GridMPI> >(grid, 0, "test"); */
+    DumpHDF5_MPI<GridMPI, myStreamer<GridMPI> >(grid, 0, "test");
 
 
 #if 0
