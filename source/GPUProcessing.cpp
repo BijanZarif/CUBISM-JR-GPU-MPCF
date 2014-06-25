@@ -88,29 +88,7 @@ void GPUProcessing::_reset()
 }
 
 
-void GPUProcessing::_copy_AOS_to_SOA(RealPtrVec_t& dst, const Real * const src, const uint_t gptfloats, const uint_t Nelements)
-{
-    Real * const ptr[7] = {dst[0], dst[1], dst[2], dst[3], dst[4], dst[5], dst[6]};
-
-#pragma omp parallel for
-    for (int i = 0; i < Nelements; ++i)
-        for (int comp = 0; comp < 7; ++comp)
-            (ptr[comp])[i] = src[i*gptfloats + comp];
-}
-
-
-void GPUProcessing::_copy_SOA_to_AOS(Real * const dst, const RealPtrVec_t& src, const uint_t gptfloats, const uint_t Nelements)
-{
-    const Real * const ptr[7] = {src[0], src[1], src[2], src[3], src[4], src[5], src[6]};
-
-#pragma omp parallel for
-    for (int i = 0; i < Nelements; ++i)
-        for (int comp = 0; comp < 7; ++comp)
-            dst[i*gptfloats + comp] = (ptr[comp])[i];
-}
-
-
-void GPUProcessing::_init_next_subdomain()
+void GPUProcessing::_init_next_chunk()
 {
     previous_length   = current_length;
     previous_iz       = current_iz;
@@ -152,7 +130,7 @@ void GPUProcessing::_printSOA(const Real * const in)
 }
 
 
-void GPUProcessing::_info_current_chunk()
+void GPUProcessing::_start_info_current_chunk(const string title)
 {
     string state;
     switch (chunk_state)
@@ -162,10 +140,12 @@ void GPUProcessing::_info_current_chunk()
         case LAST:         state = "LAST"; break;
         case SINGLE:       state = "SINGLE"; break;
     }
-    printf("[CURRENT CHUNK:        \t%d/%d]\n", current_chunk_id, N_chunks);
-    printf("[CURRENT CHUNK STATE:  \t%s]\n", state.c_str());
-    printf("[CURRENT CHUNK LENGTH: \t%d/%d]\n", current_length, CHUNK_LENGTH);
-    printf("[PREVIOUS CHUNK LENGTH:\t%d/%d]\n", previous_length, CHUNK_LENGTH);
-    printf("[CURRENT Z-POS:        \t%d/%d]\n", current_iz, BSZ_GPU);
-    printf("[NUMBER OF NODES:      \t%d]\n", SLICE_GPU * current_length);
+    printf("{\n");
+    printf("\t%s\n", title.c_str());
+    printf("\t[CURRENT CHUNK:        \t%d/%d]\n", current_chunk_id, N_chunks);
+    printf("\t[CURRENT CHUNK STATE:  \t%s]\n", state.c_str());
+    printf("\t[CURRENT CHUNK LENGTH: \t%d/%d]\n", current_length, CHUNK_LENGTH);
+    printf("\t[PREVIOUS CHUNK LENGTH:\t%d/%d]\n", previous_length, CHUNK_LENGTH);
+    printf("\t[CURRENT Z-POS:        \t%d/%d]\n", current_iz, BSZ_GPU);
+    printf("\t[NUMBER OF NODES:      \t%d]\n", SLICE_GPU * current_length);
 }

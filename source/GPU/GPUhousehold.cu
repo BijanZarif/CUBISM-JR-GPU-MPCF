@@ -37,7 +37,7 @@ Real *d_sumG, *d_sumP, *d_divU;
 std::vector<cudaArray_t> d_SOA(VSIZE, NULL);
 
 // Max SOS
-int* maxSOS;   // host, mapped
+int* h_maxSOS; // host, mapped
 int* d_maxSOS; // device, mapped (different address)
 
 // use non-null stream (async)
@@ -72,7 +72,7 @@ extern "C"
     ///////////////////////////////////////////////////////////////////////////
     // GPU Memory alloc / dealloc
     ///////////////////////////////////////////////////////////////////////////
-    void GPU::alloc(void** h_maxSOS, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t BSZ_GPU, const uint_t CHUNK_WIDTH)
+    void GPU::alloc(void** sos, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t BSZ_GPU, const uint_t CHUNK_WIDTH)
     {
         // THE FOLLOWING ASSUMES CUBIC DOAMIN
         const uint_t SLICE_GPU = BSX_GPU * BSY_GPU;
@@ -133,9 +133,9 @@ extern "C"
 
         // zero-copy maxSOS
         cudaSetDeviceFlags(cudaDeviceMapHost);
-        cudaHostAlloc((void**)&maxSOS, sizeof(int), cudaHostAllocMapped);
-        cudaHostGetDevicePointer(&d_maxSOS, maxSOS, 0);
-        *h_maxSOS = maxSOS; // return a reference to host memory to caller
+        cudaHostAlloc((void**)&h_maxSOS, sizeof(int), cudaHostAllocMapped);
+        cudaHostGetDevicePointer(&d_maxSOS, h_maxSOS, 0);
+        *(int**)sos = h_maxSOS; // return a reference to the caller
 
         // create stream
         cudaStreamCreate(&stream1);
@@ -203,7 +203,7 @@ extern "C"
         cudaFree(d_divU);
 
         // Max SOS
-        cudaFreeHost(maxSOS);
+        cudaFreeHost(h_maxSOS);
 
         // destroy stream
         cudaStreamDestroy(stream1);

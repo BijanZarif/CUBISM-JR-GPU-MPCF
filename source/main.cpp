@@ -17,7 +17,8 @@
 #include "SerializerIO_WaveletCompression_MPI_Simple.h"
 
 #include "MaxSpeedOfSound_CUDA.h"
-
+#include "Convection_CUDA.h"
+#include "Update_CUDA.h"
 
 
 // Helper
@@ -71,9 +72,10 @@ static void _ic(GridMPI& grid, ArgumentParser& parser)
 }
 
 
-static void _LSRKstep()
+template <typename TGrid, typename TGPU>
+static inline double _LSRKstep(const Real a, const Real b, const Real dtinvh, TGrid& grid, TGPU& gpu)
 {
-
+    return gpu.template process_all<Convection_CUDA, Update_CUDA>(a, b, dtinvh, grid.pdata(), grid.ptmp());
 }
 
 
@@ -104,12 +106,12 @@ int main(int argc, const char *argv[])
     // Setup Initial Condition
     ///////////////////////////////////////////////////////////////////////////
     _ic(grid, parser);
-    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(grid, 0, "IC");
+    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(grid, 0, "IC"); */
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
     ///////////////////////////////////////////////////////////////////////////
-    const size_t processing_slices = 8;
+    const size_t processing_slices = 64;
     GPUProcessing myGPU(GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ, processing_slices);
     myGPU.toggle_verbosity();
 
@@ -123,19 +125,29 @@ int main(int argc, const char *argv[])
     const unsigned int nsteps = parser("-nsteps").asInt(0);
 
     const double h = grid.getH();
+    float sos;
     double t = 0, dt;
     unsigned int step = 0;
 
     while (t < tend)
     {
-        const Real maxSOS = myGPU.template max_sos<MaxSpeedOfSound_CUDA>(grid.pdata()[0], 1);
-        dt = cfl*h/maxSOS;
-        MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, grid.getCartComm());
-        printf("Rank %d received dt = %f\n", world_rank, dt);
+        const double tsos = myGPU.template max_sos<MaxSpeedOfSound_CUDA>(grid.pdata(), sos);
+        assert(sos > 0);
+        printf("sos = %f (took %f sec)\n", sos, tsos);
 
-        _LSRKstep();
-        _LSRKstep();
-        _LSRKstep();
+        dt = cfl*h/sos;
+        dt = (tend-t) < dt ? (tend-t) : dt;
+        MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, grid.getCartComm());
+
+
+        const double trk1 = _LSRKstep<GridMPI, GPUProcessing>(0      , 1./4, dt/h, grid, myGPU);
+        printf("RK stage 1 takes %f sec\n", trk1);
+        const double trk2 = _LSRKstep<GridMPI, GPUProcessing>(-17./32, 8./9, dt/h, grid, myGPU);
+        printf("RK stage 2 takes %f sec\n", trk2);
+        const double trk3 = _LSRKstep<GridMPI, GPUProcessing>(-32./27, 3./4, dt/h, grid, myGPU);
+        printf("RK stage 3 takes %f sec\n", trk3);
+
+        printf("step takes %f sec\n", tsos + trk1 + trk2 + trk3);
 
         t += dt;
         ++step;

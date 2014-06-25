@@ -836,18 +836,18 @@ extern "C"
 ///////////////////////////////////////////////////////////////////////////////
 //                                   UTILS                                   //
 ///////////////////////////////////////////////////////////////////////////////
-static void _bindTexture(texture<float, 3, cudaReadModeElementType> tex, cudaArray_t d_ptr)
+static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex, cudaArray_t d_ptr)
 {
     cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
-    tex.addressMode[0]        = cudaAddressModeClamp;
-    tex.addressMode[1]        = cudaAddressModeClamp;
-    tex.addressMode[2]        = cudaAddressModeClamp;
-    tex.channelDesc           = fmt;
-    tex.filterMode            = cudaFilterModePoint;
-    tex.mipmapFilterMode      = cudaFilterModePoint;
-    tex.normalized            = false;
+    tex->addressMode[0]       = cudaAddressModeClamp;
+    tex->addressMode[1]       = cudaAddressModeClamp;
+    tex->addressMode[2]       = cudaAddressModeClamp;
+    tex->channelDesc          = fmt;
+    tex->filterMode           = cudaFilterModePoint;
+    tex->mipmapFilterMode     = cudaFilterModePoint;
+    tex->normalized           = false;
 
-    cudaBindTextureToArray(&tex, d_ptr, &fmt);
+    cudaBindTextureToArray(tex, d_ptr, &fmt);
 }
 
 
@@ -855,13 +855,13 @@ extern "C"
 {
     void GPU::bind_textures()
     {
-        _bindTexture(texR, d_SOA[0]);
-        _bindTexture(texU, d_SOA[1]);
-        _bindTexture(texV, d_SOA[2]);
-        _bindTexture(texW, d_SOA[3]);
-        _bindTexture(texE, d_SOA[4]);
-        _bindTexture(texG, d_SOA[5]);
-        _bindTexture(texP, d_SOA[6]);
+        _bindTexture(&texR, d_SOA[0]);
+        _bindTexture(&texU, d_SOA[1]);
+        _bindTexture(&texV, d_SOA[2]);
+        _bindTexture(&texW, d_SOA[3]);
+        _bindTexture(&texE, d_SOA[4]);
+        _bindTexture(&texG, d_SOA[5]);
+        _bindTexture(&texP, d_SOA[6]);
     }
 
 

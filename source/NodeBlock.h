@@ -108,6 +108,8 @@ class NodeBlock //cubic block of data designated for a single node
 
         inline const std::vector<Real *>& pdata() const { return data; }
         inline const std::vector<Real *>& ptmp()  const { return tmp; }
+        inline std::vector<Real *>& pdata() { return data; }
+        inline std::vector<Real *>& ptmp()  { return tmp; }
         inline const std::vector<Real *>& pxghost_l() const { return xghost_l; }
         inline const std::vector<Real *>& pxghost_r() const { return xghost_r; }
         inline const std::vector<Real *>& pyghost_l() const { return yghost_l; }
