@@ -113,7 +113,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     const size_t processing_slices = 64;
     GPUProcessing myGPU(GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ, processing_slices);
-    myGPU.toggle_verbosity();
+    /* myGPU.toggle_verbosity(); */
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
@@ -131,6 +131,7 @@ int main(int argc, const char *argv[])
 
     while (t < tend)
     {
+        // 1.) Compute max SOS -> dt
         const double tsos = myGPU.template max_sos<MaxSpeedOfSound_CUDA>(grid.pdata(), sos);
         assert(sos > 0);
         printf("sos = %f (took %f sec)\n", sos, tsos);
@@ -139,15 +140,22 @@ int main(int argc, const char *argv[])
         dt = (tend-t) < dt ? (tend-t) : dt;
         MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, grid.getCartComm());
 
-
-        const double trk1 = _LSRKstep<GridMPI, GPUProcessing>(0      , 1./4, dt/h, grid, myGPU);
-        printf("RK stage 1 takes %f sec\n", trk1);
-        const double trk2 = _LSRKstep<GridMPI, GPUProcessing>(-17./32, 8./9, dt/h, grid, myGPU);
-        printf("RK stage 2 takes %f sec\n", trk2);
-        const double trk3 = _LSRKstep<GridMPI, GPUProcessing>(-32./27, 3./4, dt/h, grid, myGPU);
-        printf("RK stage 3 takes %f sec\n", trk3);
-
-        printf("step takes %f sec\n", tsos + trk1 + trk2 + trk3);
+        // 2.) Compute RHS and update using LSRK3
+        double trk1, trk2, trk3;
+        {// stage 1
+            myGPU.load_halos();
+            trk1 = _LSRKstep<GridMPI, GPUProcessing>(0      , 1./4, dt/h, grid, myGPU);
+            printf("RK stage 1 takes %f sec\n", trk1);
+        }
+        {// stage 2
+            trk2 = _LSRKstep<GridMPI, GPUProcessing>(-17./32, 8./9, dt/h, grid, myGPU);
+            printf("RK stage 2 takes %f sec\n", trk2);
+        }
+        {// stage 3
+            trk3 = _LSRKstep<GridMPI, GPUProcessing>(-32./27, 3./4, dt/h, grid, myGPU);
+            printf("RK stage 3 takes %f sec\n", trk3);
+        }
+        printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
 
         t += dt;
         ++step;
