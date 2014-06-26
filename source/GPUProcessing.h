@@ -12,11 +12,10 @@
 #include "Timer.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <vector>
-#include <cstdlib>
-#include <cstring>
 #include <string>
-
 
 #ifndef _PAGEABLE_HOST_MEM_
 #include "cudaHostAllocator.h"
@@ -25,15 +24,22 @@ typedef std::vector<Real, cudaHostAllocator<Real> > cuda_vector_t;
 typedef std::vector<Real> cuda_vector_t;
 #endif
 
+#define ID3(x,y,z,NX,NY) ((x) + (NX) * ((y) + (NY) * (z)))
 
+
+template <typename TGrid>
 class GPUProcessing
 {
     private:
 
+        TGrid& grid;
+
         // Domain size (assume cube)
-        const uint_t BSX_GPU, BSY_GPU, BSZ_GPU;
+        static const uint_t sizeX = TGrid::sizeX;
+        static const uint_t sizeY = TGrid::sizeY;
+        static const uint_t sizeZ = TGrid::sizeZ;
+        static const uint_t SLICE_GPU = TGrid::sizeX * TGrid::sizeY;
         const uint_t CHUNK_LENGTH;
-        const uint_t SLICE_GPU;
         const uint_t REM;
 
         // GPU chunk
@@ -48,11 +54,24 @@ class GPUProcessing
         uint_t previous_chunk_id;
 
         // Ghosts
-        const uint_t N_xyghosts;
+        const uint_t N_xyghosts; // per chunk
         const uint_t N_zghosts;
+        uint_t N_yghosts;
+        uint_t N_xghosts;
+
+        ////// // TEMPORARY
+        // all ghosts colinear with z-axis (MPI, temporary solution??)
+        std::vector<Real> allxghost_l, allxghost_r;
+        std::vector<Real> allyghost_l, allyghost_r;
+
+        enum {SKIN, FLESH} myFeature[6];
+
+
+        ////////////
+
 
         // Max SOS
-        int* maxSOS;
+        int* maxSOS; // pointer to mapped memory CPU/GPU
 
         // SOA data buffers (pinned)
         struct SOAdata
@@ -97,11 +116,7 @@ class GPUProcessing
         SOAdata *previous_buffer;
         inline void _switch_buffer() // switch active buffer
         {
-            previous_buffer = buffer;
-            if (buffer == &BUFFER1)
-                buffer = &BUFFER2;
-            else
-                buffer = &BUFFER1;
+            buffer = ((previous_buffer = buffer) == &BUFFER1 ? &BUFFER2 : &BUFFER1);
         }
 
         // states
@@ -110,23 +125,67 @@ class GPUProcessing
         enum {QUIET=0, VERBOSE} chatty;
 
         // helpers
-        void _alloc_GPU();
-        void _free_GPU();
-        void _reset();
-        void _init_next_chunk();
+        void _alloc_GPU()
+        {
+            GPU::alloc((void**) &maxSOS, sizeX, sizeY, sizeZ, CHUNK_LENGTH);
+            gpu_allocation = ALLOCATED;
+        }
+
+        void _free_GPU()
+        {
+            GPU::dealloc();
+            gpu_allocation = FREE;
+        }
+
+        void _reset()
+        {
+            if (N_chunks == 1)
+            {
+                // whole chunk fits on the GPU
+                chunk_state = SINGLE;
+                current_length = sizeZ;
+            }
+            else
+            {
+                chunk_state = FIRST;
+                current_length = CHUNK_LENGTH;
+            }
+            current_iz = 0;
+            current_chunk_id = 1;
+        }
+
+        void _init_next_chunk()
+        {
+            previous_length   = current_length;
+            previous_iz       = current_iz;
+            previous_chunk_id = current_chunk_id;
+
+            current_iz     += current_length;
+            ++current_chunk_id;
+
+            if (current_chunk_id > N_chunks)
+                _reset();
+            else if (current_chunk_id == N_chunks)
+            {
+                current_length  = (1 - !REM)*REM + (!REM)*CHUNK_LENGTH;
+                chunk_state     = LAST;
+            }
+            else
+            {
+                current_length = CHUNK_LENGTH;
+                chunk_state    = INTERMEDIATE;
+            }
+
+            // use a new host buffer
+            _switch_buffer();
+        }
+
         inline void _copy_chunk(RealPtrVec_t& dst, const uint_t dstOFFSET, const RealPtrVec_t& src, const uint_t srcOFFSET, const uint_t Nelements)
         {
             for (int i = 0; i < 7; ++i)
                 memcpy(dst[i] + dstOFFSET, src[i] + srcOFFSET, Nelements*sizeof(Real));
         }
 
-        // info
-        void _printSOA(const Real * const in);
-        void _start_info_current_chunk(const std::string title = "");
-        inline void _end_info_current_chunk()
-        {
-            printf("}\n");
-        }
 
         // execution helper
         template <typename Ksos>
@@ -146,14 +205,14 @@ class GPUProcessing
                 ///////////////////////////////////////////////////////////////////
                 // 1.)
                 ///////////////////////////////////////////////////////////////////
-                GPU::h2d_3DArray(buffer->SOA, BSX_GPU, BSY_GPU, current_length);
+                GPU::h2d_3DArray(buffer->SOA, sizeX, sizeY, current_length);
 
                 ///////////////////////////////////////////////////////////////////
                 // 2.)
                 ///////////////////////////////////////////////////////////////////
                 Ksos kernel;
                 if (chatty) printf("\t[LAUNCH SOS KERNEL CHUNK %d]\n", current_chunk_id);
-                kernel.compute(BSX_GPU, BSY_GPU, current_length);
+                kernel.compute(sizeX, sizeY, current_length);
                 if (chatty) _end_info_current_chunk();
 
                 ///////////////////////////////////////////////////////////////////
@@ -239,15 +298,15 @@ class GPUProcessing
                 ///////////////////////////////////////////////////////////////////
                 Kflow convection(a, dtinvh);
                 if (chatty) printf("\t[LAUNCH CONVECTION KERNEL CHUNK %d]\n", current_chunk_id);
-                /* convection.compute(BSX_GPU, BSY_GPU, current_length, current_iz); */
-                convection.compute(BSX_GPU, BSY_GPU, current_length, 0);
+                /* convection.compute(sizeX, sizeY, current_length, current_iz); */
+                convection.compute(sizeX, sizeY, current_length, 0);
 
                 ///////////////////////////////////////////////////////////////////
                 // 4.)
                 ///////////////////////////////////////////////////////////////////
                 Kupdate update(b);
                 if (chatty) printf("\t[LAUNCH UPDATE KERNEL CHUNK %d]\n", current_chunk_id);
-                update.compute(BSX_GPU, BSY_GPU, current_length);
+                update.compute(sizeX, sizeY, current_length);
 
                 ///////////////////////////////////////////////////////////////////
                 // 5.)
@@ -366,81 +425,242 @@ class GPUProcessing
                                 buffer->xghost_l, buffer->xghost_r,
                                 buffer->yghost_l, buffer->yghost_r);
 
-                        GPU::h2d_3DArray(buffer->SOA, BSX_GPU, BSY_GPU, current_length+6);
+                        GPU::h2d_3DArray(buffer->SOA, sizeX, sizeY, current_length+6);
                         break;
                 }
             }
 
 
-        /* // index computing functions to index into the ghost buffers and generate */
-        /* // the correct stride for the GPU */
-        /* template <int A, int B, int C> */
-        /*     static inline uint_t idx_xghosts(const int ix, const int iy, const int iz) */
-        /*     { */
-        /*         return ID3(iy, ix+A, iz, B, C); */
-        /*     } */
-
-
-        /* template <int A, int B, int C> */
-        /*     static inline uint_t idx_yghosts(const int ix, const int iy, const int iz) */
-        /*     { */
-        /*         return ID3(ix, iy+A, iz, B, C); */
-        /*     } */
-
-
-        /* template <int A, int B, int C> */
-        /*     static inline uint_t idx_zghosts(const int ix, const int iy, const int iz) */
-        /*     { */
-        /*         return ID3(ix, iy, iz+A, B, C); */
-        /*     } */
-
-
-        void _compute_xy_ghosts(const Real * const src0)
+        // info
+        void _printSOA(const Real * const in)
         {
-            // Compute the x- and yghost for the current chunk
-            const int stencilStart[3] = {-3, -3, -3};
-            const int stencilEnd[3]   = { 4,  4,  4};
+            for (int iz = 0; iz < current_length+6; ++iz)
+            {
+                for (int iy = 0; iy < sizeY; ++iy)
+                {
+                    for (int ix = 0; ix < sizeX; ++ix)
+                        printf("%f\t\n", in[ix + sizeX * (iy + sizeY * iz)]);
+                    printf("\n");
+                }
+                printf("\n");
+            }
+        }
 
-            /* // use a boundary condition applied to the (current chunk) */
-            /* BoundaryCondition_CUDA<FluidBlock, FluidBlock::ElementType> bc(stencilStart, stencilEnd, src0, current_iz, current_length); */
-            /* bc.template applyBC_absorbing<0,0>(buffer->xghost_l, &GPUProcessing::idx_xghosts< 3,                  FluidBlock::sizeY, 3>); */
-            /* bc.template applyBC_absorbing<0,1>(buffer->xghost_r, &GPUProcessing::idx_xghosts< -FluidBlock::sizeX, FluidBlock::sizeY, 3>); */
-            /* bc.template applyBC_absorbing<1,0>(buffer->yghost_l, &GPUProcessing::idx_yghosts< 3,                  FluidBlock::sizeX, 3>); */
-            /* bc.template applyBC_absorbing<1,1>(buffer->yghost_r, &GPUProcessing::idx_yghosts< -FluidBlock::sizeY, FluidBlock::sizeX, 3>); */
+        void _show_feature()
+        {
+            int c[3];
+            grid.peindex(c);
+            for (int i = 0; i < 3; ++i)
+            {
+                printf("MPI coords (%d,%d,%d) -- i = %d, left:  %s\n", c[0], c[1], c[2], i, myFeature[2*i+0] == SKIN ? "Skin" : "Flesh");
+                printf("MPI coords (%d,%d,%d) -- i = %d, right: %s\n", c[0], c[1], c[2], i, myFeature[2*i+1] == SKIN ? "Skin" : "Flesh");
+            }
+        }
+
+        inline void _start_info_current_chunk(const std::string title = "")
+        {
+            std::string state;
+            switch (chunk_state)
+            {
+                case FIRST:        state = "FIRST"; break;
+                case INTERMEDIATE: state = "INTERMEDIATE"; break;
+                case LAST:         state = "LAST"; break;
+                case SINGLE:       state = "SINGLE"; break;
+            }
+            printf("{\n");
+            printf("\t%s\n", title.c_str());
+            printf("\t[CURRENT CHUNK:        \t%d/%d]\n", current_chunk_id, N_chunks);
+            printf("\t[CURRENT CHUNK STATE:  \t%s]\n", state.c_str());
+            printf("\t[CURRENT CHUNK LENGTH: \t%d/%d]\n", current_length, CHUNK_LENGTH);
+            printf("\t[PREVIOUS CHUNK LENGTH:\t%d/%d]\n", previous_length, CHUNK_LENGTH);
+            printf("\t[CURRENT Z-POS:        \t%d/%d]\n", current_iz, sizeZ);
+            printf("\t[NUMBER OF NODES:      \t%d]\n", SLICE_GPU * current_length);
+        }
+
+        inline void _end_info_current_chunk()
+        {
+            printf("}\n");
         }
 
 
-        void _compute_z_ghosts_l(const Real * const src0)
-        {
-            // Compute the left zghost for the current chunk
-            const int stencilStart[3] = {-3, -3, -3};
-            const int stencilEnd[3]   = { 4,  4,  4};
+    protected:
 
-            /* BoundaryCondition_CUDA<FluidBlock, FluidBlock::ElementType> bc(stencilStart, stencilEnd, src0); */
-            /* bc.template applyBC_absorbing<2,0>(buffer->zghost_l, &GPUProcessing::idx_zghosts< 3, FluidBlock::sizeX, FluidBlock::sizeY>); */
-        }
+        virtual void _apply_bc(const double t = 0) {}
+
+        // index mappings
+        template <int A, int B, int C>
+            static inline uint_t halomap_x(const int ix, const int iy, const int iz)
+            {
+                return ID3(iy, ix+A, iz, B, C);
+            }
 
 
-        void _compute_z_ghosts_r(const Real * const src0)
-        {
-            // Compute the right zghost for the current chunk
-            const int stencilStart[3] = {-3, -3, -3};
-            const int stencilEnd[3]   = { 4,  4,  4};
+        template <int A, int B, int C>
+            static inline uint_t halomap_y(const int ix, const int iy, const int iz)
+            {
+                return ID3(ix, iy+A, iz, B, C);
+            }
 
-            /* BoundaryCondition_CUDA<FluidBlock, FluidBlock::ElementType> bc(stencilStart, stencilEnd, src0); */
-            /* bc.template applyBC_absorbing<2,1>(buffer->zghost_r, &GPUProcessing::idx_zghosts< -FluidBlock::sizeZ, FluidBlock::sizeX, FluidBlock::sizeY>); */
-        }
+
+        template <int A, int B, int C>
+            static inline uint_t halomap_z(const int ix, const int iy, const int iz)
+            {
+                return ID3(ix, iy, iz+A, B, C);
+            }
+
+
+        /* void _compute_xy_ghosts(const Real * const src0) */
+        /* { */
+        /*     // Compute the x- and yghost for the current chunk */
+        /*     const int stencilStart[3] = {-3, -3, -3}; */
+        /*     const int stencilEnd[3]   = { 4,  4,  4}; */
+
+        /*     /1* // use a boundary condition applied to the (current chunk) *1/ */
+        /*     /1* BoundaryCondition_CUDA<FluidBlock, FluidBlock::ElementType> bc(stencilStart, stencilEnd, src0, current_iz, current_length); *1/ */
+        /*     /1* bc.template applyBC_absorbing<0,0>(buffer->xghost_l, &GPUProcessing::idx_xghosts< 3,                  FluidBlock::sizeY, 3>); *1/ */
+        /*     /1* bc.template applyBC_absorbing<0,1>(buffer->xghost_r, &GPUProcessing::idx_xghosts< -FluidBlock::sizeX, FluidBlock::sizeY, 3>); *1/ */
+        /*     /1* bc.template applyBC_absorbing<1,0>(buffer->yghost_l, &GPUProcessing::idx_yghosts< 3,                  FluidBlock::sizeX, 3>); *1/ */
+        /*     /1* bc.template applyBC_absorbing<1,1>(buffer->yghost_r, &GPUProcessing::idx_yghosts< -FluidBlock::sizeY, FluidBlock::sizeX, 3>); *1/ */
+        /* } */
+
+
+        /* void _compute_z_ghosts_l(const Real * const src0) */
+        /* { */
+        /*     // Compute the left zghost for the current chunk */
+        /*     const int stencilStart[3] = {-3, -3, -3}; */
+        /*     const int stencilEnd[3]   = { 4,  4,  4}; */
+
+        /*     /1* BoundaryCondition_CUDA<FluidBlock, FluidBlock::ElementType> bc(stencilStart, stencilEnd, src0); *1/ */
+        /*     /1* bc.template applyBC_absorbing<2,0>(buffer->zghost_l, &GPUProcessing::idx_zghosts< 3, FluidBlock::sizeX, FluidBlock::sizeY>); *1/ */
+        /* } */
+
+
+        /* void _compute_z_ghosts_r(const Real * const src0) */
+        /* { */
+        /*     // Compute the right zghost for the current chunk */
+        /*     const int stencilStart[3] = {-3, -3, -3}; */
+        /*     const int stencilEnd[3]   = { 4,  4,  4}; */
+
+        /*     /1* BoundaryCondition_CUDA<FluidBlock, FluidBlock::ElementType> bc(stencilStart, stencilEnd, src0); *1/ */
+        /*     /1* bc.template applyBC_absorbing<2,1>(buffer->zghost_r, &GPUProcessing::idx_zghosts< -FluidBlock::sizeZ, FluidBlock::sizeX, FluidBlock::sizeY>); *1/ */
+        /* } */
 
 
     public:
 
-        GPUProcessing(const uint_t BSX, const uint_t BSY, const uint_t BSZ, const uint_t CW);
-        ~GPUProcessing();
+/* xghost_l(nPrim, NULL), xghost_r(nPrim, NULL), */
+/* yghost_l(nPrim, NULL), yghost_r(nPrim, NULL), */
 
-        // main accessors to process complete domain
-        // ========================================================================
+        GPUProcessing(TGrid& G, const uint_t CL) :
+            grid(G), CHUNK_LENGTH(CL), REM( sizeZ % CL ),
+            N_chunks( (sizeZ + CL - 1) / CL ),
+            GPU_input_size( SLICE_GPU * (CL+6) ),
+            GPU_output_size( SLICE_GPU * CL ),
+            N_xyghosts(3*sizeY*CL), // WARNING: assumes cubic domain!
+            N_zghosts(3*SLICE_GPU),
+
+            // TEMPPPPP
+            allxghost_l(7*3*sizeY*sizeZ),
+            allxghost_r(7*3*sizeY*sizeZ),
+            allyghost_l(7*3*sizeY*sizeZ),
+            allyghost_r(7*3*sizeY*sizeZ),
+            N_xghosts(3*sizeY*sizeZ),
+            N_yghosts(3*sizeY*sizeZ),
+
+            BUFFER1(GPU_input_size, GPU_output_size, N_xyghosts, N_zghosts),
+            BUFFER2(GPU_input_size, GPU_output_size, N_xyghosts, N_zghosts)
+        {
+            if (0 < REM && REM < 3)
+            {
+                fprintf(stderr, "[GPUProcessing ERROR: Too few slices in the last chunk (have %d slices, should be 3 or higher)\n", REM);
+                exit(1);
+            }
+
+            chatty = QUIET;
+
+            _alloc_GPU();
+
+            _reset();
+
+            buffer          = &BUFFER1;
+            previous_buffer = &BUFFER2;
+
+            previous_length   = (1 - !REM)*REM + (!REM)*CHUNK_LENGTH;
+            previous_iz       = (N_chunks-1) * CHUNK_LENGTH;
+            previous_chunk_id = N_chunks;
+
+            int mycoords[3];
+            grid.peindex(mycoords);
+            for (int i = 0; i < 3; ++i)
+            {
+                myFeature[i*2 + 0] = mycoords[i] == 0 ? SKIN : FLESH;
+                myFeature[i*2 + 1] = mycoords[i] == grid.getBlocksPerDimension(i)-1 ? SKIN : FLESH;
+            }
+        }
+
+        virtual ~GPUProcessing() { _free_GPU(); }
+
+        ///////////////////////////////////////////////////////////////////////
+        // ACCESSORS
+        ///////////////////////////////////////////////////////////////////////
+        typedef uint_t (*index_map)(const int ix, const int iy, const int iz);
+
+        template <index_map map>
+            void _copy_halos(Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE)
+            {
+                assert(Nhalos == (xE-xS)*(yE-yS)*(zE-zS));
+
+#               pragma omp parallel for
+                for (int p = 0; p < TGrid::nPrim; ++p)
+                {
+                    const Real * const src = grid.pdata()[p];
+                    const uint_t offset = p * Nhalos;
+                    for (int iz = zS; iz < zE; ++iz)
+                        for (int iy = yS; iy < yE; ++iy)
+                            for (int ix = xS; ix < xE; ++ix)
+                                cpybuf[offset + map(ix,iy,iz)] = src[ix + sizeX * (iy + sizeY * iz)];
+                }
+            }
+
+        template <NULL>
+            void _copy_halos() {}
+
+        void load_ghosts(const double t = 0)
+        {
+            if (myFeature[0] == SKIN) _copy_halos< halomap_x<0,sizeY,3> >(&allxghost_l[0], N_xghosts, 0, 3, 0, sizeY, 0, sizeZ); // Isend, Irecv
+            if (myFeature[1] == SKIN) _copy_halos< halomap_x<-sizeX+3,sizeY,3> >(&allxghost_r[0], N_xghosts, sizeX-3, sizeX, 0, sizeY, 0, sizeZ); // Isend, Irecv
+            if (myFeature[2] == SKIN) _copy_halos< halomap_y<0,sizeX,3> >(&allyghost_l[0], N_yghosts, 0, sizeX, 0, 3, 0, sizeZ); // Isend, Irecv
+            if (myFeature[3] == SKIN) _copy_halos< halomap_y<-sizeY+3,sizeX,3> >(&allyghost_r[0], N_yghosts, 0, sizeX, sizeY-3, sizeY, 0, sizeZ); // Isend, Irecv
+
+            if (myFeature[4] == FLESH) _copy_halos<NULL>(); // can use memcpy here, always copy ALL halos
+            if (myFeature[5] == FLESH) _copy_halos<NULL>();
+
+            // send / receive
+
+            // TEST
+            const Real * const out = &allyghost_r[0];
+            for (int iz = 0; iz < sizeZ; ++iz)
+            {
+                    for (int iy = 0; iy < 3; ++iy)
+                {
+                for (int ix = 0; ix < sizeX; ++ix)
+                    {
+                        printf("%f\t", out[ix+sizeX*(iy+3*iz)]);
+                    }
+                    printf("\n");
+                }
+                printf("\n");
+            }
+
+
+            _apply_bc(t);
+
+            // swap receive buffer / ghosts
+        }
+
+
         template <typename Ksos>
-            double max_sos(const RealPtrVec_t& src, float& sos)
+            double max_sos(float& sos)
             {
                 /* *
                  * 1.) Init maxSOS = 0 (mapped integer -> zero-copy)
@@ -449,17 +669,19 @@ class GPUProcessing
                  * 4.) Synchronize stream to make sure reduction is complete
                  * */
 
+                RealPtrVec_t& src = grid.pdata();
+
                 Timer tsos;
                 tsos.start();
 
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // 1.)
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 *maxSOS = 0;
 
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // 2.)
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 Timer timer;
                 timer.start();
                 _copy_chunk(buffer->SOA, 0, src, 0, SLICE_GPU * current_length);
@@ -472,16 +694,16 @@ class GPUProcessing
                     printf("\t[COPY SRC CHUNK %d TAKES %f sec]\n", current_chunk_id, t1);
                 }
 
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // 3.)
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 for (int i = 0; i < N_chunks; ++i)
                     _process_chunk<Ksos>(src);
                 if (chatty) _end_info_current_chunk();
 
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // 4.)
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 this->syncStream(GPU::streamID::S1);
 
                 union {float f; int i;} ret;
@@ -493,7 +715,7 @@ class GPUProcessing
 
 
         template <typename Kflow, typename Kupdate>
-            double process_all(const Real a, const Real b, const Real dtinvh, RealPtrVec_t& src, RealPtrVec_t& tmp)
+            double process_all(const Real a, const Real b, const Real dtinvh)
             {
                 /* *
                  * 1.) Extract x/yghosts for current chunk and upload to GPU
@@ -503,6 +725,9 @@ class GPUProcessing
                  * 5.) SOA->AOS of GPU updated solution for LAST/SINGLE chunk
                  * 6.) If chunk is SINGLE: AOS->SOA of interior nodes (can not be hidden for SINGLE case)
                  * */
+
+                RealPtrVec_t& src = grid.pdata();
+                RealPtrVec_t& tmp = grid.ptmp();
 
                 Timer tall;
                 tall.start();
@@ -514,17 +739,17 @@ class GPUProcessing
                     _start_info_current_chunk(title);
                 }
 
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // 1.)
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 /* _compute_xy_ghosts(src0); */
                 GPU::upload_xy_ghosts(N_xyghosts,
                         buffer->xghost_l, buffer->xghost_r,
                         buffer->yghost_l, buffer->yghost_r);
 
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // 2.)
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // copy left ghosts always
                 /* _compute_z_ghosts_l(src0); */
                 for (int i = 0; i < 7; ++i)
@@ -541,20 +766,20 @@ class GPUProcessing
                         break;
                 }
 
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // 3.)
-                ///////////////////////////////////////////////////////////////////
-                GPU::h2d_3DArray(buffer->SOA, BSX_GPU, BSY_GPU, current_length+6);
+                ///////////////////////////////////////////////////////////////
+                GPU::h2d_3DArray(buffer->SOA, sizeX, sizeY, current_length+6);
 
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // 4.)
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 for (int i = 0; i < N_chunks; ++i)
                     _process_chunk<Kflow, Kupdate>(a, b, dtinvh, src, tmp);
 
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // 5.)
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // Copy back SOA->AOS of previous chunk
                 Timer timer;
                 const uint_t prevOFFSET = SLICE_GPU * previous_iz;
@@ -575,9 +800,9 @@ class GPUProcessing
                 if (chatty)
                     printf("\t[COPY BACK SRC CHUNK %d TAKES %f sec]\n", previous_chunk_id, t1);
 
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 // 6.)
-                ///////////////////////////////////////////////////////////////////
+                ///////////////////////////////////////////////////////////////
                 switch (chunk_state)
                 {
                     case SINGLE:

@@ -55,7 +55,6 @@ class NodeBlock //cubic block of data designated for a single node
                 origin[i] = O[i];
         }
 
-
         // Fluid data and tmp storage
         std::vector<Real *> data;
         std::vector<Real *> tmp;
@@ -69,13 +68,6 @@ class NodeBlock //cubic block of data designated for a single node
         }
 
 
-        // Ghost buffers -> MOVE TO GPUProcessing!!
-        std::vector<Real *> xghost_l, xghost_r;
-        std::vector<Real *> yghost_l, yghost_r;
-        std::vector<Real *> zghost_l, zghost_r;
-
-
-
     private:
         void _alloc();
         void _dealloc();
@@ -86,10 +78,8 @@ class NodeBlock //cubic block of data designated for a single node
         NodeBlock(const double e_ = 1.0) :
             //origin{0.0, 0.0, 0.0}, // nvcc does not like this
             bextent(e_), h(e_ / (_BLOCKSIZE_ - 1)),
-            data(nPrim, NULL), tmp(nPrim, NULL),
-            xghost_l(nPrim, NULL), xghost_r(nPrim, NULL),
-            yghost_l(nPrim, NULL), yghost_r(nPrim, NULL),
-            zghost_l(nPrim, NULL), zghost_r(nPrim, NULL) { origin[0] = origin[1] = origin[2] = 0.0; _alloc(); }
+            data(nPrim, NULL), tmp(nPrim, NULL) { origin[0] = origin[1] = origin[2] = 0.0; _alloc(); }
+
         virtual ~NodeBlock() { _dealloc(); }
 
         void clear_data();
@@ -100,8 +90,6 @@ class NodeBlock //cubic block of data designated for a single node
             clear_tmp();
         }
 
-        inline int size() const { return sizeX * sizeY * sizeZ; }
-        inline int size_ghost() const { return 3* sizeY * sizeZ; } //only for cubic block!
         inline double block_extent() const { return bextent; }
         inline double h_gridpoint() const { return h; }
         void get_pos(const unsigned int ix, const unsigned int iy, const unsigned int iz, double pos[3]) const;
@@ -110,16 +98,9 @@ class NodeBlock //cubic block of data designated for a single node
         inline const std::vector<Real *>& ptmp()  const { return tmp; }
         inline std::vector<Real *>& pdata() { return data; }
         inline std::vector<Real *>& ptmp()  { return tmp; }
-        inline const std::vector<Real *>& pxghost_l() const { return xghost_l; }
-        inline const std::vector<Real *>& pxghost_r() const { return xghost_r; }
-        inline const std::vector<Real *>& pyghost_l() const { return yghost_l; }
-        inline const std::vector<Real *>& pyghost_r() const { return yghost_r; }
-        inline const std::vector<Real *>& pzghost_l() const { return zghost_l; }
-        inline const std::vector<Real *>& pzghost_r() const { return zghost_r; }
 
         inline Real& operator()(const unsigned int ix, const unsigned int iy, const unsigned int iz, const PRIM p)
         {
-            Real * const ptr = data[p];
-            return ptr[_linaccess(ix, iy, iz)];
+            return data[p][_linaccess(ix, iy, iz)];
         }
 };

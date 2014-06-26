@@ -28,13 +28,6 @@ void NodeBlock::_alloc()
     {
         _allocate_aligned((void **)&data[prim], max(8, _ALIGNBYTES_), sizeof(Real) * N);
         _allocate_aligned((void **)&tmp[prim],  max(8, _ALIGNBYTES_), sizeof(Real) * N);
-
-        _allocate_aligned((void **)&xghost_l[prim],  max(8, _ALIGNBYTES_), sizeof(Real) * Ng);
-        _allocate_aligned((void **)&xghost_r[prim],  max(8, _ALIGNBYTES_), sizeof(Real) * Ng);
-        _allocate_aligned((void **)&yghost_l[prim],  max(8, _ALIGNBYTES_), sizeof(Real) * Ng);
-        _allocate_aligned((void **)&yghost_r[prim],  max(8, _ALIGNBYTES_), sizeof(Real) * Ng);
-        _allocate_aligned((void **)&zghost_l[prim],  max(8, _ALIGNBYTES_), sizeof(Real) * Ng);
-        _allocate_aligned((void **)&zghost_r[prim],  max(8, _ALIGNBYTES_), sizeof(Real) * Ng);
     }
 }
 
@@ -44,13 +37,6 @@ void NodeBlock::_dealloc()
     {
         free(data[prim]);
         free(tmp[prim]);
-
-        free(xghost_l[prim]);
-        free(xghost_r[prim]);
-        free(yghost_l[prim]);
-        free(yghost_r[prim]);
-        free(zghost_l[prim]);
-        free(zghost_r[prim]);
     }
 }
 
@@ -78,6 +64,7 @@ void NodeBlock::clear_tmp()
 
 void NodeBlock::get_pos(const unsigned int ix, const unsigned int iy, const unsigned int iz, double pos[3]) const
 {
+    // local position, relative to origin
     pos[0] = origin[0] + h * ix;
     pos[1] = origin[1] + h * iy;
     pos[2] = origin[2] + h * iz;

@@ -69,22 +69,22 @@ class GridMPI : public NodeBlock
         }
     }
 
-    void _send_receive(Real *ghost_l, Real *ghost_r, const int Ng, const int left, const int right)
-    {
-        vector<Real> recv_buffer_l(Ng);
-        vector<Real> recv_buffer_r(Ng);
+    /* void _send_receive(Real *ghost_l, Real *ghost_r, const int Ng, const int left, const int right) */
+    /* { */
+    /*     vector<Real> recv_buffer_l(Ng); */
+    /*     vector<Real> recv_buffer_r(Ng); */
 
-        MPI_Status status;
-        MPI_Sendrecv(ghost_l, Ng, _MPI_REAL_, left,  1, &recv_buffer_r[0], Ng, _MPI_REAL_, right, MPI_ANY_TAG, cart_world, &status);
-        MPI_Sendrecv(ghost_r, Ng, _MPI_REAL_, right, 2, &recv_buffer_l[0], Ng, _MPI_REAL_, left,  MPI_ANY_TAG, cart_world, &status);
+    /*     MPI_Status status; */
+    /*     MPI_Sendrecv(ghost_l, Ng, _MPI_REAL_, left,  1, &recv_buffer_r[0], Ng, _MPI_REAL_, right, MPI_ANY_TAG, cart_world, &status); */
+    /*     MPI_Sendrecv(ghost_r, Ng, _MPI_REAL_, right, 2, &recv_buffer_l[0], Ng, _MPI_REAL_, left,  MPI_ANY_TAG, cart_world, &status); */
 
-        //copy back
-        for (int i = 0; i < Ng; ++i)
-        {
-            ghost_l[i] = recv_buffer_l[i];
-            ghost_r[i] = recv_buffer_r[i];
-        }
-    }
+    /*     //copy back */
+    /*     for (int i = 0; i < Ng; ++i) */
+    /*     { */
+    /*         ghost_l[i] = recv_buffer_l[i]; */
+    /*         ghost_r[i] = recv_buffer_r[i]; */
+    /*     } */
+    /* } */
 
 
     public:
@@ -134,17 +134,17 @@ class GridMPI : public NodeBlock
     }
 
 
-    void send_receive_all()
-    {
-        const int Ng = size_ghost();
+    /* void send_receive_all() */
+    /* { */
+    /*     const int Ng = size_ghost(); */
 
-        for (int i = 0; i < nPrim; ++i)
-        {
-            _send_receive(xghost_l[i], xghost_r[i], Ng, nbrrank[0], nbrrank[1]);
-            _send_receive(yghost_l[i], yghost_r[i], Ng, nbrrank[2], nbrrank[3]);
-            _send_receive(zghost_l[i], zghost_r[i], Ng, nbrrank[4], nbrrank[5]);
-        }
-    }
+    /*     for (int i = 0; i < nPrim; ++i) */
+    /*     { */
+    /*         _send_receive(xghost_l[i], xghost_r[i], Ng, nbrrank[0], nbrrank[1]); */
+    /*         _send_receive(yghost_l[i], yghost_r[i], Ng, nbrrank[2], nbrrank[3]); */
+    /*         _send_receive(zghost_l[i], zghost_r[i], Ng, nbrrank[4], nbrrank[5]); */
+    /*     } */
+    /* } */
 /* // send and receive */
 /* template <typename T> */
 /* void send_receive(T *ghost_l, T *ghost_r, const int Ng, const int myrank, const int left, const int right) */

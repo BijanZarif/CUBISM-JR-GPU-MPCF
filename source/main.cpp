@@ -22,6 +22,28 @@
 
 
 // Helper
+static void _ic123(GridMPI& grid)
+{
+    // 1 2 3 4 5 6 7 8 9 .........
+    typedef GridMPI::PRIM var;
+    unsigned int cnt = 0;
+#pragma omp paralell for
+    for (int iz = 0; iz < GridMPI::sizeZ; ++iz)
+        for (int iy = 0; iy < GridMPI::sizeY; ++iy)
+            for (int ix = 0; ix < GridMPI::sizeX; ++ix)
+            {
+                grid(ix, iy, iz, var::R) = cnt;
+                grid(ix, iy, iz, var::U) = cnt;
+                grid(ix, iy, iz, var::V) = cnt;
+                grid(ix, iy, iz, var::W) = cnt;
+                grid(ix, iy, iz, var::E) = cnt;
+                grid(ix, iy, iz, var::G) = cnt;
+                grid(ix, iy, iz, var::P) = cnt++;
+            }
+
+}
+
+
 static void _ic(GridMPI& grid, ArgumentParser& parser)
 {
     ///////////////////////////////////////////////////////////////////////////
@@ -72,10 +94,10 @@ static void _ic(GridMPI& grid, ArgumentParser& parser)
 }
 
 
-template <typename TGrid, typename TGPU>
-static inline double _LSRKstep(const Real a, const Real b, const Real dtinvh, TGrid& grid, TGPU& gpu)
+template <typename TGPU>
+static inline double _LSRKstep(const Real a, const Real b, const Real dtinvh, TGPU& gpu)
 {
-    return gpu.template process_all<Convection_CUDA, Update_CUDA>(a, b, dtinvh, grid.pdata(), grid.ptmp());
+    return gpu.template process_all<Convection_CUDA, Update_CUDA>(a, b, dtinvh);
 }
 
 
@@ -100,19 +122,20 @@ int main(int argc, const char *argv[])
     const int npex = parser("-npex").asInt(1);
     const int npey = parser("-npey").asInt(1);
     const int npez = parser("-npez").asInt(1);
-    GridMPI grid(npex, npey, npez);
+    GridMPI mygrid(npex, npey, npez);
 
     ///////////////////////////////////////////////////////////////////////////
     // Setup Initial Condition
     ///////////////////////////////////////////////////////////////////////////
-    _ic(grid, parser);
-    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(grid, 0, "IC"); */
+    _ic123(mygrid);
+    /* _ic(mygrid, parser); */
+    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, "IC"); */
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
     ///////////////////////////////////////////////////////////////////////////
-    const size_t processing_slices = 64;
-    GPUProcessing myGPU(GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ, processing_slices);
+    const size_t chunk_slices = 64;
+    GPUProcessing<GridMPI> myGPU(mygrid, chunk_slices);
     /* myGPU.toggle_verbosity(); */
 
     ///////////////////////////////////////////////////////////////////////////
@@ -124,7 +147,7 @@ int main(int argc, const char *argv[])
     parser.unset_strict_mode();
     const unsigned int nsteps = parser("-nsteps").asInt(0);
 
-    const double h = grid.getH();
+    const double h = mygrid.getH();
     float sos;
     double t = 0, dt;
     unsigned int step = 0;
@@ -132,27 +155,27 @@ int main(int argc, const char *argv[])
     while (t < tend)
     {
         // 1.) Compute max SOS -> dt
-        const double tsos = myGPU.template max_sos<MaxSpeedOfSound_CUDA>(grid.pdata(), sos);
+        const double tsos = myGPU.template max_sos<MaxSpeedOfSound_CUDA>(sos);
         assert(sos > 0);
         printf("sos = %f (took %f sec)\n", sos, tsos);
 
         dt = cfl*h/sos;
         dt = (tend-t) < dt ? (tend-t) : dt;
-        MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, grid.getCartComm());
+        MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, mygrid.getCartComm());
 
         // 2.) Compute RHS and update using LSRK3
         double trk1, trk2, trk3;
         {// stage 1
-            myGPU.load_halos();
-            trk1 = _LSRKstep<GridMPI, GPUProcessing>(0      , 1./4, dt/h, grid, myGPU);
+            myGPU.load_ghosts();
+            trk1 = _LSRKstep<GPUProcessing<GridMPI> >(0      , 1./4, dt/h, myGPU);
             printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
-            trk2 = _LSRKstep<GridMPI, GPUProcessing>(-17./32, 8./9, dt/h, grid, myGPU);
+            trk2 = _LSRKstep<GPUProcessing<GridMPI> >(-17./32, 8./9, dt/h, myGPU);
             printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
-            trk3 = _LSRKstep<GridMPI, GPUProcessing>(-32./27, 3./4, dt/h, grid, myGPU);
+            trk3 = _LSRKstep<GPUProcessing<GridMPI> >(-32./27, 3./4, dt/h, myGPU);
             printf("RK stage 3 takes %f sec\n", trk3);
         }
         printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);

@@ -16,17 +16,16 @@ using namespace std;
 #define ID3(x,y,z,NX,NY) ((x) + (NX) * ((y) + (NY) * (z)))
 
 
-GPUProcessing::GPUProcessing(const uint_t BSX, const uint_t BSY, const uint_t BSZ, const uint_t CL)
+GPUProcessing<TGrid>::GPUProcessing(TGrid& G, const uint_t CL)
     :
-    BSX_GPU(BSX), BSY_GPU(BSY), BSZ_GPU(BSZ), CHUNK_LENGTH(CL),
-    SLICE_GPU( BSX * BSY ), REM( BSZ % CL ),
-    N_chunks( (BSZ + CL - 1) / CL ),
-    GPU_input_size( SLICE_GPU * (CL+6) ),
-    GPU_output_size( SLICE_GPU * CL ),
-    N_xyghosts(3*BSY*CL), // WARNING: assumes cubic domain!
-    N_zghosts(3*SLICE_GPU), // WARNING: assumes cubic domain!
-    BUFFER1(GPU_input_size, GPU_output_size, N_xyghosts, N_zghosts),
-    BUFFER2(GPU_input_size, GPU_output_size, N_xyghosts, N_zghosts)
+        grid(G), CHUNK_LENGTH(CL), REM( sizeZ % CL ),
+        N_chunks( (sizeZ + CL - 1) / CL ),
+        GPU_input_size( SLICE_GPU * (CL+6) ),
+        GPU_output_size( SLICE_GPU * CL ),
+        N_xyghosts(3*sizeY*CL), // WARNING: assumes cubic domain!
+        N_zghosts(3*SLICE_GPU), // WARNING: assumes cubic domain!
+        BUFFER1(GPU_input_size, GPU_output_size, N_xyghosts, N_zghosts),
+        BUFFER2(GPU_input_size, GPU_output_size, N_xyghosts, N_zghosts)
 {
     if (0 < REM && REM < 3)
     {
@@ -49,34 +48,34 @@ GPUProcessing::GPUProcessing(const uint_t BSX, const uint_t BSY, const uint_t BS
 }
 
 
-GPUProcessing::~GPUProcessing()
+GPUProcessing<TGrid>::~GPUProcessing()
 {
     _free_GPU();
 }
 
 
-void GPUProcessing::_alloc_GPU()
+void GPUProcessing<TGrid>::_alloc_GPU()
 {
     // allocate GPU memory
-    GPU::alloc((void**) &maxSOS, BSX_GPU, BSY_GPU, BSZ_GPU, CHUNK_LENGTH);
+    GPU::alloc((void**) &maxSOS, sizeX, sizeY, sizeZ, CHUNK_LENGTH);
     gpu_allocation = ALLOCATED;
 }
 
 
-void GPUProcessing::_free_GPU()
+void GPUProcessing<TGrid>::_free_GPU()
 {
     GPU::dealloc();
     gpu_allocation = FREE;
 }
 
 
-void GPUProcessing::_reset()
+void GPUProcessing<TGrid>::_reset()
 {
     if (N_chunks == 1)
     {
         // whole chunk fits on the GPU
         chunk_state = SINGLE;
-        current_length = BSZ_GPU;
+        current_length = sizeZ;
     }
     else
     {
@@ -88,7 +87,7 @@ void GPUProcessing::_reset()
 }
 
 
-void GPUProcessing::_init_next_chunk()
+void GPUProcessing<TGrid>::_init_next_chunk()
 {
     previous_length   = current_length;
     previous_iz       = current_iz;
@@ -115,14 +114,14 @@ void GPUProcessing::_init_next_chunk()
 }
 
 
-void GPUProcessing::_printSOA(const Real * const in)
+void GPUProcessing<TGrid>::_printSOA(const Real * const in)
 {
     for (int iz = 0; iz < current_length+6; ++iz)
     {
-        for (int iy = 0; iy < BSY_GPU; ++iy)
+        for (int iy = 0; iy < sizeY; ++iy)
         {
-            for (int ix = 0; ix < BSX_GPU; ++ix)
-                cout << in[ID3(ix, iy, iz, BSX_GPU, BSY_GPU)] << '\t';
+            for (int ix = 0; ix < sizeX; ++ix)
+                cout << in[ID3(ix, iy, iz, sizeX, sizeY)] << '\t';
             cout << endl;
         }
         cout << endl;
@@ -130,7 +129,7 @@ void GPUProcessing::_printSOA(const Real * const in)
 }
 
 
-void GPUProcessing::_start_info_current_chunk(const string title)
+void GPUProcessing<TGrid>::_start_info_current_chunk(const string title)
 {
     string state;
     switch (chunk_state)
@@ -146,6 +145,6 @@ void GPUProcessing::_start_info_current_chunk(const string title)
     printf("\t[CURRENT CHUNK STATE:  \t%s]\n", state.c_str());
     printf("\t[CURRENT CHUNK LENGTH: \t%d/%d]\n", current_length, CHUNK_LENGTH);
     printf("\t[PREVIOUS CHUNK LENGTH:\t%d/%d]\n", previous_length, CHUNK_LENGTH);
-    printf("\t[CURRENT Z-POS:        \t%d/%d]\n", current_iz, BSZ_GPU);
+    printf("\t[CURRENT Z-POS:        \t%d/%d]\n", current_iz, sizeZ);
     printf("\t[NUMBER OF NODES:      \t%d]\n", SLICE_GPU * current_length);
 }
