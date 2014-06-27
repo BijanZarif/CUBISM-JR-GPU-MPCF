@@ -138,7 +138,7 @@ class GridMPI : public NodeBlock
     /* { */
     /*     const int Ng = size_ghost(); */
 
-    /*     for (int i = 0; i < nPrim; ++i) */
+    /*     for (int i = 0; i < NVAR; ++i) */
     /*     { */
     /*         _send_receive(xghost_l[i], xghost_r[i], Ng, nbrrank[0], nbrrank[1]); */
     /*         _send_receive(yghost_l[i], yghost_r[i], Ng, nbrrank[2], nbrrank[3]); */
@@ -281,6 +281,12 @@ class GridMPI : public NodeBlock
     {
         for(int i=0; i<3; ++i)
             mypeindex[i] = this->mypeindex[i];
+    }
+
+    inline void getNeighborRanks(int nbr[6]) const
+    {
+        for(int i=0; i<6; ++i)
+            nbr[i] = this->nbrrank[i];
     }
 
     inline size_t getTimeStamp() const

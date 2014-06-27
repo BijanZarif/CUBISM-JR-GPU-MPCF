@@ -28,12 +28,11 @@ namespace GPU
         void dealloc();
 
         // PCIe transfers
-        void upload_ghosts(const uint_t Nghost,
-                const Real* const xghost_L, const Real* const xghost_R,
-                const Real* const yghost_L, const Real* const yghost_R);
-        void upload_xy_ghosts(const uint_t Nghost,
-                const RealPtrVec_t& xghost_l, const RealPtrVec_t& xghost_r,
-                const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r);
+        /* void upload_ghosts(const uint_t Nghost, */
+        /*         const Real* const xghost_L, const Real* const xghost_R, */
+        /*         const Real* const yghost_L, const Real* const yghost_R); */
+        void upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, const RealPtrVec_t& xghost_r,
+                const uint_t Nyghost, const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r);
         void h2d_3DArray(const RealPtrVec_t& src, const uint_t NX, const uint_t NY, const uint_t NZ);
         void h2d_tmp(const RealPtrVec_t& src, const uint_t N);
         void d2h_rhs(RealPtrVec_t& dst, const uint_t N);

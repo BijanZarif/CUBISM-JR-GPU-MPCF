@@ -32,7 +32,7 @@ class NodeBlock //cubic block of data designated for a single node
         };
 
         // Dimensions
-        static const int nPrim = NPRIMITIVES;
+        static const int NVAR = NPRIMITIVES;
         static const int sizeX = _BLOCKSIZE_;
         static const int sizeY = _BLOCKSIZE_;
         static const int sizeZ = _BLOCKSIZE_;
@@ -78,7 +78,7 @@ class NodeBlock //cubic block of data designated for a single node
         NodeBlock(const double e_ = 1.0) :
             //origin{0.0, 0.0, 0.0}, // nvcc does not like this
             bextent(e_), h(e_ / (_BLOCKSIZE_ - 1)),
-            data(nPrim, NULL), tmp(nPrim, NULL) { origin[0] = origin[1] = origin[2] = 0.0; _alloc(); }
+            data(NVAR, NULL), tmp(NVAR, NULL) { origin[0] = origin[1] = origin[2] = 0.0; _alloc(); }
 
         virtual ~NodeBlock() { _dealloc(); }
 

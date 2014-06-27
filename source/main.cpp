@@ -10,7 +10,7 @@
 
 #include "ArgumentParser.h"
 #include "GridMPI.h"
-#include "GPUProcessing.h"
+#include "GPUlab.h"
 #include "Types.h"
 #include "Timer.h"
 #include "HDF5Dumper_MPI.h"
@@ -22,6 +22,26 @@
 
 
 // Helper
+static void _icCONST(GridMPI& grid, const Real val = 0)
+{
+    typedef GridMPI::PRIM var;
+#pragma omp paralell for
+    for (int iz = 0; iz < GridMPI::sizeZ; ++iz)
+        for (int iy = 0; iy < GridMPI::sizeY; ++iy)
+            for (int ix = 0; ix < GridMPI::sizeX; ++ix)
+            {
+                grid(ix, iy, iz, var::R) = val;
+                grid(ix, iy, iz, var::U) = val;
+                grid(ix, iy, iz, var::V) = val;
+                grid(ix, iy, iz, var::W) = val;
+                grid(ix, iy, iz, var::E) = val;
+                grid(ix, iy, iz, var::G) = val;
+                grid(ix, iy, iz, var::P) = val;
+            }
+
+}
+
+
 static void _ic123(GridMPI& grid)
 {
     // 1 2 3 4 5 6 7 8 9 .........
@@ -44,7 +64,7 @@ static void _ic123(GridMPI& grid)
 }
 
 
-static void _ic(GridMPI& grid, ArgumentParser& parser)
+static void _icSOD(GridMPI& grid, ArgumentParser& parser)
 {
     ///////////////////////////////////////////////////////////////////////////
     // SOD
@@ -127,15 +147,16 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Setup Initial Condition
     ///////////////////////////////////////////////////////////////////////////
-    _ic123(mygrid);
-    /* _ic(mygrid, parser); */
+    /* _icCONST(mygrid, world_rank+1); */
+    /* _ic123(mygrid); */
+    _icSOD(mygrid, parser);
     /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, "IC"); */
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
     ///////////////////////////////////////////////////////////////////////////
     const size_t chunk_slices = 64;
-    GPUProcessing<GridMPI> myGPU(mygrid, chunk_slices);
+    GPUlab<GridMPI> myGPU(mygrid, chunk_slices);
     /* myGPU.toggle_verbosity(); */
 
     ///////////////////////////////////////////////////////////////////////////
@@ -167,15 +188,15 @@ int main(int argc, const char *argv[])
         double trk1, trk2, trk3;
         {// stage 1
             myGPU.load_ghosts();
-            trk1 = _LSRKstep<GPUProcessing<GridMPI> >(0      , 1./4, dt/h, myGPU);
+            trk1 = _LSRKstep<GPUlab<GridMPI> >(0      , 1./4, dt/h, myGPU);
             printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
-            trk2 = _LSRKstep<GPUProcessing<GridMPI> >(-17./32, 8./9, dt/h, myGPU);
+            trk2 = _LSRKstep<GPUlab<GridMPI> >(-17./32, 8./9, dt/h, myGPU);
             printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
-            trk3 = _LSRKstep<GPUProcessing<GridMPI> >(-32./27, 3./4, dt/h, myGPU);
+            trk3 = _LSRKstep<GPUlab<GridMPI> >(-32./27, 3./4, dt/h, myGPU);
             printf("RK stage 3 takes %f sec\n", trk3);
         }
         printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);

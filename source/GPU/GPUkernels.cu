@@ -117,7 +117,7 @@ void _xflux(const uint_t NX, const uint_t NY, const uint_t NZ, const uint_t glob
         {
             /* *
              * 1.) Get cell values
-             * 2.) Reconstruct face values (in primitive variables)
+             * 2.) Reconstruct face values (in varitive variables)
              * 3.) Compute characteristic velocities
              * 4.) Compute 7 flux contributions
              * 5.) Compute right hand side for the advection equations
@@ -152,29 +152,29 @@ void _xflux(const uint_t NX, const uint_t NY, const uint_t NZ, const uint_t glob
             assert(Pm3 >= 0); assert(Pm2 >= 0); assert(Pm1 >= 0); assert(Pp1 >= 0); assert(Pp2 >= 0); assert(Pp3 >= 0);
 
             ///////////////////////////////////////////////////////////////////
-            // 2.) Reconstruction of primitive values, using WENO5/3
+            // 2.) Reconstruction of varitive values, using WENO5/3
             ///////////////////////////////////////////////////////////////////
-            // Reconstruct primitive value p at face f, using WENO5/3
+            // Reconstruct varitive value p at face f, using WENO5/3
             // rho
             const Real rp = _weno_pluss_clipped(rm2, rm1, rp1, rp2, rp3);
             const Real rm = _weno_minus_clipped(rm3, rm2, rm1, rp1, rp2);
             assert(!isnan(rp)); assert(!isnan(rm));
-            // u (convert primitive variable u = (rho*u) / rho)
+            // u (convert varitive variable u = (rho*u) / rho)
             um3 /= rm3; um2 /= rm2; um1 /= rm1; up1 /= rp1; up2 /= rp2; up3 /= rp3;
             const Real up = _weno_pluss_clipped(um2, um1, up1, up2, up3);
             const Real um = _weno_minus_clipped(um3, um2, um1, up1, up2);
             assert(!isnan(up)); assert(!isnan(um));
-            // v (convert primitive variable v = (rho*v) / rho)
+            // v (convert varitive variable v = (rho*v) / rho)
             vm3 /= rm3; vm2 /= rm2; vm1 /= rm1; vp1 /= rp1; vp2 /= rp2; vp3 /= rp3;
             const Real vp = _weno_pluss_clipped(vm2, vm1, vp1, vp2, vp3);
             const Real vm = _weno_minus_clipped(vm3, vm2, vm1, vp1, vp2);
             assert(!isnan(vp)); assert(!isnan(vm));
-            // w (convert primitive variable w = (rho*w) / rho)
+            // w (convert varitive variable w = (rho*w) / rho)
             wm3 /= rm3; wm2 /= rm2; wm1 /= rm1; wp1 /= rp1; wp2 /= rp2; wp3 /= rp3;
             const Real wp = _weno_pluss_clipped(wm2, wm1, wp1, wp2, wp3);
             const Real wm = _weno_minus_clipped(wm3, wm2, wm1, wp1, wp2);
             assert(!isnan(wp)); assert(!isnan(wm));
-            // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
+            // p (convert varitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
             const Real pm3 = (em3 - 0.5f*rm3*(um3*um3 + vm3*vm3 + wm3*wm3) - Pm3) / Gm3;
             const Real pm2 = (em2 - 0.5f*rm2*(um2*um2 + vm2*vm2 + wm2*wm2) - Pm2) / Gm2;
             const Real pm1 = (em1 - 0.5f*rm1*(um1*um1 + vm1*vm1 + wm1*wm1) - Pm1) / Gm1;
@@ -278,7 +278,7 @@ void _yflux(const uint_t NX, const uint_t NY, const uint_t NZ, const uint_t glob
         {
             /* *
              * 1.) Get cell values
-             * 2.) Reconstruct face values (in primitive variables)
+             * 2.) Reconstruct face values (in varitive variables)
              * 3.) Compute characteristic velocities
              * 4.) Compute 7 flux contributions
              * 5.) Compute right hand side for the advection equations
@@ -313,28 +313,28 @@ void _yflux(const uint_t NX, const uint_t NY, const uint_t NZ, const uint_t glob
             assert(Pm3 >= 0); assert(Pm2 >= 0); assert(Pm1 >= 0); assert(Pp1 >= 0); assert(Pp2 >= 0); assert(Pp3 >= 0);
 
             ///////////////////////////////////////////////////////////////////
-            // 2.) Reconstruction of primitive values, using WENO5/3
+            // 2.) Reconstruction of varitive values, using WENO5/3
             ///////////////////////////////////////////////////////////////////
             // rho
             const Real rp = _weno_pluss_clipped(rm2, rm1, rp1, rp2, rp3);
             const Real rm = _weno_minus_clipped(rm3, rm2, rm1, rp1, rp2);
             assert(!isnan(rp)); assert(!isnan(rm));
-            // u (convert primitive variable u = (rho*u) / rho)
+            // u (convert varitive variable u = (rho*u) / rho)
             um3 /= rm3; um2 /= rm2; um1 /= rm1; up1 /= rp1; up2 /= rp2; up3 /= rp3;
             const Real up = _weno_pluss_clipped(um2, um1, up1, up2, up3);
             const Real um = _weno_minus_clipped(um3, um2, um1, up1, up2);
             assert(!isnan(up)); assert(!isnan(um));
-            // v (convert primitive variable v = (rho*v) / rho)
+            // v (convert varitive variable v = (rho*v) / rho)
             vm3 /= rm3; vm2 /= rm2; vm1 /= rm1; vp1 /= rp1; vp2 /= rp2; vp3 /= rp3;
             const Real vp = _weno_pluss_clipped(vm2, vm1, vp1, vp2, vp3);
             const Real vm = _weno_minus_clipped(vm3, vm2, vm1, vp1, vp2);
             assert(!isnan(vp)); assert(!isnan(vm));
-            // w (convert primitive variable w = (rho*w) / rho)
+            // w (convert varitive variable w = (rho*w) / rho)
             wm3 /= rm3; wm2 /= rm2; wm1 /= rm1; wp1 /= rp1; wp2 /= rp2; wp3 /= rp3;
             const Real wp = _weno_pluss_clipped(wm2, wm1, wp1, wp2, wp3);
             const Real wm = _weno_minus_clipped(wm3, wm2, wm1, wp1, wp2);
             assert(!isnan(wp)); assert(!isnan(wm));
-            // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
+            // p (convert varitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
             const Real pm3 = (em3 - 0.5f*rm3*(um3*um3 + vm3*vm3 + wm3*wm3) - Pm3) / Gm3;
             const Real pm2 = (em2 - 0.5f*rm2*(um2*um2 + vm2*vm2 + wm2*wm2) - Pm2) / Gm2;
             const Real pm1 = (em1 - 0.5f*rm1*(um1*um1 + vm1*vm1 + wm1*wm1) - Pm1) / Gm1;
@@ -436,7 +436,7 @@ void _zflux(const uint_t NX, const uint_t NY, const uint_t NZ,
         {
             /* *
              * 1.) Get cell values
-             * 2.) Reconstruct face values (in primitive variables)
+             * 2.) Reconstruct face values (in varitive variables)
              * 3.) Compute characteristic velocities
              * 4.) Compute 7 flux contributions
              * 5.) Compute right hand side for the advection equations
@@ -471,28 +471,28 @@ void _zflux(const uint_t NX, const uint_t NY, const uint_t NZ,
             assert(Pm3 >= 0); assert(Pm2 >= 0); assert(Pm1 >= 0); assert(Pp1 >= 0); assert(Pp2 >= 0); assert(Pp3 >= 0);
 
             ///////////////////////////////////////////////////////////////////
-            // 2.) Reconstruction of primitive values, using WENO5/3
+            // 2.) Reconstruction of varitive values, using WENO5/3
             ///////////////////////////////////////////////////////////////////
             // rho
             const Real rp = _weno_pluss_clipped(rm2, rm1, rp1, rp2, rp3);
             const Real rm = _weno_minus_clipped(rm3, rm2, rm1, rp1, rp2);
             assert(!isnan(rp)); assert(!isnan(rm));
-            // u (convert primitive variable u = (rho*u) / rho)
+            // u (convert varitive variable u = (rho*u) / rho)
             um3 /= rm3; um2 /= rm2; um1 /= rm1; up1 /= rp1; up2 /= rp2; up3 /= rp3;
             const Real up = _weno_pluss_clipped(um2, um1, up1, up2, up3);
             const Real um = _weno_minus_clipped(um3, um2, um1, up1, up2);
             assert(!isnan(up)); assert(!isnan(um));
-            // v (convert primitive variable v = (rho*v) / rho)
+            // v (convert varitive variable v = (rho*v) / rho)
             vm3 /= rm3; vm2 /= rm2; vm1 /= rm1; vp1 /= rp1; vp2 /= rp2; vp3 /= rp3;
             const Real vp = _weno_pluss_clipped(vm2, vm1, vp1, vp2, vp3);
             const Real vm = _weno_minus_clipped(vm3, vm2, vm1, vp1, vp2);
             assert(!isnan(vp)); assert(!isnan(vm));
-            // w (convert primitive variable w = (rho*w) / rho)
+            // w (convert varitive variable w = (rho*w) / rho)
             wm3 /= rm3; wm2 /= rm2; wm1 /= rm1; wp1 /= rp1; wp2 /= rp2; wp3 /= rp3;
             const Real wp = _weno_pluss_clipped(wm2, wm1, wp1, wp2, wp3);
             const Real wm = _weno_minus_clipped(wm3, wm2, wm1, wp1, wp2);
             assert(!isnan(wp)); assert(!isnan(wm));
-            // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
+            // p (convert varitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
             const Real pm3 = (em3 - 0.5f*rm3*(um3*um3 + vm3*vm3 + wm3*wm3) - Pm3) / Gm3;
             const Real pm2 = (em2 - 0.5f*rm2*(um2*um2 + vm2*vm2 + wm2*wm2) - Pm2) / Gm2;
             const Real pm1 = (em1 - 0.5f*rm1*(um1*um1 + vm1*vm1 + wm1*wm1) - Pm1) / Gm1;

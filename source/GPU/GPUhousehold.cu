@@ -11,7 +11,7 @@
 #include "NodeBlock.h"
 #include "GPU.h"
 
-enum { VSIZE = NodeBlock::nPrim };
+enum { VSIZE = NodeBlock::NVAR };
 
 ///////////////////////////////////////////////////////////////////////////////
 // GLOBAL VARIABLES
@@ -93,32 +93,32 @@ extern "C"
 
         // Allocate
         cudaChannelFormatDesc fmt =  cudaCreateChannelDesc<Real>();
-        for (int prim = 0; prim < VSIZE; ++prim)
+        for (int var = 0; var < VSIZE; ++var)
         {
             //tmp
-            cudaMalloc(&d_tmp[prim], outputSize*sizeof(Real));
-            cudaMemset(d_tmp[prim], 0, outputSize*sizeof(Real));
+            cudaMalloc(&d_tmp[var], outputSize*sizeof(Real));
+            cudaMemset(d_tmp[var], 0, outputSize*sizeof(Real));
 
             // rhs
-            cudaMalloc(&d_rhs[prim], outputSize*sizeof(Real));
-            cudaMemset(d_rhs[prim], 0, outputSize*sizeof(Real));
+            cudaMalloc(&d_rhs[var], outputSize*sizeof(Real));
+            cudaMemset(d_rhs[var], 0, outputSize*sizeof(Real));
 
             // fluxes
-            cudaMalloc(&d_xflux[prim], bSflx*sizeof(Real));
-            cudaMalloc(&d_yflux[prim], bSfly*sizeof(Real));
-            cudaMalloc(&d_zflux[prim], bSflz*sizeof(Real));
-            cudaMemset(d_xflux[prim], 0, bSflx*sizeof(Real));
-            cudaMemset(d_yflux[prim], 0, bSfly*sizeof(Real));
-            cudaMemset(d_zflux[prim], 0, bSflz*sizeof(Real));
+            cudaMalloc(&d_xflux[var], bSflx*sizeof(Real));
+            cudaMalloc(&d_yflux[var], bSfly*sizeof(Real));
+            cudaMalloc(&d_zflux[var], bSflz*sizeof(Real));
+            cudaMemset(d_xflux[var], 0, bSflx*sizeof(Real));
+            cudaMemset(d_yflux[var], 0, bSfly*sizeof(Real));
+            cudaMemset(d_zflux[var], 0, bSflz*sizeof(Real));
 
             // ghosts
-            cudaMalloc(&d_xgl[prim], xgSize*sizeof(Real));
-            cudaMalloc(&d_xgr[prim], xgSize*sizeof(Real));
-            cudaMalloc(&d_ygl[prim], ygSize*sizeof(Real));
-            cudaMalloc(&d_ygr[prim], ygSize*sizeof(Real));
+            cudaMalloc(&d_xgl[var], xgSize*sizeof(Real));
+            cudaMalloc(&d_xgr[var], xgSize*sizeof(Real));
+            cudaMalloc(&d_ygl[var], ygSize*sizeof(Real));
+            cudaMalloc(&d_ygr[var], ygSize*sizeof(Real));
 
             // GPU input SOA
-            cudaMalloc3DArray(&d_SOA[prim], &fmt, make_cudaExtent(BSX_GPU, BSY_GPU, CHUNK_WIDTH+6));
+            cudaMalloc3DArray(&d_SOA[var], &fmt, make_cudaExtent(BSX_GPU, BSY_GPU, CHUNK_WIDTH+6));
         }
 
         // extraterm for advection
@@ -169,27 +169,27 @@ extern "C"
 
     void GPU::dealloc()
     {
-        for (int prim = 0; prim < VSIZE; ++prim)
+        for (int var = 0; var < VSIZE; ++var)
         {
             // tmp
-            cudaFree(d_tmp[prim]);
+            cudaFree(d_tmp[var]);
 
             // rhs
-            cudaFree(d_rhs[prim]);
+            cudaFree(d_rhs[var]);
 
             // fluxes
-            cudaFree(d_xflux[prim]);
-            cudaFree(d_yflux[prim]);
-            cudaFree(d_zflux[prim]);
+            cudaFree(d_xflux[var]);
+            cudaFree(d_yflux[var]);
+            cudaFree(d_zflux[var]);
 
             // ghosts
-            cudaFree(d_xgl[prim]);
-            cudaFree(d_xgr[prim]);
-            cudaFree(d_ygl[prim]);
-            cudaFree(d_ygr[prim]);
+            cudaFree(d_xgl[var]);
+            cudaFree(d_xgr[var]);
+            cudaFree(d_ygl[var]);
+            cudaFree(d_ygr[var]);
 
             // input SOA
-            cudaFreeArray(d_SOA[prim]);
+            cudaFreeArray(d_SOA[var]);
         }
 
         // extraterms
@@ -232,30 +232,31 @@ extern "C"
     ///////////////////////////////////////////////////////////////////////////
     // H2D / D2H
     ///////////////////////////////////////////////////////////////////////////
-    void GPU::upload_ghosts(const uint_t Nghost,
-            const Real* const xghost_L, const Real* const xghost_R,
-            const Real* const yghost_L, const Real* const yghost_R)
+    /* void GPU::upload_ghosts(const uint_t Nghost, */
+    /*         const Real* const xghost_L, const Real* const xghost_R, */
+    /*         const Real* const yghost_L, const Real* const yghost_R) */
+    /* { */
+    /*     for (int i = 0; i < VSIZE; ++i) */
+    /*     { */
+    /*         cudaMemcpyAsync(d_xgl[i], &xghost_L[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1); */
+    /*         cudaMemcpyAsync(d_xgr[i], &xghost_R[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1); */
+    /*         cudaMemcpyAsync(d_ygl[i], &yghost_L[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1); */
+    /*         cudaMemcpyAsync(d_ygr[i], &yghost_R[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1); */
+    /*     } */
+    /* } */
+
+
+    void GPU::upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, const RealPtrVec_t& xghost_r,
+            const uint_t Nyghost, const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r)
     {
         for (int i = 0; i < VSIZE; ++i)
         {
-            cudaMemcpyAsync(d_xgl[i], &xghost_L[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-            cudaMemcpyAsync(d_xgr[i], &xghost_R[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-            cudaMemcpyAsync(d_ygl[i], &yghost_L[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-            cudaMemcpyAsync(d_ygr[i], &yghost_R[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-        }
-    }
-
-
-    void GPU::upload_xy_ghosts(const uint_t Nghost,
-            const RealPtrVec_t& xghost_l, const RealPtrVec_t& xghost_r,
-            const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r)
-    {
-        for (int i = 0; i < VSIZE; ++i)
-        {
-            cudaMemcpyAsync(d_xgl[i], xghost_l[i], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-            cudaMemcpyAsync(d_xgr[i], xghost_r[i], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-            cudaMemcpyAsync(d_ygl[i], yghost_l[i], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-            cudaMemcpyAsync(d_ygr[i], yghost_r[i], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
+            // x
+            cudaMemcpyAsync(d_xgl[i], xghost_l[i], Nxghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
+            cudaMemcpyAsync(d_xgr[i], xghost_r[i], Nxghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
+            // y
+            cudaMemcpyAsync(d_ygl[i], yghost_l[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
+            cudaMemcpyAsync(d_ygr[i], yghost_r[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
         }
     }
 

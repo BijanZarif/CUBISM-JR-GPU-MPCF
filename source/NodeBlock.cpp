@@ -24,28 +24,28 @@ void NodeBlock::_alloc()
 {
     const int N = sizeX * sizeY * sizeZ;
     const int Ng = 3 * sizeX * sizeX; //only for cubic block!
-    for (int prim = 0; prim < nPrim; ++prim)
+    for (int var = 0; var < NVAR; ++var)
     {
-        _allocate_aligned((void **)&data[prim], max(8, _ALIGNBYTES_), sizeof(Real) * N);
-        _allocate_aligned((void **)&tmp[prim],  max(8, _ALIGNBYTES_), sizeof(Real) * N);
+        _allocate_aligned((void **)&data[var], max(8, _ALIGNBYTES_), sizeof(Real) * N);
+        _allocate_aligned((void **)&tmp[var],  max(8, _ALIGNBYTES_), sizeof(Real) * N);
     }
 }
 
 void NodeBlock::_dealloc()
 {
-    for (int prim = 0; prim < nPrim; ++prim)
+    for (int var = 0; var < NVAR; ++var)
     {
-        free(data[prim]);
-        free(tmp[prim]);
+        free(data[var]);
+        free(tmp[var]);
     }
 }
 
 void NodeBlock::clear_data()
 {
     const int N = sizeX * sizeY * sizeZ;
-    for (int prim = 0; prim < nPrim; ++prim)
+    for (int var = 0; var < NVAR; ++var)
     {
-        Real *pdata = data[prim];
+        Real *pdata = data[var];
         for (int i = 0; i < N; ++i)
             pdata[i] = static_cast<Real>(0.0);
     }
@@ -54,9 +54,9 @@ void NodeBlock::clear_data()
 void NodeBlock::clear_tmp()
 {
     const int N = sizeX * sizeY * sizeZ;
-    for (int prim = 0; prim < nPrim; ++prim)
+    for (int var = 0; var < NVAR; ++var)
     {
-        Real *ptmp = tmp[prim];
+        Real *ptmp = tmp[var];
         for (int i = 0; i < N; ++i)
             ptmp[i] = static_cast<Real>(0.0);
     }
