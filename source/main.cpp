@@ -156,7 +156,8 @@ int main(int argc, const char *argv[])
     // Run Solver
     ///////////////////////////////////////////////////////////////////////////
     const size_t chunk_slices = 64;
-    GPUlab<GridMPI> myGPU(mygrid, chunk_slices);
+    GPUlab myGPU(mygrid, chunk_slices);
+    /* GPUlab<GridMPI> myGPU(mygrid, chunk_slices); */
     /* myGPU.toggle_verbosity(); */
 
     ///////////////////////////////////////////////////////////////////////////
@@ -188,15 +189,18 @@ int main(int argc, const char *argv[])
         double trk1, trk2, trk3;
         {// stage 1
             myGPU.load_ghosts();
-            trk1 = _LSRKstep<GPUlab<GridMPI> >(0      , 1./4, dt/h, myGPU);
+            trk1 = _LSRKstep<GPUlab>(0      , 1./4, dt/h, myGPU);
+            /* trk1 = _LSRKstep<GPUlab<GridMPI> >(0      , 1./4, dt/h, myGPU); */
             printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
-            trk2 = _LSRKstep<GPUlab<GridMPI> >(-17./32, 8./9, dt/h, myGPU);
+            trk2 = _LSRKstep<GPUlab>(-17./32, 8./9, dt/h, myGPU);
+            /* trk2 = _LSRKstep<GPUlab<GridMPI> >(-17./32, 8./9, dt/h, myGPU); */
             printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
-            trk3 = _LSRKstep<GPUlab<GridMPI> >(-32./27, 3./4, dt/h, myGPU);
+            trk3 = _LSRKstep<GPUlab>(-32./27, 3./4, dt/h, myGPU);
+            /* trk3 = _LSRKstep<GPUlab<GridMPI> >(-32./27, 3./4, dt/h, myGPU); */
             printf("RK stage 3 takes %f sec\n", trk3);
         }
         printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
