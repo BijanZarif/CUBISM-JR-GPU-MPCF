@@ -50,7 +50,6 @@ class GPUlab
         enum {FIRST, INTERMEDIATE, LAST, SINGLE} chunk_state;
         enum {ALLOCATED, FREE} gpu_allocation;
         enum {QUIET=0, VERBOSE} chatty;
-        enum {SKIN, FLESH} myFeature[6];
 
         typedef uint_t (*index_map)(const int ix, const int iy, const int iz);
 
@@ -62,17 +61,11 @@ class GPUlab
         const uint_t CHUNK_LENGTH;
         const uint_t REM;
         const uint_t N_chunks;
-        uint_t current_length;
-        uint_t current_iz;
-        uint_t current_chunk_id;
-        uint_t previous_length;
-        uint_t previous_iz;
-        uint_t previous_chunk_id;
 
         int* maxSOS; // pointer to mapped memory CPU/GPU
 
         ///////////////////////////////////////////////////////////////////////
-        // HALOS / COMMUNICATION
+        // HALOS / MPI COMMUNICATION
         ///////////////////////////////////////////////////////////////////////
         const MPI_Comm cart_world;
         std::vector<MPI_Request> request;
@@ -102,7 +95,7 @@ class GPUlab
                     right[i] = &recv_right[i * Nhalo];
                 }
             }
-        } halox, haloy, haloz;
+        };
 
         // MPI
         inline void _issue_send(const Real * const sendbuf, const uint_t Nelements, const uint_t sender)
@@ -119,39 +112,8 @@ class GPUlab
 
         // Halo extraction
         template <index_map map>
-        void _copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE)
-        {
-            assert(Nhalos == (xE-xS)*(yE-yS)*(zE-zS));
-
-#               pragma omp parallel for
-            for (int p = 0; p < GridMPI::NVAR; ++p)
-            {
-                const Real * const src = grid.pdata()[p];
-                const uint_t offset = p * Nhalos;
-                for (int iz = zS; iz < zE; ++iz)
-                    for (int iy = yS; iy < yE; ++iy)
-                        for (int ix = xS; ix < xE; ++ix)
-                            cpybuf[offset + map(ix,iy,iz)] = src[ix + sizeX * (iy + sizeY * iz)];
-            }
-
-            _issue_send(cpybuf, GridMPI::NVAR * Nhalos, sender);
-        }
-
-        void _copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int zS)
-        {
-            assert(Nhalos == 3*SLICE_GPU);
-
-            const uint_t srcoffset = SLICE_GPU * zS;
-#           pragma omp parallel for
-            for (int p = 0; p < GridMPI::NVAR; ++p)
-            {
-                const Real * const src = grid.pdata()[p];
-                const uint_t offset = p * Nhalos;
-                memcpy(cpybuf + offset, src + srcoffset, Nhalos*sizeof(Real));
-            }
-
-            _issue_send(cpybuf, GridMPI::NVAR * Nhalos, sender);
-        }
+        void _copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE);
+        void _copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int zS);
 
 
         ///////////////////////////////////////////////////////////////////////
@@ -162,7 +124,6 @@ class GPUlab
             static const uint_t NVAR = GridMPI::NVAR; // number of variables in set
             const uint_t _sizeIn, _sizeOut;
             uint_t Nxghost, Nyghost; // may change depending on last chunk
-            /* const uint_t Nzghost; // must not change */
 
             // Tmp storage for GPU input data SoA representation
             cuda_vector_t SOA_all;
@@ -174,20 +135,16 @@ class GPUlab
 
             // compact ghosts
             cuda_vector_t xyghost_all;
-            RealPtrVec_t xghost_l, xghost_r, yghost_l, yghost_r; //zghost_l, zghost_r;
+            RealPtrVec_t xghost_l, xghost_r, yghost_l, yghost_r;
 
             HostBuffer(const uint_t sizeIn, const uint_t sizeOut, const uint_t sizeXghost, const uint_t sizeYghost) :
-            /* HostBuffer(const uint_t sizeIn, const uint_t sizeOut, const uint_t sizeXghost, const uint_t sizeYghost, const uint_t sizeZghost) : */
                 _sizeIn(sizeIn), _sizeOut(sizeOut),
                 Nxghost(sizeXghost), Nyghost(sizeYghost),
-                /* Nzghost(sizeZghost), */
                 SOA_all(NVAR*sizeIn, 0.0), SOA(NVAR, NULL),
                 tmpSOA_all(NVAR*sizeOut, 0.0), tmpSOA(NVAR, NULL),
                 xyghost_all(2*NVAR*sizeXghost + 2*NVAR*sizeYghost, 0.0),
-                /* ghost_all(2*NVAR*sizeXghost + 2*NVAR*sizeYghost + 2*NVAR*sizeZghost, 0.0), */
                 xghost_l(NVAR, NULL), xghost_r(NVAR, NULL),
                 yghost_l(NVAR, NULL), yghost_r(NVAR, NULL)
-                /* zghost_l(NVAR, NULL), zghost_r(NVAR, NULL) */
             {
                 for (uint_t i = 0; i < NVAR; ++i)
                 {
@@ -195,7 +152,6 @@ class GPUlab
                     tmpSOA[i] = &tmpSOA_all[i * sizeOut];
                 }
                 realign_ghost_pointer(sizeXghost, sizeYghost);
-                /* realign_ghost_pointer(sizeXghost, sizeYghost, sizeZghost); */
             }
 
             // --> CURRENTLY NOT USED ELSEWHERE, THEREFORE REQUIRES sizeZ % CHUNK_LENGTH == 0
@@ -205,22 +161,17 @@ class GPUlab
             // coalesced at all times.  Ghosts are stored all in the same
             // contiguous array for better H2D/D2H bandwidth)
             void realign_ghost_pointer(const uint_t sizeXg, const uint_t sizeYg)
-            /* void realign_ghost_pointer(const uint_t sizeXg, const uint_t sizeYg, const uint_t sizeZg) */
             {
                 assert(sizeXg  <= Nxghost);
                 assert(sizeYg  <= Nyghost);
-                /* assert(sizeZg  <= Nzghost); */
 
                 const uint_t allXghost = 2*NVAR*sizeXg;
-                /* const uint_t allYghost = 2*NVAR*sizeYg; */
                 for (uint_t i = 0; i < NVAR; ++i)
                 {
                     xghost_l[i] = &xyghost_all[(0*NVAR + i) * sizeXg];
                     xghost_r[i] = &xyghost_all[(1*NVAR + i) * sizeXg];
                     yghost_l[i] = &xyghost_all[(0*NVAR + i) * sizeYg + allXghost];
                     yghost_r[i] = &xyghost_all[(1*NVAR + i) * sizeYg + allXghost];
-                    /* zghost_l[i] = &ghost_all[(0*NVAR + i) * sizeZg + allXghost + allYghost]; */
-                    /* zghost_r[i] = &ghost_all[(1*NVAR + i) * sizeZg + allXghost + allYghost]; */
                 }
             }
         };
@@ -238,72 +189,26 @@ class GPUlab
         ///////////////////////////////////////////////////////////////////////
         // PRIVATE HELPER
         ///////////////////////////////////////////////////////////////////////
-        void _alloc_GPU()
-        {
-            GPU::alloc((void**) &maxSOS, sizeX, sizeY, sizeZ, CHUNK_LENGTH);
-            gpu_allocation = ALLOCATED;
-        }
-
-        void _free_GPU()
-        {
-            GPU::dealloc();
-            gpu_allocation = FREE;
-        }
-
+        void _alloc_GPU();
+        void _free_GPU();
         inline void _syncGPU() { GPU::syncGPU(); }
         inline void _syncStream(GPU::streamID s) { GPU::syncStream(s); }
-
-        void _reset()
-        {
-            if (N_chunks == 1)
-            {
-                // whole chunk fits on the GPU
-                chunk_state = SINGLE;
-                current_length = sizeZ;
-            }
-            else
-            {
-                chunk_state = FIRST;
-                current_length = CHUNK_LENGTH;
-            }
-            current_iz = 0;
-            current_chunk_id = 1;
-        }
-
-        void _init_next_chunk()
-        {
-            previous_length   = current_length;
-            previous_iz       = current_iz;
-            previous_chunk_id = current_chunk_id;
-
-            current_iz     += current_length;
-            ++current_chunk_id;
-
-            if (current_chunk_id > N_chunks)
-                _reset();
-            else if (current_chunk_id == N_chunks)
-            {
-                current_length  = (1 - !REM)*REM + (!REM)*CHUNK_LENGTH;
-                chunk_state     = LAST;
-            }
-            else
-            {
-                current_length = CHUNK_LENGTH;
-                chunk_state    = INTERMEDIATE;
-            }
-
-            // use a new host buffer
-            _swap_buffer();
-
-            // set the number of ghosts in x/y direction for this buffer
-            buffer->Nxghost = 3*sizeY*current_length;
-            buffer->Nyghost = sizeX*3*current_length;
-        }
+        void _reset();
+        void _init_next_chunk();
 
         inline void _copy_range(RealPtrVec_t& dst, const uint_t dstOFFSET, const RealPtrVec_t& src, const uint_t srcOFFSET, const uint_t Nelements)
         {
             for (int i = 0; i < GridMPI::NVAR; ++i)
                 memcpy(dst[i] + dstOFFSET, src[i] + srcOFFSET, Nelements*sizeof(Real));
+        }
+
+        inline void _copy_xyghosts() // alternatively, copy ALL x/yghosts at beginning
+        {
+            // copy from the halos into the ghost buffer of the current chunk
+            _copy_range(buffer->xghost_l, 0, halox.left,  3*sizeY*current_iz, buffer->Nxghost);
+            _copy_range(buffer->xghost_r, 0, halox.right, 3*sizeY*current_iz, buffer->Nxghost);
+            _copy_range(buffer->yghost_l, 0, haloy.left,  3*sizeX*current_iz, buffer->Nyghost);
+            _copy_range(buffer->yghost_r, 0, haloy.right, 3*sizeX*current_iz, buffer->Nyghost);
         }
 
 
@@ -489,11 +394,9 @@ class GPUlab
 
                 case INTERMEDIATE:
                     {
-                        // left ghosts (reuse conversion in previous buffer)
+                        // left ghosts (reuse previous buffer)
                         const uint_t prevOFFSET = SLICE_GPU * previous_length;
                         _copy_range(buffer->SOA, 0, previous_buffer->SOA, prevOFFSET, haloz.Nhalo);
-                        /* for (int i = 0; i < 7; ++i) */
-                        /*     memcpy(buffer->SOA[i], previous_buffer->SOA[i] + prevOFFSET, buffer->Nzghost*sizeof(Real)); */
 
                         // interior + right ghosts
                         _copy_range(buffer->SOA, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length + haloz.Nhalo);
@@ -502,21 +405,16 @@ class GPUlab
 
                 case LAST:
                     {
-                        // left ghosts (reuse conversion in previous buffer)
+                        // left ghosts (reuse previous buffer)
                         const uint_t prevOFFSET = SLICE_GPU * previous_length;
                         _copy_range(buffer->SOA, 0, previous_buffer->SOA, prevOFFSET, haloz.Nhalo);
-                        /* for (int i = 0; i < 7; ++i) */
-                        /*     memcpy(buffer->SOA[i], previous_buffer->SOA[i] + prevOFFSET, buffer->Nzghost*sizeof(Real)); */
 
                         // interior
                         _copy_range(buffer->SOA, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length);
 
                         // right ghosts
-                        /* _compute_z_ghosts_r(src0); */
                         const uint_t current_rightOFFSET = haloz.Nhalo + SLICE_GPU * current_length;
                         _copy_range(buffer->SOA, current_rightOFFSET, haloz.right, 0, haloz.Nhalo);
-                        /* for (int i = 0; i < 7; ++i) */
-                        /*     memcpy(buffer->SOA[i] + current_rightOFFSET, buffer->zghost_r[i], buffer->Nzghost*sizeof(Real)); */
                         break;
                     }
             }
@@ -544,7 +442,6 @@ class GPUlab
                 case INTERMEDIATE:
                 case LAST:
                     _copy_xyghosts();
-                    /* _compute_xy_ghosts(src0); */
                     GPU::upload_xy_ghosts(buffer->Nxghost, buffer->xghost_l, buffer->xghost_r,
                                           buffer->Nyghost, buffer->yghost_l, buffer->yghost_r);
 
@@ -555,20 +452,7 @@ class GPUlab
         }
 
         // info
-        void _printSOA(const Real * const in)
-        {
-            for (int iz = 0; iz < current_length+6; ++iz)
-            {
-                for (int iy = 0; iy < sizeY; ++iy)
-                {
-                    for (int ix = 0; ix < sizeX; ++ix)
-                        printf("%f\t\n", in[ix + sizeX * (iy + sizeY * iz)]);
-                    printf("\n");
-                }
-                printf("\n");
-            }
-        }
-
+        void _printSOA(const Real * const in);
         void _show_feature();
         void _start_info_current_chunk(const std::string title = "");
         inline void _end_info_current_chunk()
@@ -579,11 +463,24 @@ class GPUlab
 
     protected:
 
+        enum {SKIN, FLESH} myFeature[6];
         GridMPI& grid;
+
+        // CHUNK metrics
+        uint_t current_length;
+        uint_t current_iz;
+        uint_t current_chunk_id;
+        uint_t previous_length;
+        uint_t previous_iz;
+        uint_t previous_chunk_id;
+
+        // halos (=ghosts)
+        Halo halox, haloy, haloz;
 
         virtual void _apply_bc(const double t = 0) {}
 
-        // index mappings
+        // index mappings for halos.  These mappings are used to store the halo
+        // data with a particular stride in favor for the GPU
         template <int A, int B, int C>
         static inline uint_t halomap_x(const int ix, const int iy, const int iz)
         {
@@ -603,53 +500,6 @@ class GPUlab
         {
             return ID3(ix, iy, iz+A, B, C);
         }
-
-
-        inline void _copy_xyghosts() // alternatively, copy ALL x/yghosts at beginning
-        {
-            // copy from the halos into the buffer of the current chunk
-            _copy_range(buffer->xghost_l, 0, halox.left,  3*sizeY*current_iz, buffer->Nxghost);
-            _copy_range(buffer->xghost_r, 0, halox.right, 3*sizeY*current_iz, buffer->Nxghost);
-            _copy_range(buffer->yghost_l, 0, haloy.left,  3*sizeX*current_iz, buffer->Nyghost);
-            _copy_range(buffer->yghost_r, 0, haloy.right, 3*sizeX*current_iz, buffer->Nyghost);
-        }
-
-
-        /* void _compute_xy_ghosts(const Real * const src0) */
-        /* { */
-        /*     // Compute the x- and yghost for the current chunk */
-        /*     const int stencilStart[3] = {-3, -3, -3}; */
-        /*     const int stencilEnd[3]   = { 4,  4,  4}; */
-
-        /*     /1* // use a boundary condition applied to the (current chunk) *1/ */
-        /*     /1* BoundaryCondition_CUDA<FluidBlock, FluidBlock::ElementType> bc(stencilStart, stencilEnd, src0, current_iz, current_length); *1/ */
-        /*     /1* bc.template applyBC_absorbing<0,0>(buffer->xghost_l, &GPUlab::idx_xghosts< 3,                  FluidBlock::sizeY, 3>); *1/ */
-        /*     /1* bc.template applyBC_absorbing<0,1>(buffer->xghost_r, &GPUlab::idx_xghosts< -FluidBlock::sizeX, FluidBlock::sizeY, 3>); *1/ */
-        /*     /1* bc.template applyBC_absorbing<1,0>(buffer->yghost_l, &GPUlab::idx_yghosts< 3,                  FluidBlock::sizeX, 3>); *1/ */
-        /*     /1* bc.template applyBC_absorbing<1,1>(buffer->yghost_r, &GPUlab::idx_yghosts< -FluidBlock::sizeY, FluidBlock::sizeX, 3>); *1/ */
-        /* } */
-
-
-        /* void _compute_z_ghosts_l(const Real * const src0) */
-        /* { */
-        /*     // Compute the left zghost for the current chunk */
-        /*     const int stencilStart[3] = {-3, -3, -3}; */
-        /*     const int stencilEnd[3]   = { 4,  4,  4}; */
-
-        /*     /1* BoundaryCondition_CUDA<FluidBlock, FluidBlock::ElementType> bc(stencilStart, stencilEnd, src0); *1/ */
-        /*     /1* bc.template applyBC_absorbing<2,0>(buffer->zghost_l, &GPUlab::idx_zghosts< 3, FluidBlock::sizeX, FluidBlock::sizeY>); *1/ */
-        /* } */
-
-
-        /* void _compute_z_ghosts_r(const Real * const src0) */
-        /* { */
-        /*     // Compute the right zghost for the current chunk */
-        /*     const int stencilStart[3] = {-3, -3, -3}; */
-        /*     const int stencilEnd[3]   = { 4,  4,  4}; */
-
-        /*     /1* BoundaryCondition_CUDA<FluidBlock, FluidBlock::ElementType> bc(stencilStart, stencilEnd, src0); *1/ */
-        /*     /1* bc.template applyBC_absorbing<2,1>(buffer->zghost_r, &GPUlab::idx_zghosts< -FluidBlock::sizeZ, FluidBlock::sizeX, FluidBlock::sizeY>); *1/ */
-        /* } */
 
 
     public:
@@ -748,7 +598,6 @@ class GPUlab
             // 1.)
             ///////////////////////////////////////////////////////////////
             _copy_xyghosts();
-            /* _compute_xy_ghosts(src0); */
             GPU::upload_xy_ghosts(buffer->Nxghost, buffer->xghost_l, buffer->xghost_r,
                                   buffer->Nyghost, buffer->yghost_l, buffer->yghost_r);
 
@@ -757,20 +606,13 @@ class GPUlab
             ///////////////////////////////////////////////////////////////
             // copy left ghosts always (CAN BE DONE BE MPI RECV)
             _copy_range(buffer->SOA, 0, haloz.left, 0, haloz.Nhalo);
-            /* _copy_range(buffer->SOA, 0, buffer->zghost_l, 0, buffer->Nzghost * sizeof(Real)); */
-
-            /* for (int i = 0; i < 7; ++i) */
-            /*     memcpy(buffer->SOA[i], buffer->zghost_l[i], buffer->Nzghost*sizeof(Real)); */
 
             // right ghosts are conditional
             switch (chunk_state)
             {
                 case SINGLE:
-                    /* _compute_z_ghosts_r(src0); */
                     const uint_t OFFSET = haloz.Nhalo + SLICE_GPU * current_length;
                     _copy_range(buffer->SOA, OFFSET, haloz.right, 0, haloz.Nhalo);
-                    /* for (int i = 0; i < 7; ++i) */
-                    /*     memcpy(buffer->SOA[i] + OFFSET, buffer->zghost_r[i], buffer->Nzghost*sizeof(Real)); */
                     break;
             }
 

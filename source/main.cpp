@@ -19,6 +19,7 @@
 #include "MaxSpeedOfSound_CUDA.h"
 #include "Convection_CUDA.h"
 #include "Update_CUDA.h"
+#include "BoundaryConditions.h"
 
 
 // Helper
@@ -121,6 +122,26 @@ static inline double _LSRKstep(const Real a, const Real b, const Real dtinvh, TG
 }
 
 
+// implement boundary conditions for SOD
+class GPUlabSOD : public GPUlab
+{
+    protected:
+        void _apply_bc(const double t = 0)
+        {
+            BoundaryConditions<GridMPI> bc(grid.pdata(), current_iz, current_length);
+            if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0, halomap_x<0,sizeY,3> >(halox.left);
+            if (myFeature[1] == SKIN) bc.template applyBC_absorbing<0,1, halomap_x<0,sizeY,3> >(halox.right);
+            if (myFeature[2] == SKIN) bc.template applyBC_absorbing<1,0, halomap_y<0,sizeX,3> >(haloy.left);
+            if (myFeature[3] == SKIN) bc.template applyBC_absorbing<1,1, halomap_y<0,sizeX,3> >(haloy.right);
+            if (myFeature[4] == SKIN) bc.template applyBC_absorbing<2,0, halomap_z<0,sizeX,sizeY> >(haloz.left);
+            if (myFeature[5] == SKIN) bc.template applyBC_absorbing<2,1, halomap_z<0,sizeX,sizeY> >(haloz.right);
+        }
+
+    public:
+        GPUlabSOD(GridMPI& grid, const unsigned int nslices) : GPUlab(grid, nslices) { }
+};
+
+
 
 int main(int argc, const char *argv[])
 {
@@ -150,15 +171,19 @@ int main(int argc, const char *argv[])
     /* _icCONST(mygrid, world_rank+1); */
     /* _ic123(mygrid); */
     _icSOD(mygrid, parser);
-    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, "IC"); */
+    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, "IC");
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
     ///////////////////////////////////////////////////////////////////////////
     const size_t chunk_slices = 64;
-    GPUlab myGPU(mygrid, chunk_slices);
-    /* GPUlab<GridMPI> myGPU(mygrid, chunk_slices); */
+    GPUlabSOD myGPU(mygrid, chunk_slices);
+    /* GPUlab myGPU(mygrid, chunk_slices); */
+
     /* myGPU.toggle_verbosity(); */
+
+    typedef GPUlabSOD Lab;
+    /* typedef GPUlab Lab; */
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
@@ -189,18 +214,17 @@ int main(int argc, const char *argv[])
         double trk1, trk2, trk3;
         {// stage 1
             myGPU.load_ghosts();
-            trk1 = _LSRKstep<GPUlab>(0      , 1./4, dt/h, myGPU);
-            /* trk1 = _LSRKstep<GPUlab<GridMPI> >(0      , 1./4, dt/h, myGPU); */
+            trk1 = _LSRKstep<Lab>(0, 1./4, dt/h, myGPU);
             printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
-            trk2 = _LSRKstep<GPUlab>(-17./32, 8./9, dt/h, myGPU);
-            /* trk2 = _LSRKstep<GPUlab<GridMPI> >(-17./32, 8./9, dt/h, myGPU); */
+            myGPU.load_ghosts();
+            trk2 = _LSRKstep<Lab>(-17./32, 8./9, dt/h, myGPU);
             printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
-            trk3 = _LSRKstep<GPUlab>(-32./27, 3./4, dt/h, myGPU);
-            /* trk3 = _LSRKstep<GPUlab<GridMPI> >(-32./27, 3./4, dt/h, myGPU); */
+            myGPU.load_ghosts();
+            trk3 = _LSRKstep<Lab>(-32./27, 3./4, dt/h, myGPU);
             printf("RK stage 3 takes %f sec\n", trk3);
         }
         printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
@@ -208,10 +232,13 @@ int main(int argc, const char *argv[])
         t += dt;
         ++step;
 
+        printf("step id is %d, time %f\n", step, t);
+
         if (step == nsteps)
             break;
     }
 
+    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, "final");
 
     // good night
     MPI_Finalize();

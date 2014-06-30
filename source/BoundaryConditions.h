@@ -1,6 +1,5 @@
 /*
- *  BoundaryConditions_CUDA.h
- *  MPCFnode
+ *  BoundaryConditions.h
  *
  *  Created by Fabian Wermelinger on 6/16/14.
  *  Copyright 2014 ETH Zurich. All rights reserved.
@@ -13,99 +12,75 @@
 #include <math.h>
 #include <vector>
 
+#ifdef _FLOAT_PRECISION_
 typedef float Real;
+#else
+typedef double Real;
+#endif
 
 
-template<typename TBlock, typename TElement>
-class BoundaryCondition_CUDA
+template<typename TGrid>
+class BoundaryConditions
 {
 protected:
 
     int s[3], e[3];
-    int stencilStart[3], stencilEnd[3];
 
-    const float * const src;
-    const unsigned int gptfloats;
+    const std::vector<Real *>& pdata;
     const unsigned int startZ, deltaZ;
-    typedef unsigned int (*index_function)(const int ix, const int iy, const int iz);
+    typedef unsigned int (*index_map)(const int ix, const int iy, const int iz);
 
     template<int dir, int side>
     void _setup()
     {
-        s[0] =  dir==0? (side==0? stencilStart[0]: TBlock::sizeX) : 0;
-        s[1] =  dir==1? (side==0? stencilStart[1]: TBlock::sizeY) : 0;
-        s[2] =  dir==2? (side==0? stencilStart[2]: TBlock::sizeZ) : startZ;
+        s[0] =  0;
+        s[1] =  0;
+        s[2] =  dir==2? 0 : startZ;
 
-        e[0] =  dir==0? (side==0? 0: TBlock::sizeX + stencilEnd[0]-1) : TBlock::sizeX;
-        e[1] =  dir==1? (side==0? 0: TBlock::sizeY + stencilEnd[1]-1) : TBlock::sizeY;
-        e[2] =  dir==2? (side==0? 0: TBlock::sizeZ + stencilEnd[2]-1) : startZ + deltaZ;
+        e[0] =  dir==0? 3 : TGrid::sizeX;
+        e[1] =  dir==1? 3 : TGrid::sizeY;
+        e[2] =  dir==2? 3 : startZ + deltaZ;
     }
 
-    /* Real _pulse(const Real t_star, const Real p_ratio) */
-    /* { */
-    /*     const Real Pa = p_ratio*2.38*10;//target peak pressure (factor 2.38 if no velocity) */
-    /*     const Real omega = 2*M_PI*0.5/6e-6;//tensile part set to be 6microseconds (6e-6) */
-    /*     const Real rise  = 1.03*(1-exp(-9.21e7*t_star));//50ns rise time */
-    /*     const Real alpha = 9.1e5; */
-
-    /*     Real p = rise*2*Pa*exp(-alpha*t_star)*cos(omega*t_star + M_PI/3.); */
-
-    /*     return p; */
-    /* } */
 
 public:
 
-    BoundaryCondition_CUDA(const int ss[3], const int se[3], const float * const src0,
-            const unsigned int first_slice_iz = 0, const unsigned int n_slices = TBlock::sizeZ)
+    BoundaryConditions(const std::vector<Real *>& data,
+            const unsigned int first_slice_iz = 0, const unsigned int n_slices = TGrid::sizeZ)
         :
-            src(src0),
-            gptfloats(TBlock::gptfloats),
+            pdata(data),
             startZ(first_slice_iz), deltaZ(n_slices)
     {
         s[0]=s[1]=s[2]=0;
         e[0]=e[1]=e[2]=0;
-
-        stencilStart[0] = ss[0];
-        stencilStart[1] = ss[1];
-        stencilStart[2] = ss[2];
-
-        stencilEnd[0] = se[0];
-        stencilEnd[1] = se[1];
-        stencilEnd[2] = se[2];
     }
 
-    TElement& operator()(int ix, int iy, int iz)
+    inline Real operator()(const Real * const psrc, int ix, int iy, int iz) const
     {
-        // assumes one single block!
-        const unsigned int idx = gptfloats * (ix + TBlock::sizeX * (iy + TBlock::sizeY * iz));
-        return * (TElement*) &src[idx];
+        return psrc[ix + TGrid::sizeX * (iy + TGrid::sizeY * iz)];
     }
 
-    template<int dir, int side>
-    void applyBC_absorbing(std::vector<float*> dst, index_function idx)
+    template<int dir, int side, index_map map>
+    void applyBC_absorbing(std::vector<Real *>& halo)
     {
         _setup<dir,side>();
 
-        for(int iz=s[2]; iz<e[2]; iz++)
-            for(int iy=s[1]; iy<e[1]; iy++)
-                for(int ix=s[0]; ix<e[0]; ix++)
-                {
-                    const TElement& b = (*this)(dir==0? (side==0? 0:TBlock::sizeX-1):ix,
-                                                dir==1? (side==0? 0:TBlock::sizeY-1):iy,
-                                                dir==2? (side==0? 0:TBlock::sizeZ-1):iz);
-
-                    // startZ is subtracted from iz because dst can be a ghost
-                    // buffer for a particular subdomain (local index
-                    // coordinates)
-                    const unsigned int ghost_id = idx(ix, iy, iz-startZ);
-                    (dst[0])[ghost_id] = b.rho;
-                    (dst[1])[ghost_id] = b.u;
-                    (dst[2])[ghost_id] = b.v;
-                    (dst[3])[ghost_id] = b.w;
-                    (dst[4])[ghost_id] = b.energy;
-                    (dst[5])[ghost_id] = b.G;
-                    (dst[6])[ghost_id] = b.P;
-                }
+#pragma omp parallel for
+        for (int p = 0; p < TGrid::NVAR; ++p)
+        {
+            Real * const phalo = halo[p];
+            const Real * const psrc = pdata[p];
+            for(int iz=s[2]; iz<e[2]; iz++)
+                for(int iy=s[1]; iy<e[1]; iy++)
+                    for(int ix=s[0]; ix<e[0]; ix++)
+                    {
+                        // iz-startZ to operate on an arbitrary chunk
+                        phalo[map(ix, iy, iz-startZ)] = (*this)(psrc,
+                                dir==0? (side==0? 0:TGrid::sizeX-1):ix,
+                                dir==1? (side==0? 0:TGrid::sizeY-1):iy,
+                                dir==2? (side==0? 0:TGrid::sizeZ-1):iz);
+                    }
+        }
     }
 
     /* template<int dir, int side> */
