@@ -14,18 +14,20 @@ ifneq "$(findstring brutus,$(shell hostname))" ""
 	numa-lib = /cluster/work/infk/hbabak/numactl-2.0.7/
 endif
 
-ifeq "$(hdf)" "1"
-	CPPFLAGS += -I$(hdf-inc) -D_USE_HDF_
-	LIBS += -L$(hdf-lib) -lhdf5
-endif
+# ifeq "$(hdf)" "1"
+# 	CPPFLAGS += -I$(hdf-inc) -D_USE_HDF_
+# 	LIBS += -L$(hdf-lib) -lhdf5
+# endif
 
-CPPFLAGS += -std=c++11 -fopenmp $(extra)
+CPPFLAGS += -std=c++11 -fopenmp -D_USE_HDF_ -D_ALIGNBYTES_=16 -D_BLOCKSIZE_=16 -D_FLOAT_PRECISION_ -D_SP_COMP_ -D_USE_ZLIB_ $(extra)
+
+CC = cc
 
 all: test.cpp NodeBlock.h NodeBlock.cpp WaveletCompressor.o
-	mpic++ $(CPPFLAGS) test.cpp NodeBlock.cpp WaveletCompressor.o -o test $(LIBS) -lz
+	$(CC) $(CPPFLAGS) test.cpp NodeBlock.cpp WaveletCompressor.o -o test $(LIBS) -lz
 
 WaveletCompressor.o: WaveletCompressor.h WaveletCompressor.cpp
-	g++ $(CPPFLAGS) $(extra)  -c WaveletCompressor.cpp -o WaveletCompressor.o
+	$(CC) $(CPPFLAGS) $(extra)  -c WaveletCompressor.cpp -o WaveletCompressor.o
 
 clean:
 	rm -f lsf.* ghosts_rank_* rank_* *~ *.o test
