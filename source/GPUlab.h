@@ -236,11 +236,9 @@ class GPUlab
             ///////////////////////////////////////////////////////////////////
             // 2.)
             ///////////////////////////////////////////////////////////////////
-#ifndef _MUTE_GPU_
             Ksos kernel;
             if (chatty) printf("\t[LAUNCH SOS KERNEL CHUNK %d]\n", current_chunk_id);
             kernel.compute(sizeX, sizeY, current_length);
-#endif
             if (chatty) _end_info_current_chunk();
 
             ///////////////////////////////////////////////////////////////////
@@ -325,21 +323,17 @@ class GPUlab
             ///////////////////////////////////////////////////////////////////
             // 3.)
             ///////////////////////////////////////////////////////////////////
-#ifndef _MUTE_GPU_
             Kflow convection(a, dtinvh);
             if (chatty) printf("\t[LAUNCH CONVECTION KERNEL CHUNK %d]\n", current_chunk_id);
             /* convection.compute(sizeX, sizeY, current_length, current_iz); */
             convection.compute(sizeX, sizeY, current_length, 0);
-#endif
 
             ///////////////////////////////////////////////////////////////////
             // 4.)
             ///////////////////////////////////////////////////////////////////
-#ifndef _MUTE_GPU_
             Kupdate update(b);
             if (chatty) printf("\t[LAUNCH UPDATE KERNEL CHUNK %d]\n", current_chunk_id);
             update.compute(sizeX, sizeY, current_length);
-#endif
 
             ///////////////////////////////////////////////////////////////////
             // 5.)

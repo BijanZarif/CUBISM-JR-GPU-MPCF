@@ -128,7 +128,8 @@ class GPUlabSOD : public GPUlab
     protected:
         void _apply_bc(const double t = 0)
         {
-            BoundaryConditions<GridMPI> bc(grid.pdata(), current_iz, current_length);
+            /* BoundaryConditions<GridMPI> bc(grid.pdata(), current_iz, current_length); */
+            BoundaryConditions<GridMPI> bc(grid.pdata()); // call this constructor if all halos are fetched at one time
             if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0, halomap_x<0,sizeY,3> >(halox.left);
             if (myFeature[1] == SKIN) bc.template applyBC_absorbing<0,1, halomap_x<0,sizeY,3> >(halox.right);
             if (myFeature[2] == SKIN) bc.template applyBC_absorbing<1,0, halomap_y<0,sizeX,3> >(haloy.left);
@@ -174,9 +175,9 @@ int main(int argc, const char *argv[])
     DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, "IC");
 
     ///////////////////////////////////////////////////////////////////////////
-    // Run Solver
+    // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t chunk_slices = 64;
+    const size_t chunk_slices = 4;
     GPUlabSOD myGPU(mygrid, chunk_slices);
     /* GPUlab myGPU(mygrid, chunk_slices); */
 

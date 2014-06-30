@@ -686,6 +686,7 @@ extern "C"
 {
     void GPU::xflux(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH, const uint_t global_iz)
     {
+#ifndef _MUTE_GPU_
         devPtrSet xghostL(d_xgl);
         devPtrSet xghostR(d_xgr);
         devPtrSet xflux(d_xflux);
@@ -716,11 +717,13 @@ extern "C"
             xextra.stop(stream1);
             xextra.print("[_xextraterm Kernel]: ");
         }
+#endif
     }
 
 
     void GPU::yflux(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH, const uint_t global_iz)
     {
+#ifndef _MUTE_GPU_
         devPtrSet yghostL(d_ygl);
         devPtrSet yghostR(d_ygr);
         devPtrSet yflux(d_yflux);
@@ -748,11 +751,13 @@ extern "C"
             yextra.stop(stream1);
             yextra.print("[_yextraterm Kernel]: ");
         }
+#endif
     }
 
 
     void GPU::zflux(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH)
     {
+#ifndef _MUTE_GPU_
         devPtrSet zflux(d_zflux);
 
         {
@@ -777,11 +782,13 @@ extern "C"
             zextra.stop(stream1);
             zextra.print("[_zextraterm Kernel]: ");
         }
+#endif
     }
 
 
     void GPU::divergence(const Real a, const Real dtinvh, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH)
     {
+#ifndef _MUTE_GPU_
         cudaStreamWaitEvent(stream1, h2d_tmp_completed, 0);
 
         devPtrSet xflux(d_xflux);
@@ -800,11 +807,13 @@ extern "C"
         kernel.print("[_divergence Kernel]: ");
 
         cudaEventRecord(divergence_completed, stream1);
+#endif
     }
 
 
     void GPU::update(const Real b, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH)
     {
+#ifndef _MUTE_GPU_
         devPtrSet tmp(d_tmp);
         devPtrSet rhs(d_rhs);
 
@@ -816,11 +825,13 @@ extern "C"
         _update<<<grid, blocks, 0, stream1>>>(BSX_GPU, BSY_GPU, CHUNK_WIDTH, b, tmp, rhs);
         kernel.stop(stream1);
         kernel.print("[_update Kernel]: ");
+#endif
     }
 
 
     void GPU::MaxSpeedOfSound(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH)
     {
+#ifndef _MUTE_GPU_
         const dim3 grid((BSX_GPU + NTHREADS -1) / NTHREADS, BSY_GPU, 1);
         const dim3 blocks(NTHREADS, 1, 1);
 
@@ -829,6 +840,7 @@ extern "C"
         _maxSOS<<<grid, blocks, 0, stream1>>>(BSX_GPU, BSY_GPU, CHUNK_WIDTH, d_maxSOS);
         kernel.stop(stream1);
         kernel.print("[_maxSOS Kernel]: ");
+#endif
     }
 }
 
@@ -855,6 +867,7 @@ extern "C"
 {
     void GPU::bind_textures()
     {
+#ifndef _MUTE_GPU_
         _bindTexture(&texR, d_SOA[0]);
         _bindTexture(&texU, d_SOA[1]);
         _bindTexture(&texV, d_SOA[2]);
@@ -862,11 +875,13 @@ extern "C"
         _bindTexture(&texE, d_SOA[4]);
         _bindTexture(&texG, d_SOA[5]);
         _bindTexture(&texP, d_SOA[6]);
+#endif
     }
 
 
     void GPU::unbind_textures()
     {
+#ifndef _MUTE_GPU_
         cudaUnbindTexture(&texR);
         cudaUnbindTexture(&texU);
         cudaUnbindTexture(&texV);
@@ -874,5 +889,6 @@ extern "C"
         cudaUnbindTexture(&texE);
         cudaUnbindTexture(&texG);
         cudaUnbindTexture(&texP);
+#endif
     }
 }

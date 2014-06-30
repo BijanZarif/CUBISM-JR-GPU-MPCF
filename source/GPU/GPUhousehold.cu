@@ -74,6 +74,7 @@ extern "C"
     ///////////////////////////////////////////////////////////////////////////
     void GPU::alloc(void** sos, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t BSZ_GPU, const uint_t CHUNK_WIDTH)
     {
+#ifndef _MUTE_GPU_
         // THE FOLLOWING ASSUMES CUBIC DOAMIN
         const uint_t SLICE_GPU = BSX_GPU * BSY_GPU;
 
@@ -164,11 +165,13 @@ extern "C"
         printf("[%5.1f MB (extraterm)]\n", (5*bSflx + 3*outputSize)*sizeof(Real) / 1024. / 1024);
         GPU::tell_memUsage_GPU();
         printf("=====================================================================\n");
+#endif
     }
 
 
     void GPU::dealloc()
     {
+#ifndef _MUTE_GPU_
         for (int var = 0; var < VSIZE; ++var)
         {
             // tmp
@@ -226,29 +229,17 @@ extern "C"
         printf("[FREE GPU %s]\n", prop.name);
         GPU::tell_memUsage_GPU();
         printf("=====================================================================\n");
+#endif
     }
 
 
     ///////////////////////////////////////////////////////////////////////////
     // H2D / D2H
     ///////////////////////////////////////////////////////////////////////////
-    /* void GPU::upload_ghosts(const uint_t Nghost, */
-    /*         const Real* const xghost_L, const Real* const xghost_R, */
-    /*         const Real* const yghost_L, const Real* const yghost_R) */
-    /* { */
-    /*     for (int i = 0; i < VSIZE; ++i) */
-    /*     { */
-    /*         cudaMemcpyAsync(d_xgl[i], &xghost_L[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1); */
-    /*         cudaMemcpyAsync(d_xgr[i], &xghost_R[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1); */
-    /*         cudaMemcpyAsync(d_ygl[i], &yghost_L[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1); */
-    /*         cudaMemcpyAsync(d_ygr[i], &yghost_R[i*Nghost], Nghost*sizeof(Real), cudaMemcpyHostToDevice, stream1); */
-    /*     } */
-    /* } */
-
-
     void GPU::upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, const RealPtrVec_t& xghost_r,
             const uint_t Nyghost, const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r)
     {
+#ifndef _MUTE_GPU_
         for (int i = 0; i < VSIZE; ++i)
         {
             // x
@@ -258,11 +249,13 @@ extern "C"
             cudaMemcpyAsync(d_ygl[i], yghost_l[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
             cudaMemcpyAsync(d_ygr[i], yghost_r[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
         }
+#endif
     }
 
 
     void GPU::h2d_3DArray(const RealPtrVec_t& src, const uint_t NX, const uint_t NY, const uint_t NZ)
     {
+#ifndef _MUTE_GPU_
         GPUtimer upload;
         upload.start(stream1);
         for (int i = 0; i < VSIZE; ++i)
@@ -271,11 +264,13 @@ extern "C"
         upload.print("[GPU UPLOAD 3DArray]: ");
 
         cudaEventRecord(h2d_3Darray_completed, stream1);
+#endif
     }
 
 
     void GPU::h2d_tmp(const RealPtrVec_t& src, const uint_t N)
     {
+#ifndef _MUTE_GPU_
         cudaStreamWaitEvent(stream2, h2d_3Darray_completed, 0);
 
         GPUtimer upload;
@@ -286,11 +281,13 @@ extern "C"
         upload.print("[GPU UPLOAD TMP]: ");
 
         cudaEventRecord(h2d_tmp_completed, stream2);
+#endif
     }
 
 
     void GPU::d2h_rhs(RealPtrVec_t& dst, const uint_t N)
     {
+#ifndef _MUTE_GPU_
         cudaStreamWaitEvent(stream2, divergence_completed, 0);
 
         // copy content of d_rhs to host, using the stream2 (after divergence)
@@ -302,11 +299,13 @@ extern "C"
         download.print("[GPU DOWNLOAD RHS]: ");
 
         cudaEventRecord(d2h_rhs_completed, stream2);
+#endif
     }
 
 
     void GPU::d2h_tmp(RealPtrVec_t& dst, const uint_t N)
     {
+#ifndef _MUTE_GPU_
         /* // wait until the device to host copy of the rhs has finished. This will */
         /* // hide the SOA to AOS conversion of the RHS data on the host, while the */
         /* // updated solution is copied to the host. */
@@ -321,6 +320,7 @@ extern "C"
         download.print("[GPU DOWNLOAD TMP]: ");
 
         cudaEventRecord(d2h_tmp_completed, stream2);
+#endif
     }
 
 
@@ -329,38 +329,48 @@ extern "C"
     ///////////////////////////////////////////////////////////////////////////
     void GPU::h2d_3DArray_wait()
     {
+#ifndef _MUTE_GPU_
         // wait until h2d_3DArray has finished
         cudaEventSynchronize(h2d_3Darray_completed);
+#endif
     }
 
 
     void GPU::d2h_rhs_wait()
     {
+#ifndef _MUTE_GPU_
         // wait until d2h_rhs has finished
         cudaEventSynchronize(d2h_rhs_completed);
+#endif
     }
 
 
     void GPU::d2h_tmp_wait()
     {
+#ifndef _MUTE_GPU_
         // wait until d2h_tmp has finished
         cudaEventSynchronize(d2h_tmp_completed);
+#endif
     }
 
 
     void GPU::syncGPU()
     {
+#ifndef _MUTE_GPU_
         cudaDeviceSynchronize();
+#endif
     }
 
 
     void GPU::syncStream(streamID s)
     {
+#ifndef _MUTE_GPU_
         switch (s)
         {
             case S1: cudaStreamSynchronize(stream1); break;
             case S2: cudaStreamSynchronize(stream2); break;
         }
+#endif
     }
 
 
@@ -369,6 +379,7 @@ extern "C"
     ///////////////////////////////////////////////////////////////////////////
     void GPU::tell_memUsage_GPU()
     {
+#ifndef _MUTE_GPU_
         size_t free_byte, total_byte;
         const int status = cudaMemGetInfo(&free_byte, &total_byte);
         if (cudaSuccess != status)
@@ -381,15 +392,18 @@ extern "C"
                 (double)free_byte / 1024 / 1024,
                 (double)total_byte / 1024 / 1024,
                 (double)used / 1024 / 1024);
+#endif
     }
 
 
     void GPU::tell_GPU()
     {
+#ifndef _MUTE_GPU_
         int dev;
         cudaDeviceProp prop;
         cudaGetDevice(&dev);
         cudaGetDeviceProperties(&prop, dev);
         printf("Using device %d (%s)\n", dev, prop.name);
+#endif
     }
 }
