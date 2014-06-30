@@ -16,13 +16,13 @@ GPUlab::GPUlab(GridMPI& G, const uint_t CL)
         BUFFER1(GPU_input_size, GPU_output_size, 3*sizeY*CL, sizeX*3*CL), // per chunk
         BUFFER2(GPU_input_size, GPU_output_size, 3*sizeY*CL, sizeX*3*CL), // per chunk
         grid(G),
-        halox(3*sizeY*sizeZ), // all domain
+        halox(3*sizeY*sizeZ), // all domain (buffer zone for halo extraction + MPI send/recv)
         haloy(sizeX*3*sizeZ), // all domain
         haloz(sizeX*sizeY*3)  // all domain
 {
     if (REM != 0) // can be solved later
     {
-        fprintf(stderr, "[GPUlab ERROR: CURRENTLY CHUNK LENGTHS MUST BE A MULTIPLE of GridMPI::sizeZ\n");
+        fprintf(stderr, "[GPUlab ERROR: CURRENTLY CHUNK LENGTHS MUST BE AN INTEGER MULTIPLE of GridMPI::sizeZ\n");
         exit(1);
     }
 
