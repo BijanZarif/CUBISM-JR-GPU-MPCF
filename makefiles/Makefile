@@ -86,6 +86,8 @@ ifeq "$(fftw)"  "1"
 	LIBS += -L$(fftw-lib) -lfftw3 -lfftw3_mpi #-ldfftw -ldfftw_mpi
 endif
 
+# CUFLAGS += --maxrregcount 50
+
 ##################
 VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU
 .DEFAULT_GOAL := mpcf-cluster

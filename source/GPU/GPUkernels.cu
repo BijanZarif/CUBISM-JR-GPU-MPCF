@@ -12,7 +12,7 @@
 #include "GPUonly.cuh"
 #include "CUDA_Timer.cuh"
 
-#define NTHREADS 128
+#define NTHREADS 64
 
 // pointer compound to pass a kernel argument
 struct devPtrSet // 7 fluid quantities
