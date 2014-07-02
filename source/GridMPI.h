@@ -11,6 +11,7 @@
 
 #include <mpi.h>
 #include <vector>
+#include <cmath>
 #include "NodeBlock.h"
 
 using namespace std;
@@ -21,7 +22,6 @@ using namespace std;
 #define _MPI_REAL_ MPI_DOUBLE
 #endif
 
-#define _mymax(a,b) ((a) > (b) ? (a) : (b))
 
 /* #include "StencilInfo.h" */
 /* #include "SynchronizerMPI.h" */
@@ -106,8 +106,8 @@ class GridMPI : public NodeBlock
         pesize[1] = npeY;
         pesize[2] = npeZ;
 
-        const double h = maxextent / (_mymax(pesize[0]*blocksize[0], _mymax(pesize[1]*blocksize[1], pesize[2]*blocksize[2])) - 1);
-        _set_gridspacing(h);
+        h = maxextent / (std::max(pesize[0]*blocksize[0], std::max(pesize[1]*blocksize[1], pesize[2]*blocksize[2])) - 1);
+        bextent = h * (std::max(blocksize[0], std::max(blocksize[1], blocksize[2])) - 1);
 
         int world_size;
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);

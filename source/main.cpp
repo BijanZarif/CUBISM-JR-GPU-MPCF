@@ -14,7 +14,7 @@
 #include "Types.h"
 #include "Timer.h"
 #include "HDF5Dumper_MPI.h"
-#include "SerializerIO_WaveletCompression_MPI_Simple.h"
+/* #include "SerializerIO_WaveletCompression_MPI_Simple.h" */
 
 #include "MaxSpeedOfSound_CUDA.h"
 #include "Convection_CUDA.h"
@@ -92,7 +92,7 @@ static void _icSOD(GridMPI& grid, ArgumentParser& parser)
                 grid.get_pos(ix, iy, iz, pos);
 
                 // set up along x
-                bool x = pos[0] < x0;
+                bool x = pos[2] < x0;
 
                 const double r = x * rho1 + !x * rho2;
                 const double p = x * p1   + !x * p2;
@@ -105,9 +105,9 @@ static void _icSOD(GridMPI& grid, ArgumentParser& parser)
                 assert(P >= 0);
 
                 grid(ix, iy, iz, var::R) = r;
-                grid(ix, iy, iz, var::U) = u;
+                grid(ix, iy, iz, var::W) = u;
                 grid(ix, iy, iz, var::V) = 0;
-                grid(ix, iy, iz, var::W) = 0;
+                grid(ix, iy, iz, var::U) = 0;
                 grid(ix, iy, iz, var::E) = G*p + P + 0.5*u*u/r;
                 grid(ix, iy, iz, var::G) = G;
                 grid(ix, iy, iz, var::P) = P;
@@ -172,12 +172,12 @@ int main(int argc, const char *argv[])
     /* _icCONST(mygrid, world_rank+1); */
     /* _ic123(mygrid); */
     _icSOD(mygrid, parser);
-    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, "IC");
+    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, "IC"); */
 
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t chunk_slices = 64;
+    const size_t chunk_slices = 512;
     GPUlabSOD myGPU(mygrid, chunk_slices);
     /* GPUlab myGPU(mygrid, chunk_slices); */
 

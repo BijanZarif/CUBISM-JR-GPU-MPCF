@@ -23,7 +23,6 @@ static void _allocate_aligned(void **memptr, size_t alignment, size_t bytes)
 void NodeBlock::_alloc()
 {
     const int N = sizeX * sizeY * sizeZ;
-    const int Ng = 3 * sizeX * sizeX; //only for cubic block!
     for (int var = 0; var < NVAR; ++var)
     {
         _allocate_aligned((void **)&data[var], max(8, _ALIGNBYTES_), sizeof(Real) * N);

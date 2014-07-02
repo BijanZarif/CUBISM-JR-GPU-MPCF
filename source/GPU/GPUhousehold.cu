@@ -47,6 +47,7 @@ cudaStream_t stream3;
 
 // events
 cudaEvent_t divergence_completed;
+cudaEvent_t update_completed;
 cudaEvent_t h2d_3Darray_completed;
 cudaEvent_t h2d_tmp_completed;
 cudaEvent_t d2h_rhs_completed;
@@ -90,8 +91,10 @@ extern "C"
         // Ghosts
         /* const uint_t xgSize = 3*BSY_GPU*BSZ_GPU; */
         /* const uint_t ygSize = BSX_GPU*3*BSZ_GPU; */
-        const uint_t xgSize = 3 * SLICE_GPU;
-        const uint_t ygSize = 3 * SLICE_GPU;
+        /* const uint_t xgSize = 3 * SLICE_GPU; */
+        /* const uint_t ygSize = 3 * SLICE_GPU; */
+        const uint_t xgSize = 3*BSY_GPU*CHUNK_WIDTH;
+        const uint_t ygSize = BSX_GPU*3*CHUNK_WIDTH;
 
         // Allocate
         cudaChannelFormatDesc fmt =  cudaCreateChannelDesc<Real>();
@@ -146,6 +149,7 @@ extern "C"
 
         // create event
         cudaEventCreate(&divergence_completed);
+        cudaEventCreate(&update_completed);
         cudaEventCreate(&h2d_3Darray_completed);
         cudaEventCreate(&h2d_tmp_completed);
         cudaEventCreate(&d2h_rhs_completed);
@@ -217,6 +221,7 @@ extern "C"
 
         // destroy events
         cudaEventDestroy(divergence_completed);
+        cudaEventDestroy(update_completed);
         cudaEventDestroy(h2d_3Darray_completed);
         cudaEventDestroy(h2d_tmp_completed);
         cudaEventDestroy(d2h_rhs_completed);
@@ -309,10 +314,7 @@ extern "C"
     void GPU::d2h_tmp(RealPtrVec_t& dst, const uint_t N)
     {
 #ifndef _MUTE_GPU_
-        /* // wait until the device to host copy of the rhs has finished. This will */
-        /* // hide the SOA to AOS conversion of the RHS data on the host, while the */
-        /* // updated solution is copied to the host. */
-        /* cudaStreamWaitEvent(stream1, d2h_rhs_completed, 0); */
+        cudaStreamWaitEvent(stream2, update_completed, 0);
 
         // copy content of d_tmp to host, using the stream1
         GPUtimer download;

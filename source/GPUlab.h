@@ -616,6 +616,10 @@ class GPUlab
                     break;
             }
 
+            /* for (int i = 0; i < haloz.Nhalo; ++i) */
+            /*     printf("%f ", haloz.right[0][i]); */
+            /* printf("\n"); */
+
             ///////////////////////////////////////////////////////////////
             // 3.)
             ///////////////////////////////////////////////////////////////
@@ -631,7 +635,6 @@ class GPUlab
             ///////////////////////////////////////////////////////////////
             // 5.)
             ///////////////////////////////////////////////////////////////
-            // Copy back SOA->AOS of previous chunk
             Timer timer;
             const uint_t prevOFFSET = SLICE_GPU * previous_iz;
 
@@ -650,6 +653,12 @@ class GPUlab
             const double t1 = timer.stop();
             if (chatty)
                 printf("\t[COPY BACK SRC CHUNK %d TAKES %f sec]\n", previous_chunk_id, t1);
+
+
+            /* for (int i = 0; i < haloz.Nhalo; ++i) */
+            /*     /1* printf("%f ", src[0][SLICE_GPU*125 + i]); *1/ */
+            /*     printf("%f ", previous_buffer->SOA[0][SLICE_GPU*61 + i]); */
+            /* printf("\n"); */
 
             ///////////////////////////////////////////////////////////////
             // 6.)

@@ -71,7 +71,7 @@ void GPUlab::_copysend_halos(const int sender, Real * const cpybuf, const uint_t
         for (int iz = zS; iz < zE; ++iz)
             for (int iy = yS; iy < yE; ++iy)
                 for (int ix = xS; ix < xE; ++ix)
-                    cpybuf[offset + map(ix,iy,iz)] = src[ix + sizeX * (iy + sizeY * iz)];
+                    cpybuf[offset + map(ix,iy,iz-zS)] = src[ix + sizeX * (iy + sizeY * iz)];
     }
 
     // farewell, brother

@@ -8,11 +8,9 @@
 
 #include <stdlib.h>
 #include <assert.h>
+#include <cmath>
 #include <vector>
 
-#ifndef _BLOCKSIZE_
-#define _BLOCKSIZE_ 16
-#endif
 
 #ifdef _FLOAT_PRECISION_
 typedef float Real;
@@ -21,7 +19,7 @@ typedef double Real;
 #endif
 
 
-class NodeBlock //cubic block of data designated for a single node
+class NodeBlock
 {
     public:
 
@@ -33,22 +31,17 @@ class NodeBlock //cubic block of data designated for a single node
 
         // Dimensions
         static const int NVAR = NPRIMITIVES;
-        static const int sizeX = _BLOCKSIZE_;
-        static const int sizeY = _BLOCKSIZE_;
-        static const int sizeZ = _BLOCKSIZE_;
+        static const int sizeX = _BLOCKSIZEX_;
+        static const int sizeY = _BLOCKSIZEY_;
+        static const int sizeZ = _BLOCKSIZEZ_;
 
 
     protected:
 
         // spatial measures
         double origin[3];
-        double bextent; //since cubic block, all sides = extent
+        double bextent;
         double h;
-        inline void _set_gridspacing(const double h_)
-        {
-            h = h_;
-            bextent = h_ * (_BLOCKSIZE_-1);
-        }
         inline void _set_origin(const double O[3])
         {
             for (int i = 0; i < 3; ++i)
@@ -75,10 +68,15 @@ class NodeBlock //cubic block of data designated for a single node
 
     public:
 
-        NodeBlock(const double e_ = 1.0) :
-            //origin{0.0, 0.0, 0.0}, // nvcc does not like this
-            bextent(e_), h(e_ / (_BLOCKSIZE_ - 1)),
-            data(NVAR, NULL), tmp(NVAR, NULL) { origin[0] = origin[1] = origin[2] = 0.0; _alloc(); }
+        NodeBlock(const double e_ = 1.0)
+            :
+                //origin{0.0, 0.0, 0.0}, // nvcc does not like this
+                bextent(e_), data(NVAR, NULL), tmp(NVAR, NULL)
+        {
+            h = bextent / (std::max(_BLOCKSIZEX_, std::max(_BLOCKSIZEY_, _BLOCKSIZEZ_)) - 1);
+            origin[0] = origin[1] = origin[2] = 0.0;
+            _alloc();
+        }
 
         virtual ~NodeBlock() { _dealloc(); }
 
