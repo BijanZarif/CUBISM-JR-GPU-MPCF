@@ -177,7 +177,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t chunk_slices = 512;
+    const size_t chunk_slices = 64;
     GPUlabSOD myGPU(mygrid, chunk_slices);
     /* GPUlab myGPU(mygrid, chunk_slices); */
 
@@ -233,7 +233,7 @@ int main(int argc, const char *argv[])
         t += dt;
         ++step;
 
-        printf("step id is %d, physical time %f\n", step, t);
+        printf("step id is %d, physical time %f (dt = %f)\n", step, t, dt);
 
         if (step == nsteps)
             break;
