@@ -370,8 +370,6 @@ int main(int argc, const char *argv[])
         dt = (tend-t) < dt ? (tend-t) : dt;
         MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, mygrid.getCartComm());
 
-        dt = 0.0005;
-
         // 2.) Compute RHS and update using LSRK3
         double trk1, trk2, trk3;
         {// stage 1
