@@ -7,6 +7,10 @@
 #include <stdio.h>
 #include <assert.h>
 #include <omp.h>
+#include <fstream>
+#include <vector>
+#include <cmath>
+using namespace std;
 
 #include "ArgumentParser.h"
 #include "GridMPI.h"
@@ -115,6 +119,132 @@ static void _icSOD(GridMPI& grid, ArgumentParser& parser)
 }
 
 
+Real EPSILON = 1.0;
+
+static Real _heaviside(const Real phi)
+{
+    return (phi>0? 0:1);
+}
+
+static Real _heaviside_smooth(const Real phi)
+{
+    const Real alpha = M_PI*min(1., max(0., 0.5*(phi+EPSILON)/EPSILON));
+    return 0.5+0.5*cos(alpha);
+}
+
+static void _getPostShockRatio(const Real pre_shock[3], const Real mach, const Real gamma, const Real pc, Real postShock[3])
+{
+    const double Mpost = sqrt( (pow(mach,(Real)2.)*(gamma-1.)+2.) / (2.*gamma*pow(mach,(Real)2.)-(gamma-1.)) );
+    postShock[0] = (gamma+1.)*pow(mach,(Real)2.)/( (gamma-1.)*pow(mach,(Real)2.)+2.)*pre_shock[0] ;
+    postShock[2] = 1./(gamma+1.) * ( 2.*gamma*pow(mach,(Real)2.)-(gamma-1.))*pre_shock[2];
+    const double preShockU = mach*sqrt(gamma*(pc+pre_shock[2])/pre_shock[0]);
+    const double postShockU = Mpost*sqrt(gamma*(pc+postShock[2])/postShock[0]);
+    postShock[1] = preShockU - postShockU;
+}
+
+static void _ic2DSB(GridMPI& grid, ArgumentParser& parser)
+{
+    ///////////////////////////////////////////////////////////////////////////
+    // 2D Shock Bubble
+    ///////////////////////////////////////////////////////////////////////////
+    const double x0   = parser("-x0").asDouble(0.1);
+    const double mach = parser("-mach").asDouble(1.22);
+    const double rho2 = parser("-rho").asDouble(0.125);
+    const double rhob = parser("-rhobubble").asDouble(0.138);
+    const double u2   = parser("-u").asDouble(0.0);
+    const double p2   = parser("-p").asDouble(0.1);
+    const double pbub = parser("-pbubble").asDouble(0.1);
+    const double g1   = parser("-g1").asDouble(1.4);
+    const double g2   = parser("-g2").asDouble(1.67);
+    const double pc1  = parser("-pc1").asDouble(0.0);
+    const double pc2  = parser("-pc2").asDouble(0.0);
+
+    const Real pre_shock[3] = {rho2, u2, p2};
+    Real post_shock[3];
+    _getPostShockRatio(pre_shock, mach, g1, pc1, post_shock);
+    const double rho1 = post_shock[0];
+    const double u1   = post_shock[1];
+    const double p1   = post_shock[2];
+    printf("Post Shock Velocity = %f\n", u1);
+
+    EPSILON = (Real)(parser("-mollfactor").asInt(1))*sqrt(3.)*grid.getH();
+
+    const double G1 = g1-1;
+    const double G2 = g2-1;
+    const double F1 = g1*pc1;
+    const double F2 = g2*pc2;
+
+    vector<Real> Rb;       // radius of bubble
+    vector<vector<Real> > posb;  // position of bubble
+
+    // read bubbles from file
+    ifstream bubbleFile("bubbles.dat");
+    if (!bubbleFile.good())
+    {
+        cout << "Can not load bubble file './bubbles.dat'. ABORT" << endl;
+        exit(1);
+    }
+    unsigned int nb;
+    bubbleFile >> nb;
+    Rb.resize(nb);
+    posb.resize(nb);
+    for (int i = 0; i < nb; ++i)
+    {
+        if (!bubbleFile.good())
+        {
+            cout << "Error reading './bubbles.dat'. ABORT" << endl;
+            exit(1);
+        }
+        posb[i].resize(2);
+        bubbleFile >> posb[i][0];
+        bubbleFile >> posb[i][1];
+        bubbleFile >> Rb[i];
+    }
+    bubbleFile.close();
+
+    // init
+    typedef GridMPI::PRIM var;
+#pragma omp paralell for
+    for (int iz = 0; iz < GridMPI::sizeZ; ++iz)
+        for (int iy = 0; iy < GridMPI::sizeY; ++iy)
+            for (int ix = 0; ix < GridMPI::sizeX; ++ix)
+            {
+                double p[3];
+                grid.get_pos(ix, iy, iz, p);
+
+                // determine shock region
+                const Real shock = _heaviside(p[2] - x0);
+
+                // process all bubbles
+                Real bubble;
+                for (int i = 0; i < nb; ++i)
+                {
+                    const Real r = sqrt( pow(p[1] - posb[i][0], 2) + pow(p[2] - posb[i][1], 2) );
+                    bubble = _heaviside_smooth(r - Rb[i]);
+                    if (bubble > 0)
+                        break;
+                }
+
+                grid(ix, iy, iz, var::R) = shock*rho1 + (1 - shock)*(rhob*bubble + rho2*(1 - bubble));
+
+                // even if specified, bubbles have same IC velocity as
+                // bulk flow.
+                grid(ix, iy, iz, var::W) = (shock*u1 + (1-shock)*u2) * grid(ix, iy, iz, var::R);
+                grid(ix, iy, iz, var::V) = 0;
+                grid(ix, iy, iz, var::U) = 0;
+
+                // phase mix
+                grid(ix, iy, iz, var::G) = 1./G1*(1 - bubble) + 1./G2*bubble;
+                grid(ix, iy, iz, var::P) = F1/G1*(1 - bubble) + F2/G2*bubble;
+
+                // energy
+                const Real pressure  = shock*p1 + (1-shock)*(pbub*bubble + p2*(1 - bubble));
+                const Real ke = 0.5*(pow(grid(ix, iy, iz, var::U),2)+pow(grid(ix, iy, iz, var::V),2)+pow(grid(ix, iy, iz, var::W),2))/grid(ix, iy, iz, var::R);
+                grid(ix, iy, iz, var::E) = pressure*grid(ix, iy, iz, var::G) + grid(ix, iy, iz, var::P) + ke;
+            }
+}
+
+
 template <typename TGPU>
 static inline double _LSRKstep(const Real a, const Real b, const Real dtinvh, TGPU& gpu)
 {
@@ -141,6 +271,36 @@ class GPUlabSOD : public GPUlab
     public:
         GPUlabSOD(GridMPI& grid, const unsigned int nslices) : GPUlab(grid, nslices) { }
 };
+
+
+class GPUlabSB : public GPUlab
+{
+    protected:
+        void _apply_bc(const double t = 0)
+        {
+            /* BoundaryConditions<GridMPI> bc(grid.pdata(), current_iz, current_length); */
+            BoundaryConditions<GridMPI> bc(grid.pdata()); // call this constructor if all halos are fetched at one time
+            if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0, halomap_x<0,sizeY,3> >(halox.left);
+            if (myFeature[1] == SKIN) bc.template applyBC_absorbing<0,1, halomap_x<0,sizeY,3> >(halox.right);
+            if (myFeature[2] == SKIN) bc.template applyBC_reflecting<1,0, halomap_y<0,sizeX,3> >(haloy.left);
+            if (myFeature[3] == SKIN) bc.template applyBC_reflecting<1,1, halomap_y<0,sizeX,3> >(haloy.right);
+            if (myFeature[4] == SKIN) bc.template applyBC_absorbing<2,0, halomap_z<0,sizeX,sizeY> >(haloz.left);
+            if (myFeature[5] == SKIN) bc.template applyBC_absorbing<2,1, halomap_z<0,sizeX,sizeY> >(haloz.right);
+        }
+
+    public:
+        GPUlabSB(GridMPI& grid, const unsigned int nslices) : GPUlab(grid, nslices) { }
+};
+
+/* typedef GPUlabSOD Lab; */
+typedef GPUlabSB Lab;
+
+
+const char *_make_fname(char *fname, const char *base, const int fcount)
+{
+    sprintf(fname, "%s_%04d", base, fcount);
+    return fname;
+}
 
 
 
@@ -171,20 +331,19 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     /* _icCONST(mygrid, world_rank+1); */
     /* _ic123(mygrid); */
-    _icSOD(mygrid, parser);
-    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, "IC"); */
+    /* _icSOD(mygrid, parser); */
+    _ic2DSB(mygrid, parser);
+
+    unsigned int fcount = 0;
+    char fname[256];
+    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, _make_fname(fname, "data", fcount++));
 
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
     const size_t chunk_slices = 64;
-    GPUlabSOD myGPU(mygrid, chunk_slices);
-    /* GPUlab myGPU(mygrid, chunk_slices); */
-
+    Lab myGPU(mygrid, chunk_slices);
     /* myGPU.toggle_verbosity(); */
-
-    typedef GPUlabSOD Lab;
-    /* typedef GPUlab Lab; */
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
@@ -197,7 +356,7 @@ int main(int argc, const char *argv[])
 
     const double h = mygrid.getH();
     float sos;
-    double t = 0, dt;
+    double t = 0, dt, tlast = 0;
     unsigned int step = 0;
 
     while (t < tend)
@@ -210,6 +369,8 @@ int main(int argc, const char *argv[])
         dt = cfl*h/sos;
         dt = (tend-t) < dt ? (tend-t) : dt;
         MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, mygrid.getCartComm());
+
+        dt = 0.0005;
 
         // 2.) Compute RHS and update using LSRK3
         double trk1, trk2, trk3;
@@ -235,11 +396,16 @@ int main(int argc, const char *argv[])
 
         printf("step id is %d, physical time %f (dt = %f)\n", step, t, dt);
 
-        if (step == nsteps)
-            break;
+        if ((t-tlast)*1000 > 1.0 && (int)(t*1000) % 6 == 0)
+        {
+            tlast = t;
+            DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++));
+        }
+
+        if (step == nsteps) break;
     }
 
-    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, "final");
+    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++));
 
     // good night
     MPI_Finalize();

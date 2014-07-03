@@ -30,7 +30,7 @@ protected:
     const unsigned int startZ, deltaZ;
     typedef unsigned int (*index_map)(const int ix, const int iy, const int iz);
 
-    template<int dir, int side>
+    template<int dir>
     void _setup()
     {
         s[0] =  0;
@@ -63,13 +63,14 @@ public:
     template<int dir, int side, index_map map>
     void applyBC_absorbing(std::vector<Real *>& halo)
     {
-        _setup<dir,side>();
+        _setup<dir>();
 
 #pragma omp parallel for
         for (int p = 0; p < TGrid::NVAR; ++p)
         {
             Real * const phalo = halo[p];
             const Real * const psrc = pdata[p];
+
             for(int iz=s[2]; iz<e[2]; iz++)
                 for(int iy=s[1]; iy<e[1]; iy++)
                     for(int ix=s[0]; ix<e[0]; ix++)
@@ -79,6 +80,33 @@ public:
                                 dir==0? (side==0? 0:TGrid::sizeX-1):ix,
                                 dir==1? (side==0? 0:TGrid::sizeY-1):iy,
                                 dir==2? (side==0? 0:TGrid::sizeZ-1):iz);
+                    }
+        }
+    }
+
+
+    template<int dir, int side, index_map map>
+    void applyBC_reflecting(std::vector<Real *>& halo)
+    {
+        _setup<dir>();
+
+        const Real fac[TGrid::NVAR] = {1, ((dir==0)? -1:1), ((dir==1)? -1:1), ((dir==2)? -1:1), 1, 1, 1};
+
+#pragma omp parallel for
+        for (int p = 0; p < TGrid::NVAR; ++p)
+        {
+            Real * const phalo = halo[p];
+            const Real * const psrc = pdata[p];
+
+            for(int iz=s[2]; iz<e[2]; iz++)
+                for(int iy=s[1]; iy<e[1]; iy++)
+                    for(int ix=s[0]; ix<e[0]; ix++)
+                    {
+                        // iz-startZ to operate on an arbitrary chunk
+                        phalo[map(ix, iy, iz-startZ)] = fac[p] * (*this)(psrc,
+                                dir==0? (side==0? 2-ix:TGrid::sizeX-1-ix):ix,
+                                dir==1? (side==0? 2-iy:TGrid::sizeY-1-iy):iy,
+                                dir==2? (side==0? 2-iz:TGrid::sizeZ-1-iz):iz);
                     }
         }
     }
@@ -162,28 +190,6 @@ public:
     /*     } */
     /* } */
 
-    /* template<int dir, int side> */
-    /* void applyBC_reflecting() */
-    /* { */
-    /*     _setup<dir,side>(); */
-
-    /*     for(int iz=s[2]; iz<e[2]; iz++) */
-    /*         for(int iy=s[1]; iy<e[1]; iy++) */
-    /*             for(int ix=s[0]; ix<e[0]; ix++) */
-    /*             { */
-    /*                 TElement source = (*this)(dir==0? (side==0? -ix-1:2*TBlock::sizeX-ix-1):ix, */
-    /*                                           dir==1? (side==0? -iy-1:2*TBlock::sizeY-iy-1):iy, */
-    /*                                           dir==2? (side==0? -iz-1:2*TBlock::sizeZ-iz-1):iz); */
-
-    /*                 (*this)(ix,iy,iz).rho      = source.rho; */
-    /*                 (*this)(ix,iy,iz).u        = ((dir==0)? -1:1)*source.u; */
-    /*                 (*this)(ix,iy,iz).v        = ((dir==1)? -1:1)*source.v; */
-    /*                 (*this)(ix,iy,iz).w        = ((dir==2)? -1:1)*source.w; */
-    /*                 (*this)(ix,iy,iz).energy   = source.energy; */
-    /*                 (*this)(ix,iy,iz).G = source.G; */
-    /*                 (*this)(ix,iy,iz).P = source.P; */
-    /*             } */
-    /* } */
 
     /* template<int dir, int side> */
     /* void applyBC_dirichlet(const TElement& p) */
