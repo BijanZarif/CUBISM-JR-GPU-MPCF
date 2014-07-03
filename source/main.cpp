@@ -149,11 +149,11 @@ static void _ic2DSB(GridMPI& grid, ArgumentParser& parser)
     ///////////////////////////////////////////////////////////////////////////
     const double x0   = parser("-x0").asDouble(0.1);
     const double mach = parser("-mach").asDouble(1.22);
-    const double rho2 = parser("-rho").asDouble(0.125);
+    const double rho2 = parser("-rho").asDouble(1);
     const double rhob = parser("-rhobubble").asDouble(0.138);
     const double u2   = parser("-u").asDouble(0.0);
-    const double p2   = parser("-p").asDouble(0.1);
-    const double pbub = parser("-pbubble").asDouble(0.1);
+    const double p2   = parser("-p").asDouble(1);
+    const double pbub = parser("-pbubble").asDouble(1);
     const double g1   = parser("-g1").asDouble(1.4);
     const double g2   = parser("-g2").asDouble(1.67);
     const double pc1  = parser("-pc1").asDouble(0.0);
@@ -292,8 +292,8 @@ class GPUlabSB : public GPUlab
         GPUlabSB(GridMPI& grid, const unsigned int nslices) : GPUlab(grid, nslices) { }
 };
 
-typedef GPUlabSOD Lab;
-/* typedef GPUlabSB Lab; */
+/* typedef GPUlabSOD Lab; */
+typedef GPUlabSB Lab;
 
 
 const char *_make_fname(char *fname, const char *base, const int fcount)
@@ -331,8 +331,8 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     /* _icCONST(mygrid, world_rank+1); */
     /* _ic123(mygrid); */
-    _icSOD(mygrid, parser);
-    /* _ic2DSB(mygrid, parser); */
+    /* _icSOD(mygrid, parser); */
+    _ic2DSB(mygrid, parser);
 
     unsigned int fcount = 0;
     char fname[256];
@@ -341,7 +341,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t chunk_slices = 32;
+    const size_t chunk_slices = 64;
     Lab myGPU(mygrid, chunk_slices);
     /* myGPU.toggle_verbosity(); */
 
