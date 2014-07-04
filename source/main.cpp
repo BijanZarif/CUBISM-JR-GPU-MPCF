@@ -233,7 +233,7 @@ int main(int argc, const char *argv[])
         t += dt;
         ++step;
 
-        printf("step id is %d, time %f\n", step, t);
+        printf("step id is %d, physical time %f\n", step, t);
 
         if (step == nsteps)
             break;

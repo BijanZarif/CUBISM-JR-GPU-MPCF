@@ -43,6 +43,7 @@ int* d_maxSOS; // device, mapped (different address)
 // use non-null stream (async)
 cudaStream_t stream1;
 cudaStream_t stream2;
+cudaStream_t stream3;
 
 // events
 cudaEvent_t divergence_completed;
@@ -141,6 +142,7 @@ extern "C"
         // create stream
         cudaStreamCreate(&stream1);
         cudaStreamCreate(&stream2);
+        cudaStreamCreate(&stream3);
 
         // create event
         cudaEventCreate(&divergence_completed);
@@ -211,6 +213,7 @@ extern "C"
         // destroy stream
         cudaStreamDestroy(stream1);
         cudaStreamDestroy(stream2);
+        cudaStreamDestroy(stream3);
 
         // destroy events
         cudaEventDestroy(divergence_completed);
@@ -271,16 +274,16 @@ extern "C"
     void GPU::h2d_tmp(const RealPtrVec_t& src, const uint_t N)
     {
 #ifndef _MUTE_GPU_
-        cudaStreamWaitEvent(stream2, h2d_3Darray_completed, 0);
+        cudaStreamWaitEvent(stream3, h2d_3Darray_completed, 0);
 
         GPUtimer upload;
-        upload.start(stream2);
+        upload.start(stream3);
         for (int i = 0; i < VSIZE; ++i)
-            cudaMemcpyAsync(d_tmp[i], src[i], N*sizeof(Real), cudaMemcpyHostToDevice, stream2);
-        upload.stop(stream2);
+            cudaMemcpyAsync(d_tmp[i], src[i], N*sizeof(Real), cudaMemcpyHostToDevice, stream3);
+        upload.stop(stream3);
         upload.print("[GPU UPLOAD TMP]: ");
 
-        cudaEventRecord(h2d_tmp_completed, stream2);
+        cudaEventRecord(h2d_tmp_completed, stream3);
 #endif
     }
 
