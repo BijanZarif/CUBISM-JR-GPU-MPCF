@@ -177,7 +177,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t chunk_slices = 4;
+    const size_t chunk_slices = 64;
     GPUlabSOD myGPU(mygrid, chunk_slices);
     /* GPUlab myGPU(mygrid, chunk_slices); */
 
