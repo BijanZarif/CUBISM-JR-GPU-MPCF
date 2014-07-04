@@ -96,7 +96,7 @@ static void _icSOD(GridMPI& grid, ArgumentParser& parser)
                 grid.get_pos(ix, iy, iz, pos);
 
                 // set up along x
-                bool x = pos[1] < x0;
+                bool x = pos[2] < x0;
 
                 const double r = x * rho1 + !x * rho2;
                 const double p = x * p1   + !x * p2;
@@ -109,9 +109,9 @@ static void _icSOD(GridMPI& grid, ArgumentParser& parser)
                 assert(P >= 0);
 
                 grid(ix, iy, iz, var::R) = r;
-                grid(ix, iy, iz, var::V) = u;
+                grid(ix, iy, iz, var::W) = u;
+                grid(ix, iy, iz, var::V) = 0;
                 grid(ix, iy, iz, var::U) = 0;
-                grid(ix, iy, iz, var::W) = 0;
                 grid(ix, iy, iz, var::E) = G*p + P + 0.5*u*u/r;
                 grid(ix, iy, iz, var::G) = G;
                 grid(ix, iy, iz, var::P) = P;
@@ -181,7 +181,7 @@ static void _ic2DSB(GridMPI& grid, ArgumentParser& parser)
     ifstream bubbleFile("bubbles.dat");
     if (!bubbleFile.good())
     {
-        cout << "Can not load bubble file './bubbles.dat'. ABORT" << endl;
+        fprintf(stderr, "Can not load bubble file './bubbles.dat'. ABORT");
         exit(1);
     }
     unsigned int nb;
@@ -192,7 +192,7 @@ static void _ic2DSB(GridMPI& grid, ArgumentParser& parser)
     {
         if (!bubbleFile.good())
         {
-            cout << "Error reading './bubbles.dat'. ABORT" << endl;
+            fprintf(stderr, "Error reading './bubbles.dat'. ABORT");
             exit(1);
         }
         posb[i].resize(2);
@@ -292,8 +292,8 @@ class GPUlabSB : public GPUlab
         GPUlabSB(GridMPI& grid, const unsigned int nslices) : GPUlab(grid, nslices) { }
 };
 
-/* typedef GPUlabSOD Lab; */
-typedef GPUlabSB Lab;
+typedef GPUlabSOD Lab;
+/* typedef GPUlabSB Lab; */
 
 
 const char *_make_fname(char *fname, const char *base, const int fcount)
@@ -331,8 +331,8 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     /* _icCONST(mygrid, world_rank+1); */
     /* _ic123(mygrid); */
-    /* _icSOD(mygrid, parser); */
-    _ic2DSB(mygrid, parser);
+    _icSOD(mygrid, parser);
+    /* _ic2DSB(mygrid, parser); */
 
     unsigned int fcount = 0;
     char fname[256];
@@ -341,7 +341,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t chunk_slices = 64;
+    const size_t chunk_slices = 128;
     Lab myGPU(mygrid, chunk_slices);
     /* myGPU.toggle_verbosity(); */
 
