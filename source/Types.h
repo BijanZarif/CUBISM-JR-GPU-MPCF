@@ -18,6 +18,9 @@ typedef float Real;
 typedef double Real;
 #endif
 
+typedef std::vector<Real *> RealPtrVec_t;
+typedef unsigned int uint_t;
+
 
 struct StreamerGridPointIterative //dummy
 {

@@ -212,6 +212,7 @@ void GPUlab::_start_info_current_chunk(const std::string title)
 ///////////////////////////////////////////////////////////////////////////////
 void GPUlab::load_ghosts(const double t)
 {
+    // TODO: THIS NEEDS THOROUGH TESTING!
 
     if (myFeature[0] == FLESH) _copysend_halos< halomap_x<0,sizeY,3>        >(0, &halox.send_left[0], halox.Nhalo, 0, 3, 0, sizeY, 0, sizeZ);
     if (myFeature[1] == FLESH) _copysend_halos< halomap_x<-sizeX+3,sizeY,3> >(1, &halox.send_right[0],halox.Nhalo, sizeX-3, sizeX, 0, sizeY, 0, sizeZ);

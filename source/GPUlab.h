@@ -125,13 +125,17 @@ class GPUlab
             const uint_t _sizeIn, _sizeOut;
             uint_t Nxghost, Nyghost; // may change depending on last chunk
 
-            // Tmp storage for GPU input data SoA representation
-            cuda_vector_t SOA_all;
-            RealPtrVec_t SOA;
+            // Tmp storage for GPU input data
+            cuda_vector_t SOAin_all;
+            RealPtrVec_t SOAin;
 
-            // Tmp storage for GPU tmp SoA representation
-            cuda_vector_t tmpSOA_all;
-            RealPtrVec_t tmpSOA;
+            // Tmp storage for GPU tmp
+            cuda_vector_t SOAtmp_all;
+            RealPtrVec_t SOAtmp;
+
+            // Tmp storage for GPU output data (updated solution)
+            cuda_vector_t SOAout_all;
+            RealPtrVec_t SOAout;
 
             // compact ghosts
             cuda_vector_t xyghost_all;
@@ -140,16 +144,18 @@ class GPUlab
             HostBuffer(const uint_t sizeIn, const uint_t sizeOut, const uint_t sizeXghost, const uint_t sizeYghost) :
                 _sizeIn(sizeIn), _sizeOut(sizeOut),
                 Nxghost(sizeXghost), Nyghost(sizeYghost),
-                SOA_all(NVAR*sizeIn, 0.0), SOA(NVAR, NULL),
-                tmpSOA_all(NVAR*sizeOut, 0.0), tmpSOA(NVAR, NULL),
+                SOAin_all(NVAR*sizeIn, 0.0), SOAin(NVAR, NULL),
+                SOAtmp_all(NVAR*sizeOut, 0.0), SOAtmp(NVAR, NULL),
+                SOAout_all(NVAR*sizeOut, 0.0), SOAout(NVAR, NULL),
                 xyghost_all(2*NVAR*sizeXghost + 2*NVAR*sizeYghost, 0.0),
                 xghost_l(NVAR, NULL), xghost_r(NVAR, NULL),
                 yghost_l(NVAR, NULL), yghost_r(NVAR, NULL)
             {
                 for (uint_t i = 0; i < NVAR; ++i)
                 {
-                    SOA[i]    = &SOA_all[i * sizeIn];
-                    tmpSOA[i] = &tmpSOA_all[i * sizeOut];
+                    SOAin[i]  = &SOAin_all[i * sizeIn];
+                    SOAtmp[i] = &SOAtmp_all[i * sizeOut];
+                    SOAout[i] = &SOAout_all[i * sizeOut];
                 }
                 realign_ghost_pointer(sizeXghost, sizeYghost);
             }
@@ -231,7 +237,7 @@ class GPUlab
             // 1.)
             ///////////////////////////////////////////////////////////////////
             /* GPU::h2d_3DArray(buffer->SOA, sizeX, sizeY, current_length); */
-            GPU::h2d_3DArray(buffer->SOA, sizeX, sizeY, CHUNK_LENGTH);
+            GPU::h2d_3DArray(buffer->SOAin, sizeX, sizeY, CHUNK_LENGTH);
 
             ///////////////////////////////////////////////////////////////////
             // 2.)
@@ -258,22 +264,25 @@ class GPUlab
             ///////////////////////////////////////////////////////////////////
             const uint_t OFFSET = SLICE_GPU * current_iz;
             timer.start();
-            switch (chunk_state)
-            {
-                case FIRST: // Pre-computes for rhs coputation after maxSOS
-                    // interior + right ghosts
-                    _copy_range(buffer->SOA, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length + haloz.Nhalo);
-                    break;
 
-                case SINGLE: // Pre-computes for rhs computation after maxSOS
-                    // interior only
-                    _copy_range(buffer->SOA, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length);
-                    break;
+            _copy_range(buffer->SOAin, 0, src, OFFSET, SLICE_GPU * current_length);
 
-                default: // Pre-computes next chunk for maxSOS
-                    _copy_range(buffer->SOA, 0, src, OFFSET, SLICE_GPU * current_length);
-                    break;
-            }
+            /* switch (chunk_state) */
+            /* { */
+            /*     /1* case FIRST: // Pre-copy for rhs coputation after maxSOS *1/ */
+            /*     /1*     // interior + right ghosts *1/ */
+            /*     /1*     _copy_range(buffer->SOAin, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length + haloz.Nhalo); *1/ */
+            /*     /1*     break; *1/ */
+
+            /*     /1* case SINGLE: // Pre-copy for rhs computation after maxSOS *1/ */
+            /*     /1*     // interior only *1/ */
+            /*     /1*     _copy_range(buffer->SOAin, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length); *1/ */
+            /*     /1*     break; *1/ */
+
+            /*     /1* default: // copy next chunk for maxSOS *1/ */
+            /*     /1*     _copy_range(buffer->SOAin, 0, src, OFFSET, SLICE_GPU * current_length); *1/ */
+            /*     /1*     break; *1/ */
+            /* } */
             const double t1 = timer.stop();
             if (chatty) printf("\t[COPY SRC CHUNK %d TAKES %f sec]\n", current_chunk_id, t1);
 
@@ -299,7 +308,7 @@ class GPUlab
              * 8.)  Download GPU rhs of previous chunk into previous buffer (downloaded on TMP stream)
              * 9.)  Download GPU updated solution of previous chunk into previous buffer (downloaded on TMP stream)
              * 10.) Compute x/yghosts of new chunk and upload to GPU (overlaps download of 8-9, uploaded on MAIN stream)
-             * 11.) Upload GPU input of new chunk (3DArrays, overlaps download of 8-9, uploaded on MAIN stream)
+             *      Upload GPU input of new chunk (3DArrays, overlaps download of 8-9, uploaded on MAIN stream)
              * */
 
             Timer timer;
@@ -309,7 +318,7 @@ class GPUlab
             ///////////////////////////////////////////////////////////////////
             uint_t OFFSET = SLICE_GPU * current_iz;
             timer.start();
-            _copy_range(buffer->tmpSOA, 0, tmp, OFFSET, SLICE_GPU * current_length);
+            _copy_range(buffer->SOAtmp, 0, tmp, OFFSET, SLICE_GPU * current_length);
             const double t1 = timer.stop();
             if (chatty)
                 printf("\t[COPY TMP CHUNK %d TAKES %f sec]\n", current_chunk_id, t1);
@@ -317,8 +326,8 @@ class GPUlab
             ///////////////////////////////////////////////////////////////////
             // 2.)
             ///////////////////////////////////////////////////////////////////
-            /* GPU::h2d_tmp(buffer->tmpSOA, SLICE_GPU * current_length); */
-            GPU::h2d_tmp(buffer->tmpSOA, GPU_output_size);
+            /* GPU::h2d_tmp(buffer->SOAtmp, SLICE_GPU * current_length); */
+            GPU::h2d_tmp(buffer->SOAtmp, GPU_output_size);
 
             ///////////////////////////////////////////////////////////////////
             // 3.)
@@ -340,28 +349,29 @@ class GPUlab
             ///////////////////////////////////////////////////////////////////
             switch (chunk_state)
             {
-                // Since operations are on previous chunk, this must only
-                // be done on INTERMEDIATE or LAST chunks.  The SOA->AOS
-                // copy back of SINGLE and (actual) LAST chunks must be
-                // done after _process_chunk has finished.  The next
-                // lab.load() operation requires a fully updated domain.
+                // Since operations are on previous chunk, this must only be
+                // done on INTERMEDIATE or LAST chunks.  The SOA->AOS copy back
+                // of SINGLE and (actual) LAST chunks must be done after
+                // _process_chunk has finished processing all chunks.
                 case INTERMEDIATE:
-                case LAST: // operations are on chunk one before LAST!
+                case LAST: // operations are on chunk one before LAST (because of use of previous_buffer)!
                     const uint_t prevOFFSET = SLICE_GPU * previous_iz;
 
                     GPU::d2h_rhs_wait(); // make sure previous d2h has finished
                     timer.start();
-                    _copy_range(tmp, prevOFFSET, previous_buffer->tmpSOA, 0, SLICE_GPU * previous_length);
+                    _copy_range(tmp, prevOFFSET, previous_buffer->SOAtmp, 0, SLICE_GPU * previous_length);
                     const double t4 = timer.stop();
                     if (chatty)
                         printf("\t[COPY BACK TMP CHUNK %d TAKES %f sec]\n", previous_chunk_id, t4);
 
                     GPU::d2h_tmp_wait();
                     timer.start();
-                    _copy_range(src, prevOFFSET, previous_buffer->SOA, 0, SLICE_GPU * previous_length);
+                    _copy_range(src, prevOFFSET, previous_buffer->SOAout, 0, SLICE_GPU * previous_length);
                     const double t2 = timer.stop();
                     if (chatty)
-                        printf("\t[COPY BACK SRC CHUNK %d TAKES %f sec]\n", previous_chunk_id, t2);
+                        printf("\t[COPY BACK OUTPUT CHUNK %d TAKES %f sec]\n", previous_chunk_id, t2);
+
+                    break;
             }
             if (chatty) _end_info_current_chunk();
 
@@ -384,22 +394,23 @@ class GPUlab
             timer.start();
             switch (chunk_state)
             {
-                // Prepare interior nodes for the next call to _process_all.
-                // The ghosts are copied later, once the new Lab has been
-                // loaded.
-                case FIRST:
-                    // interior + right ghosts
-                    _copy_range(buffer->SOA, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length + haloz.Nhalo);
-                    break;
+                /* // Prepare interior nodes for the next call to _process_all. */
+                /* // The ghosts are copied later, once the new Lab has been */
+                /* // loaded. */
+                /* case FIRST: */
+                /*     // interior + right ghosts */
+                /*     printf("copy FIRST\n"); */
+                /*     _copy_range(buffer->SOAin, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length + haloz.Nhalo); */
+                /*     break; */
 
                 case INTERMEDIATE:
                     {
                         // left ghosts (reuse previous buffer)
                         const uint_t prevOFFSET = SLICE_GPU * previous_length;
-                        _copy_range(buffer->SOA, 0, previous_buffer->SOA, prevOFFSET, haloz.Nhalo);
+                        _copy_range(buffer->SOAin, 0, previous_buffer->SOAin, prevOFFSET, haloz.Nhalo);
 
                         // interior + right ghosts
-                        _copy_range(buffer->SOA, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length + haloz.Nhalo);
+                        _copy_range(buffer->SOAin, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length + haloz.Nhalo);
                         break;
                     }
 
@@ -407,14 +418,14 @@ class GPUlab
                     {
                         // left ghosts (reuse previous buffer)
                         const uint_t prevOFFSET = SLICE_GPU * previous_length;
-                        _copy_range(buffer->SOA, 0, previous_buffer->SOA, prevOFFSET, haloz.Nhalo);
+                        _copy_range(buffer->SOAin, 0, previous_buffer->SOAin, prevOFFSET, haloz.Nhalo);
 
                         // interior
-                        _copy_range(buffer->SOA, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length);
+                        _copy_range(buffer->SOAin, haloz.Nhalo, src, OFFSET, SLICE_GPU * current_length);
 
                         // right ghosts
                         const uint_t current_rightOFFSET = haloz.Nhalo + SLICE_GPU * current_length;
-                        _copy_range(buffer->SOA, current_rightOFFSET, haloz.right, 0, haloz.Nhalo);
+                        _copy_range(buffer->SOAin, current_rightOFFSET, haloz.right, 0, haloz.Nhalo);
                         break;
                     }
             }
@@ -425,17 +436,17 @@ class GPUlab
             ///////////////////////////////////////////////////////////////////
             // 8.)
             ///////////////////////////////////////////////////////////////////
-            /* GPU::d2h_rhs(previous_buffer->tmpSOA, SLICE_GPU * previous_length); */
-            GPU::d2h_rhs(previous_buffer->tmpSOA, GPU_output_size);
+            /* GPU::d2h_rhs(previous_buffer->SOAtmp, SLICE_GPU * previous_length); */
+            GPU::d2h_rhs(previous_buffer->SOAtmp, GPU_output_size);
 
             ///////////////////////////////////////////////////////////////////
             // 9.)
             ///////////////////////////////////////////////////////////////////
-            /* GPU::d2h_tmp(previous_buffer->SOA, SLICE_GPU * previous_length); */
-            GPU::d2h_tmp(previous_buffer->SOA, GPU_output_size);
+            /* GPU::d2h_tmp(previous_buffer->SOAout, SLICE_GPU * previous_length); */
+            GPU::d2h_tmp(previous_buffer->SOAout, GPU_output_size);
 
             ///////////////////////////////////////////////////////////////////
-            // 11.)
+            // 10.)
             ///////////////////////////////////////////////////////////////////
             switch (chunk_state)
             {
@@ -445,8 +456,9 @@ class GPUlab
                     GPU::upload_xy_ghosts(buffer->Nxghost, buffer->xghost_l, buffer->xghost_r,
                                           buffer->Nyghost, buffer->yghost_l, buffer->yghost_r);
 
-                    /* GPU::h2d_3DArray(buffer->SOA, sizeX, sizeY, current_length+6); */
-                    GPU::h2d_3DArray(buffer->SOA, sizeX, sizeY, CHUNK_LENGTH+6);
+                    /* GPU::h2d_3DArray(buffer->SOAin, sizeX, sizeY, current_length+6); */
+                    GPU::h2d_3DArray(buffer->SOAin, sizeX, sizeY, CHUNK_LENGTH+6);
+
                     break;
             }
         }
@@ -539,7 +551,7 @@ class GPUlab
             ///////////////////////////////////////////////////////////////
             Timer timer;
             timer.start();
-            _copy_range(buffer->SOA, 0, src, 0, SLICE_GPU * current_length);
+            _copy_range(buffer->SOAin, 0, src, 0, SLICE_GPU * current_length);
             const double t1 = timer.stop();
             if (chatty)
             {
@@ -561,6 +573,8 @@ class GPUlab
             ///////////////////////////////////////////////////////////////
             this->_syncStream(GPU::streamID::S1);
 
+            // maxSOS should be unsigned int, no?
+            assert(sizeof(float) == sizeof(int));
             union {float f; int i;} ret;
             ret.i = *maxSOS;
             sos   = ret.f;
@@ -574,11 +588,10 @@ class GPUlab
         {
             /* *
              * 1.) Extract x/yghosts for current chunk and upload to GPU
-             * 2.) Copy left (and right for SINGLE) ghosts (hidden by 1.)
+             * 2.) Copy ghosts and interior data into buffer for FIRST/SINGLE chunk
              * 3.) Upload GPU input for FIRST/SINGLE chunk (3DArrays)
              * 4.) Process all chunks
-             * 5.) SOA->AOS of GPU updated solution for LAST/SINGLE chunk
-             * 6.) If chunk is SINGLE: AOS->SOA of interior nodes (can not be hidden for SINGLE case)
+             * 5.) Copy back of GPU updated solution for LAST/SINGLE chunk
              * */
 
             RealPtrVec_t& src = grid.pdata();
@@ -604,27 +617,30 @@ class GPUlab
             ///////////////////////////////////////////////////////////////
             // 2.)
             ///////////////////////////////////////////////////////////////
-            // copy left ghosts always (CAN BE DONE BE MPI RECV)
-            _copy_range(buffer->SOA, 0, haloz.left, 0, haloz.Nhalo);
+            Timer timer;
+            uint_t Nelements = SLICE_GPU * current_length;
 
-            // right ghosts are conditional
-            switch (chunk_state)
+            // copy left ghosts always (CAN BE DONE BY MPI RECV)
+            _copy_range(buffer->SOAin, 0, haloz.left, 0, haloz.Nhalo);
+            switch (chunk_state) // right ghosts are conditional
             {
+                case FIRST: Nelements += haloz.Nhalo; break;
                 case SINGLE:
-                    const uint_t OFFSET = haloz.Nhalo + SLICE_GPU * current_length;
-                    _copy_range(buffer->SOA, OFFSET, haloz.right, 0, haloz.Nhalo);
+                    _copy_range(buffer->SOAin, haloz.Nhalo + Nelements, haloz.right, 0, haloz.Nhalo);
                     break;
             }
 
-            /* for (int i = 0; i < haloz.Nhalo; ++i) */
-            /*     printf("%f ", haloz.right[0][i]); */
-            /* printf("\n"); */
+            // interior data
+            timer.start();
+            _copy_range(buffer->SOAin, haloz.Nhalo, src, 0, Nelements);
+            const double t1 = timer.stop();
+            if (chatty) printf("\t[COPY SRC CHUNK %d TAKES %f sec]\n", current_chunk_id, t1);
 
             ///////////////////////////////////////////////////////////////
             // 3.)
             ///////////////////////////////////////////////////////////////
-            /* GPU::h2d_3DArray(buffer->SOA, sizeX, sizeY, current_length+6); */
-            GPU::h2d_3DArray(buffer->SOA, sizeX, sizeY, CHUNK_LENGTH+6);
+            /* GPU::h2d_3DArray(buffer->SOAin, sizeX, sizeY, current_length+6); */
+            GPU::h2d_3DArray(buffer->SOAin, sizeX, sizeY, CHUNK_LENGTH+6);
 
             ///////////////////////////////////////////////////////////////
             // 4.)
@@ -635,44 +651,24 @@ class GPUlab
             ///////////////////////////////////////////////////////////////
             // 5.)
             ///////////////////////////////////////////////////////////////
-            Timer timer;
             const uint_t prevOFFSET = SLICE_GPU * previous_iz;
 
             // GPU rhs into tmp (d2h finishes first for rhs)
             GPU::d2h_rhs_wait();
             timer.start();
-            _copy_range(tmp, prevOFFSET, previous_buffer->tmpSOA, 0, SLICE_GPU * previous_length);
-            const double t4 = timer.stop();
+            _copy_range(tmp, prevOFFSET, previous_buffer->SOAtmp, 0, SLICE_GPU * previous_length);
+            const double t2 = timer.stop();
             if (chatty)
-                printf("\t[COPY BACK TMP CHUNK %d TAKES %f sec]\n", previous_chunk_id, t4);
+                printf("\t[COPY BACK TMP CHUNK %d TAKES %f sec]\n", previous_chunk_id, t2);
 
             // GPU update into src (a.k.a updated flow data)
             GPU::d2h_tmp_wait();
             timer.start();
-            _copy_range(src, prevOFFSET, previous_buffer->SOA, 0, SLICE_GPU * previous_length);
-            const double t1 = timer.stop();
+            _copy_range(src, prevOFFSET, previous_buffer->SOAout, 0, SLICE_GPU * previous_length);
+            const double t3 = timer.stop();
             if (chatty)
-                printf("\t[COPY BACK SRC CHUNK %d TAKES %f sec]\n", previous_chunk_id, t1);
+                printf("\t[COPY BACK OUTPUT CHUNK %d TAKES %f sec]\n", previous_chunk_id, t3);
 
-
-            /* for (int i = 0; i < haloz.Nhalo; ++i) */
-            /*     /1* printf("%f ", src[0][SLICE_GPU*125 + i]); *1/ */
-            /*     printf("%f ", previous_buffer->SOA[0][SLICE_GPU*61 + i]); */
-            /* printf("\n"); */
-
-            ///////////////////////////////////////////////////////////////
-            // 6.)
-            ///////////////////////////////////////////////////////////////
-            switch (chunk_state)
-            {
-                case SINGLE:
-                    timer.start();
-                    _copy_range(buffer->SOA, haloz.Nhalo, src, 0, SLICE_GPU * current_length);
-                    const double t3 = timer.stop();
-                    if (chatty)
-                        printf("\t[COPY SRC CHUNK %d TAKES %f sec]\n", current_chunk_id, t3);
-                    break;
-            }
             if (chatty) _end_info_current_chunk();
 
             return tall.stop();

@@ -7,10 +7,7 @@
 #pragma once
 
 #include "Types.h"
-#include <vector>
 
-typedef unsigned int uint_t;
-typedef std::vector<Real *> RealPtrVec_t;
 
 // use these declarations to interface with the GPU from the host
 namespace GPU

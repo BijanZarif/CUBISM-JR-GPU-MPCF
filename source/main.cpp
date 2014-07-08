@@ -21,12 +21,31 @@ using namespace std;
 /* #include "SerializerIO_WaveletCompression_MPI_Simple.h" */
 
 #include "MaxSpeedOfSound_CUDA.h"
+#include "MaxSpeedOfSound.h"
 #include "Convection_CUDA.h"
 #include "Update_CUDA.h"
 #include "BoundaryConditions.h"
 
 
 // Helper
+template <typename Ksos>
+static double _maxSOS(const RealPtrVec_t& src, float& sos)
+{
+    Ksos kernel;
+    Timer tsos;
+    tsos.start();
+    sos = kernel.compute(src);
+    return tsos.stop();
+}
+
+
+template <typename Ksos>
+static double _maxSOS(GPUlab * const myGPU, float& sos)
+{
+    return myGPU->template max_sos<Ksos>(sos);
+}
+
+
 static void _icCONST(GridMPI& grid, const Real val = 0)
 {
     typedef GridMPI::PRIM var;
@@ -96,8 +115,8 @@ static void _icSOD(GridMPI& grid, ArgumentParser& parser)
                 grid.get_pos(ix, iy, iz, pos);
 
                 // set up along x
-                /* bool x = pos[2] < x0; */
-                bool x = pos[0] > x0;
+                bool x = pos[2] < x0;
+                /* bool x = pos[2] > x0; */
 
                 const double r = x * rho1 + !x * rho2;
                 const double p = x * p1   + !x * p2;
@@ -110,9 +129,9 @@ static void _icSOD(GridMPI& grid, ArgumentParser& parser)
                 assert(P >= 0);
 
                 grid(ix, iy, iz, var::R) = r;
-                grid(ix, iy, iz, var::U) = u;
+                grid(ix, iy, iz, var::W) = u;
                 grid(ix, iy, iz, var::V) = 0;
-                grid(ix, iy, iz, var::W) = 0;
+                grid(ix, iy, iz, var::U) = 0;
                 grid(ix, iy, iz, var::E) = G*p + P + 0.5*u*u/r;
                 grid(ix, iy, iz, var::G) = G;
                 grid(ix, iy, iz, var::P) = P;
@@ -342,7 +361,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t chunk_slices = 64;
+    const size_t chunk_slices = 128;
     Lab myGPU(mygrid, chunk_slices);
     /* myGPU.toggle_verbosity(); */
 
@@ -363,7 +382,8 @@ int main(int argc, const char *argv[])
     while (t < tend)
     {
         // 1.) Compute max SOS -> dt
-        const double tsos = myGPU.template max_sos<MaxSpeedOfSound_CUDA>(sos);
+        const double tsos = _maxSOS<MaxSpeedOfSound_CUDA>(&myGPU, sos);
+        /* const double tsos = _maxSOS<MaxSpeedOfSound_CPP>(mygrid.pdata(), sos); */
         assert(sos > 0);
         printf("sos = %f (took %f sec)\n", sos, tsos);
 
