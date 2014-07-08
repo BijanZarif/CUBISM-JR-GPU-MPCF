@@ -25,7 +25,7 @@ struct devPtrSet // 7 fluid quantities
     Real* G;
     Real* P;
 
-    devPtrSet(RealPtrVec_t& c) : r(c[0]), u(c[1]), v(c[2]), w(c[3]), e(c[4]), G(c[5]), P(c[6]) { }
+    devPtrSet(RealPtrVec_t& c) : r(c[0]), u(c[1]), v(c[2]), w(c[3]), e(c[4]), G(c[5]), P(c[6]) { assert(c.size() == 7); }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
