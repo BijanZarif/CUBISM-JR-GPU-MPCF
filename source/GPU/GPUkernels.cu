@@ -565,39 +565,38 @@ void _divergence(const uint_t NX, const uint_t NY, const uint_t NZ,
     if (ix < NX && iy < NY)
     {
         Real fxp, fxm, fyp, fym, fzp, fzm;
-        Real rhs_reg;
         const Real factor6 = 1.0f / 6.0f;
         for (uint_t iz = 0; iz < NZ; ++iz)
         {
             const uint_t idx = ID3(ix, iy, iz, NX, NY);
 
             _fetch_flux(ix, iy, iz, NX, NY, xflux.r, yflux.r, zflux.r, fxp, fxm, fyp, fym, fzp, fzm);
-            rhs_reg = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
-            rhs.r[idx] = a*tmp.r[idx] - rhs_reg;
+            const Real rhs_r = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
+            rhs.r[idx] = a*tmp.r[idx] - rhs_r;
 
             _fetch_flux(ix, iy, iz, NX, NY, xflux.u, yflux.u, zflux.u, fxp, fxm, fyp, fym, fzp, fzm);
-            rhs_reg = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
-            rhs.u[idx] = a*tmp.u[idx] - rhs_reg;
+            const Real rhs_u = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
+            rhs.u[idx] = a*tmp.u[idx] - rhs_u;
 
             _fetch_flux(ix, iy, iz, NX, NY, xflux.v, yflux.v, zflux.v, fxp, fxm, fyp, fym, fzp, fzm);
-            rhs_reg = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
-            rhs.v[idx] = a*tmp.v[idx] - rhs_reg;
+            const Real rhs_v = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
+            rhs.v[idx] = a*tmp.v[idx] - rhs_v;
 
             _fetch_flux(ix, iy, iz, NX, NY, xflux.w, yflux.w, zflux.w, fxp, fxm, fyp, fym, fzp, fzm);
-            rhs_reg = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
-            rhs.w[idx] = a*tmp.w[idx] - rhs_reg;
+            const Real rhs_w = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
+            rhs.w[idx] = a*tmp.w[idx] - rhs_w;
 
             _fetch_flux(ix, iy, iz, NX, NY, xflux.e, yflux.e, zflux.e, fxp, fxm, fyp, fym, fzp, fzm);
-            rhs_reg = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
-            rhs.e[idx] = a*tmp.e[idx] - rhs_reg;
+            const Real rhs_e = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
+            rhs.e[idx] = a*tmp.e[idx] - rhs_e;
 
             _fetch_flux(ix, iy, iz, NX, NY, xflux.G, yflux.G, zflux.G, fxp, fxm, fyp, fym, fzp, fzm);
-            rhs_reg = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm   - divU[idx] * sumG[idx] * factor6);
-            rhs.G[idx] = a*tmp.G[idx] - rhs_reg;
+            const Real rhs_G = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm   - divU[idx] * sumG[idx] * factor6);
+            rhs.G[idx] = a*tmp.G[idx] - rhs_G;
 
             _fetch_flux(ix, iy, iz, NX, NY, xflux.P, yflux.P, zflux.P, fxp, fxm, fyp, fym, fzp, fzm);
-            rhs_reg = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm   - divU[idx] * sumP[idx] * factor6);
-            rhs.P[idx] = a*tmp.P[idx] - rhs_reg;
+            const Real rhs_P = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm   - divU[idx] * sumP[idx] * factor6);
+            rhs.P[idx] = a*tmp.P[idx] - rhs_P;
         }
     }
 }
@@ -633,10 +632,12 @@ void _update(const uint_t NX, const uint_t NY, const uint_t NZ,
             tmp.e[idx] = b*rhs.e[idx] + e;
             tmp.G[idx] = b*rhs.G[idx] + G;
             tmp.P[idx] = b*rhs.P[idx] + P;
-
-            /* if (ix == 0 && iy == 0) */
-            /*     printf("%f ", tmp.P[idx]); */
-
+            assert(tmp.r[idx] > 0);
+            assert(tmp.e[idx] > 0);
+            assert(tmp.G[idx] > 0);
+            assert(tmp.P[idx] >= 0);
+            /* if (tmp.P[idx] < 0) */
+            /*     printf("(%d, %d, %d):\trhs.P = %f, tmp.P = %f, P = %f\n", ix, iy, iz, rhs.P[idx], tmp.P[idx], P); */
         }
     }
 }

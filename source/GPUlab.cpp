@@ -160,18 +160,11 @@ void GPUlab::_init_next_chunk()
 }
 
 
-void GPUlab::_printSOA(const Real * const in)
+void GPUlab::_printSOA(const Real * const in, const uint_t size)
 {
-    for (int iz = 0; iz < current_length+6; ++iz)
-    {
-        for (int iy = 0; iy < sizeY; ++iy)
-        {
-            for (int ix = 0; ix < sizeX; ++ix)
-                printf("%f\t\n", in[ix + sizeX * (iy + sizeY * iz)]);
-            printf("\n");
-        }
-        printf("\n");
-    }
+    for (uint_t i = 0; i < size; ++i)
+        printf("%f ", in[i]);
+    printf("\n");
 }
 
 

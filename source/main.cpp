@@ -115,7 +115,7 @@ static void _icSOD(GridMPI& grid, ArgumentParser& parser)
                 grid.get_pos(ix, iy, iz, pos);
 
                 // set up along x
-                bool x = pos[2] < x0;
+                bool x = pos[0] < x0;
                 /* bool x = pos[2] > x0; */
 
                 const double r = x * rho1 + !x * rho2;
@@ -129,9 +129,9 @@ static void _icSOD(GridMPI& grid, ArgumentParser& parser)
                 assert(P >= 0);
 
                 grid(ix, iy, iz, var::R) = r;
-                grid(ix, iy, iz, var::W) = u;
+                grid(ix, iy, iz, var::U) = u;
+                grid(ix, iy, iz, var::W) = 0;
                 grid(ix, iy, iz, var::V) = 0;
-                grid(ix, iy, iz, var::U) = 0;
                 grid(ix, iy, iz, var::E) = G*p + P + 0.5*u*u/r;
                 grid(ix, iy, iz, var::G) = G;
                 grid(ix, iy, iz, var::P) = P;
@@ -361,7 +361,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t chunk_slices = 128;
+    const size_t chunk_slices = 256;
     Lab myGPU(mygrid, chunk_slices);
     /* myGPU.toggle_verbosity(); */
 

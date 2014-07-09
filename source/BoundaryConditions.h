@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 #include <math.h>
 #include <vector>
 
@@ -33,6 +34,7 @@ protected:
     template<int dir>
     void _setup()
     {
+        assert(0 <= dir && dir <= 2);
         s[0] =  0;
         s[1] =  0;
         s[2] =  dir==2? 0 : startZ;
@@ -57,6 +59,7 @@ public:
 
     inline Real operator()(const Real * const psrc, int ix, int iy, int iz) const
     {
+        assert(!isnan(psrc[ix + TGrid::sizeX * (iy + TGrid::sizeY * iz)]));
         return psrc[ix + TGrid::sizeX * (iy + TGrid::sizeY * iz)];
     }
 

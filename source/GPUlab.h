@@ -452,6 +452,8 @@ class GPUlab
             {
                 case INTERMEDIATE:
                 case LAST:
+                    assert(buffer->Nxghost == 3 * sizeY * current_length);
+                    assert(buffer->Nyghost == 3 * sizeX * current_length);
                     _copy_xyghosts();
                     GPU::upload_xy_ghosts(buffer->Nxghost, buffer->xghost_l, buffer->xghost_r,
                                           buffer->Nyghost, buffer->yghost_l, buffer->yghost_r);
@@ -464,7 +466,7 @@ class GPUlab
         }
 
         // info
-        void _printSOA(const Real * const in);
+        void _printSOA(const Real * const in, const uint_t size);
         void _show_feature();
         void _start_info_current_chunk(const std::string title = "");
         inline void _end_info_current_chunk()
@@ -610,6 +612,8 @@ class GPUlab
             ///////////////////////////////////////////////////////////////
             // 1.)
             ///////////////////////////////////////////////////////////////
+            assert(buffer->Nxghost == 3 * sizeY * current_length);
+            assert(buffer->Nyghost == 3 * sizeX * current_length);
             _copy_xyghosts();
             GPU::upload_xy_ghosts(buffer->Nxghost, buffer->xghost_l, buffer->xghost_r,
                                   buffer->Nyghost, buffer->yghost_l, buffer->yghost_r);
