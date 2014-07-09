@@ -6,9 +6,8 @@
  * */
 #pragma once
 
-#include "GPU.h"
+#include "GPU.h" // includes Types.h
 
-#define ID3(x,y,z,NX,NY) ((x) + (NX) * ((y) + (NY) * (z)))
 
 // DEVICE FUNCTIONS
 
@@ -111,91 +110,100 @@ inline Real _weno_minus_clipped(const Real a, const Real b, const Real c, const 
 
 
 __device__
-inline void _xfetch_data(const texture<float, 3, cudaReadModeElementType> tex, const Real* const ghostL, const Real* const ghostR,
-        const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz, const uint_t NX, const uint_t NY,
+inline void _xfetch_data(const texture<float, 3, cudaReadModeElementType> tex,
+        const Real * const ghostL, const Real * const ghostR,
+        const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz,
         Real& qm3, Real& qm2, Real& qm1, Real& qp1, Real& qp2, Real& qp3)
 {
+    /* *
+     * -> use ghostmap here!
+     * */
+    //
+    //
     // Indexers for the left ghosts.  The starting element is in the
     // outermost layer.  iz must be shifted according to the currently
     // processed chunk, since all of the xghosts reside on the GPU.
-    const uint_t idxm1 = ID3(iy, 2, iz+global_iz, NY, 3);
-    const uint_t idxm2 = ID3(iy, 1, iz+global_iz, NY, 3);
-    const uint_t idxm3 = ID3(iy, 0, iz+global_iz, NY, 3);
+
+/*     const uint_t idxm1 = ID3(iy, 2, iz+global_iz, NY, 3); */
+/*     const uint_t idxm2 = ID3(iy, 1, iz+global_iz, NY, 3); */
+/*     const uint_t idxm3 = ID3(iy, 0, iz+global_iz, NY, 3); */
 
     // Indexers for the right ghosts.  The starting element is in the
     // innermost layer.  iz must be shifted according to the currently
     // processed chunk, since all of the xghosts reside on the GPU.
-    const uint_t idxp1 = ID3(iy, 0, iz+global_iz, NY, 3);
-    const uint_t idxp2 = ID3(iy, 1, iz+global_iz, NY, 3);
-    const uint_t idxp3 = ID3(iy, 2, iz+global_iz, NY, 3);
+
+    /* const uint_t idxp1 = ID3(iy, 0, iz+global_iz, NY, 3); */
+    /* const uint_t idxp2 = ID3(iy, 1, iz+global_iz, NY, 3); */
+    /* const uint_t idxp3 = ID3(iy, 2, iz+global_iz, NY, 3); */
 
     // Input textures are current_chunk_length+6 slices wide along the
     // z-direction.  Hence, a shift of 3 slices is required for the iz index
     // when accessing textures
-    const uint_t iz3 = iz + 3;
+
+    /* const uint_t iz3 = iz + 3; */
 
     if (ix == 0)
     {
         qm3 = ghostL[idxm3];
         qm2 = ghostL[idxm2];
         qm1 = ghostL[idxm1];
-        qp1 = tex3D(tex, ix,   iy, iz3);
-        qp2 = tex3D(tex, ix+1, iy, iz3);
-        qp3 = tex3D(tex, ix+2, iy, iz3);
+        qp1 = tex3D(tex, ix,   iy, iz);
+        qp2 = tex3D(tex, ix+1, iy, iz);
+        qp3 = tex3D(tex, ix+2, iy, iz);
     }
     else if (ix == 1)
     {
         qm3 = ghostL[idxm2];
         qm2 = ghostL[idxm1];
-        qm1 = tex3D(tex, ix-1, iy, iz3);
-        qp1 = tex3D(tex, ix,   iy, iz3);
-        qp2 = tex3D(tex, ix+1, iy, iz3);
-        qp3 = tex3D(tex, ix+2, iy, iz3);
+        qm1 = tex3D(tex, ix-1, iy, iz);
+        qp1 = tex3D(tex, ix,   iy, iz);
+        qp2 = tex3D(tex, ix+1, iy, iz);
+        qp3 = tex3D(tex, ix+2, iy, iz);
     }
     else if (ix == 2)
     {
         qm3 = ghostL[idxm1];
-        qm2 = tex3D(tex, ix-2, iy, iz3);
-        qm1 = tex3D(tex, ix-1, iy, iz3);
-        qp1 = tex3D(tex, ix,   iy, iz3);
-        qp2 = tex3D(tex, ix+1, iy, iz3);
-        qp3 = tex3D(tex, ix+2, iy, iz3);
+        qm2 = tex3D(tex, ix-2, iy, iz);
+        qm1 = tex3D(tex, ix-1, iy, iz);
+        qp1 = tex3D(tex, ix,   iy, iz);
+        qp2 = tex3D(tex, ix+1, iy, iz);
+        qp3 = tex3D(tex, ix+2, iy, iz);
     }
     else if (ix == NX-3)
     {
-        qm3 = tex3D(tex, ix-3, iy, iz3);
-        qm2 = tex3D(tex, ix-2, iy, iz3);
-        qm1 = tex3D(tex, ix-1, iy, iz3);
-        qp1 = tex3D(tex, ix,   iy, iz3);
-        qp2 = tex3D(tex, ix+1, iy, iz3);
+        qm3 = tex3D(tex, ix-3, iy, iz);
+        qm2 = tex3D(tex, ix-2, iy, iz);
+        qm1 = tex3D(tex, ix-1, iy, iz);
+        qp1 = tex3D(tex, ix,   iy, iz);
+        qp2 = tex3D(tex, ix+1, iy, iz);
         qp3 = ghostR[idxp1];
     }
     else if (ix == NX-2)
     {
-        qm3 = tex3D(tex, ix-3, iy, iz3);
-        qm2 = tex3D(tex, ix-2, iy, iz3);
-        qm1 = tex3D(tex, ix-1, iy, iz3);
-        qp1 = tex3D(tex, ix,   iy, iz3);
+        qm3 = tex3D(tex, ix-3, iy, iz);
+        qm2 = tex3D(tex, ix-2, iy, iz);
+        qm1 = tex3D(tex, ix-1, iy, iz);
+        qp1 = tex3D(tex, ix,   iy, iz);
         qp2 = ghostR[idxp1];
         qp3 = ghostR[idxp2];
     }
     else if (ix == NX-1)
     {
-        qm3 = tex3D(tex, ix-3, iy, iz3);
-        qm2 = tex3D(tex, ix-2, iy, iz3);
-        qm1 = tex3D(tex, ix-1, iy, iz3);
+        qm3 = tex3D(tex, ix-3, iy, iz);
+        qm2 = tex3D(tex, ix-2, iy, iz);
+        qm1 = tex3D(tex, ix-1, iy, iz);
         qp1 = ghostR[idxp1];
         qp2 = ghostR[idxp2];
         qp3 = ghostR[idxp3];
     }
     else
     {
-        qm3 = tex3D(tex, ix-3, iy, iz3);
-        qm2 = tex3D(tex, ix-2, iy, iz3);
-        qm1 = tex3D(tex, ix-1, iy, iz3);
-        qp1 = tex3D(tex, ix,   iy, iz3);
-        qp2 = tex3D(tex, ix+1, iy, iz3);
-        qp3 = tex3D(tex, ix+2, iy, iz3);
+        qm3 = tex3D(tex, ix-3, iy, iz);
+        qm2 = tex3D(tex, ix-2, iy, iz);
+        qm1 = tex3D(tex, ix-1, iy, iz);
+        qp1 = tex3D(tex, ix,   iy, iz);
+        qp2 = tex3D(tex, ix+1, iy, iz);
+        qp3 = tex3D(tex, ix+2, iy, iz);
     }
     assert(!isnan(qm3));
     assert(!isnan(qm2));

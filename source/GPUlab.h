@@ -32,8 +32,6 @@ typedef std::vector<Real> cuda_vector_t;
 #define _MPI_REAL_ MPI_DOUBLE
 #endif
 
-#define ID3(x,y,z,NX,NY) ((x) + (NX) * ((y) + (NY) * (z)))
-
 
 class GPUlab
 {
@@ -50,8 +48,6 @@ class GPUlab
         enum {FIRST, INTERMEDIATE, LAST, SINGLE} chunk_state;
         enum {ALLOCATED, FREE} gpu_allocation;
         enum {QUIET=0, VERBOSE} chatty;
-
-        typedef uint_t (*index_map)(const int ix, const int iy, const int iz);
 
         // GPU BUFFER SIZES
         const uint_t GPU_input_size;
@@ -488,36 +484,14 @@ class GPUlab
         uint_t previous_iz;
         uint_t previous_chunk_id;
 
-        // halos (=ghosts)
+        // ghosts
         Halo halox, haloy, haloz;
 
+        // boundary conditions (applied for myFeature == SKIN)
         virtual void _apply_bc(const double t = 0) {}
-
-        // index mappings for halos.  These mappings are used to store the halo
-        // data with a particular stride in favor for the GPU
-        template <int A, int B, int C>
-        static inline uint_t halomap_x(const int ix, const int iy, const int iz)
-        {
-            return ID3(iy, ix+A, iz, B, C);
-        }
-
-
-        template <int A, int B, int C>
-        static inline uint_t halomap_y(const int ix, const int iy, const int iz)
-        {
-            return ID3(ix, iy+A, iz, B, C);
-        }
-
-
-        template <int A, int B, int C>
-        static inline uint_t halomap_z(const int ix, const int iy, const int iz)
-        {
-            return ID3(ix, iy, iz+A, B, C);
-        }
 
 
     public:
-
 
         GPUlab(GridMPI& G, const uint_t CL);
         virtual ~GPUlab() { _free_GPU(); }

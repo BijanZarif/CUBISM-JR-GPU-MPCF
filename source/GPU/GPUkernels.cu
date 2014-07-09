@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <vector>
 
-#include "GPU.h"
+#include "GPU.h" // includes Types.h
 #include "GPUonly.cuh"
 #include "CUDA_Timer.cuh"
 
@@ -17,13 +17,13 @@
 // pointer compound to pass a kernel argument
 struct devPtrSet // 7 fluid quantities
 {
-    Real* r;
-    Real* u;
-    Real* v;
-    Real* w;
-    Real* e;
-    Real* G;
-    Real* P;
+    Real *r;
+    Real *u;
+    Real *v;
+    Real *w;
+    Real *e;
+    Real *G;
+    Real *P;
 
     devPtrSet(RealPtrVec_t& c) : r(c[0]), u(c[1]), v(c[2]), w(c[3]), e(c[4]), G(c[5]), P(c[6]) { assert(c.size() == 7); }
 };
@@ -52,7 +52,7 @@ extern Real *d_hllc_vel;
 extern Real *d_sumG, *d_sumP, *d_divU;
 
 // max SOS
-extern int* d_maxSOS;
+extern int *d_maxSOS;
 
 // use non-null stream (async)
 extern cudaStream_t stream1;
@@ -83,6 +83,11 @@ void _xextraterm_hllc(const uint_t NX, const uint_t NY, const uint_t NZ,
         const Real * const vel,
         Real * const sumG, Real * const sumP, Real * const divU)
 {
+    /* *
+     * Computes x-contribution for the right hand side of the advection
+     * equations.  Maps two values on cell faces to one value at the cell
+     * center.  NOTE: The assignment here is "="
+     * */
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -90,11 +95,11 @@ void _xextraterm_hllc(const uint_t NX, const uint_t NY, const uint_t NZ,
     {
         for (uint_t iz = 0; iz < NZ; ++iz)
         {
-            const uint_t idx  = ID3(ix, iy, iz, NX, NY); // non-coalesced write!
-            const uint_t idxm = ID3(iy, ix, iz, NY, NX+1);
+            const uint_t idx  = ID3(iy, ix,   iz, NY, NX);
+            const uint_t idxm = ID3(iy, ix,   iz, NY, NX+1);
             const uint_t idxp = ID3(iy, ix+1, iz, NY, NX+1);
-            sumG[idx] = Gp[idxm] + Gm[idxp];
-            sumP[idx] = Pp[idxm] + Pm[idxp];
+            sumG[idx] = Gp[idxm]  + Gm[idxp];
+            sumP[idx] = Pp[idxm]  + Pm[idxp];
             divU[idx] = vel[idxp] - vel[idxm];
         }
     }
@@ -102,19 +107,32 @@ void _xextraterm_hllc(const uint_t NX, const uint_t NY, const uint_t NZ,
 
 
 __global__
-void _xflux(const uint_t NX, const uint_t NY, const uint_t NZ, const uint_t global_iz,
+void _xflux(const uint_t NXp1, const uint_t NY, const uint_t NZ, const uint_t global_iz,
         devPtrSet ghostL, devPtrSet ghostR, devPtrSet flux,
         Real * const xtra_vel, Real * const xtra_Gm, Real * const xtra_Gp, Real * const xtra_Pm, Real * const xtra_Pp)
 {
+    /* *
+     * Notes:
+     * ======
+     * 1.) NXp1 = NX + 1
+     * 2.) NX = NodeBlock::sizeX
+     * 3.) NY = NodeBlock::sizeY
+     * 4.) NZ = number of slices for currently processed chunk
+     * 5.) global_iz is the iz-coordinate in index space of the NodeBlock for
+     *     the first slice of the currently processed chunk.  It is needed if
+     *     all of the x-/yghosts are uploaded to the GPU prior to processing
+     *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
+     *     are uploaded per chunk.
+     * */
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (ix < NX && iy < NY)
+    if (ix < NXp1 && iy < NY)
     {
-        // NOTE: NX = ncells + 1 = number of faces
-        //
-        // loop over CHUNK_WIDTH slices
-        for (uint_t iz = 0; iz < NZ; ++iz)
+        // Process NZ slices of current chunk
+        // iz = 0, 1, 2: left zghost slices
+        // iz = NZ+3, NZ+4, NZ+5: right zghost slices
+        for (uint_t iz = 3; iz < NZ+3; ++iz)
         {
             /* *
              * 1.) Get cell values
@@ -128,28 +146,28 @@ void _xflux(const uint_t NX, const uint_t NY, const uint_t NZ, const uint_t glob
             // 1.) Load data
             ///////////////////////////////////////////////////////////////////
             Real rm3, rm2, rm1, rp1, rp2, rp3;
-            _xfetch_data(texR, ghostL.r, ghostR.r, ix, iy, iz, global_iz, NX, NY, rm3, rm2, rm1, rp1, rp2, rp3);
+            _xfetch_data(texR, ghostL.r, ghostR.r, ix, iy, iz, global_iz, NXp1, NY, rm3, rm2, rm1, rp1, rp2, rp3);
             assert(rm3 > 0); assert(rm2 > 0); assert(rm1 > 0); assert(rp1 > 0); assert(rp2 > 0); assert(rp3 > 0);
 
             Real um3, um2, um1, up1, up2, up3;
-            _xfetch_data(texU, ghostL.u, ghostR.u, ix, iy, iz, global_iz, NX, NY, um3, um2, um1, up1, up2, up3);
+            _xfetch_data(texU, ghostL.u, ghostR.u, ix, iy, iz, global_iz, NXp1, NY, um3, um2, um1, up1, up2, up3);
 
             Real vm3, vm2, vm1, vp1, vp2, vp3;
-            _xfetch_data(texV, ghostL.v, ghostR.v, ix, iy, iz, global_iz, NX, NY, vm3, vm2, vm1, vp1, vp2, vp3);
+            _xfetch_data(texV, ghostL.v, ghostR.v, ix, iy, iz, global_iz, NXp1, NY, vm3, vm2, vm1, vp1, vp2, vp3);
 
             Real wm3, wm2, wm1, wp1, wp2, wp3;
-            _xfetch_data(texW, ghostL.w, ghostR.w, ix, iy, iz, global_iz, NX, NY, wm3, wm2, wm1, wp1, wp2, wp3);
+            _xfetch_data(texW, ghostL.w, ghostR.w, ix, iy, iz, global_iz, NXp1, NY, wm3, wm2, wm1, wp1, wp2, wp3);
 
             Real em3, em2, em1, ep1, ep2, ep3;
-            _xfetch_data(texE, ghostL.e, ghostR.e, ix, iy, iz, global_iz, NX, NY, em3, em2, em1, ep1, ep2, ep3);
+            _xfetch_data(texE, ghostL.e, ghostR.e, ix, iy, iz, global_iz, NXp1, NY, em3, em2, em1, ep1, ep2, ep3);
             assert(em3 > 0); assert(em2 > 0); assert(em1 > 0); assert(ep1 > 0); assert(ep2 > 0); assert(ep3 > 0);
 
             Real Gm3, Gm2, Gm1, Gp1, Gp2, Gp3;
-            _xfetch_data(texG, ghostL.G, ghostR.G, ix, iy, iz, global_iz, NX, NY, Gm3, Gm2, Gm1, Gp1, Gp2, Gp3);
+            _xfetch_data(texG, ghostL.G, ghostR.G, ix, iy, iz, global_iz, NXp1, NY, Gm3, Gm2, Gm1, Gp1, Gp2, Gp3);
             assert(Gm3 > 0); assert(Gm2 > 0); assert(Gm1 > 0); assert(Gp1 > 0); assert(Gp2 > 0); assert(Gp3 > 0);
 
             Real Pm3, Pm2, Pm1, Pp1, Pp2, Pp3;
-            _xfetch_data(texP, ghostL.P, ghostR.P, ix, iy, iz, global_iz, NX, NY, Pm3, Pm2, Pm1, Pp1, Pp2, Pp3);
+            _xfetch_data(texP, ghostL.P, ghostR.P, ix, iy, iz, global_iz, NXp1, NY, Pm3, Pm2, Pm1, Pp1, Pp2, Pp3);
             assert(Pm3 >= 0); assert(Pm2 >= 0); assert(Pm1 >= 0); assert(Pp1 >= 0); assert(Pp2 >= 0); assert(Pp3 >= 0);
 
             ///////////////////////////////////////////////////////////////////
@@ -205,8 +223,6 @@ void _xflux(const uint_t NX, const uint_t NY, const uint_t NZ, const uint_t glob
             ///////////////////////////////////////////////////////////////////
             // 4.) Compute HLLC fluxes
             ///////////////////////////////////////////////////////////////////
-            /* const uint_t idx = ID3(ix, iy, iz, NX, NY); */
-            const uint_t idx = ID3(iy, ix, iz, NY, NX);
             const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss);
             const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss);
             const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss);
@@ -216,6 +232,7 @@ void _xflux(const uint_t NX, const uint_t NY, const uint_t NZ, const uint_t glob
             const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss);
             assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
 
+            const uint_t idx = ID3(iy, ix, iz, NY, NXp1);
             flux.r[idx] = fr;
             flux.u[idx] = fu;
             flux.v[idx] = fv;
@@ -225,7 +242,7 @@ void _xflux(const uint_t NX, const uint_t NY, const uint_t NZ, const uint_t glob
             flux.P[idx] = fP;
 
             ///////////////////////////////////////////////////////////////////
-            // 5.)
+            // 5.) RHS for advection equations
             ///////////////////////////////////////////////////////////////////
             xtra_vel[idx] = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss);
             xtra_Gm[idx]  = Gm;

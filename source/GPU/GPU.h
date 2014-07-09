@@ -9,7 +9,7 @@
 #include "Types.h"
 
 
-// use these declarations to interface with the GPU from the host
+// include these declarations in host code
 namespace GPU
 {
     enum streamID {S1, S2};
@@ -21,8 +21,8 @@ namespace GPU
     extern "C"
     {
         // alloc/dealloc
-        void alloc(void** h_maxSOS, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t BSZ_GPU, const uint_t CHUNK_WIDTH);
-        void dealloc();
+        void alloc(void** h_maxSOS, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t BSZ_GPU, const uint_t CHUNK_WIDTH, const bool isroot = true);
+        void dealloc(const bool isroot = true);
 
         // PCIe transfers
         void upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, const RealPtrVec_t& xghost_r,

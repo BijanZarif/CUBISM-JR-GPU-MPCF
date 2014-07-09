@@ -13,11 +13,7 @@
 #include <math.h>
 #include <vector>
 
-#ifdef _FLOAT_PRECISION_
-typedef float Real;
-#else
-typedef double Real;
-#endif
+#include "Types.h"
 
 
 template<typename TGrid>
@@ -27,9 +23,8 @@ protected:
 
     int s[3], e[3];
 
-    const std::vector<Real *>& pdata;
-    const unsigned int startZ, deltaZ;
-    typedef unsigned int (*index_map)(const int ix, const int iy, const int iz);
+    const RealPtrVec_t& pdata;
+    const uint_t startZ, deltaZ;
 
     template<int dir>
     void _setup()
@@ -47,8 +42,7 @@ protected:
 
 public:
 
-    BoundaryConditions(const std::vector<Real *>& data,
-            const unsigned int first_slice_iz = 0, const unsigned int n_slices = TGrid::sizeZ)
+    BoundaryConditions(const RealPtrVec_t& data, const uint_t first_slice_iz = 0, const uint_t n_slices = TGrid::sizeZ)
         :
             pdata(data),
             startZ(first_slice_iz), deltaZ(n_slices)
@@ -64,7 +58,7 @@ public:
     }
 
     template<int dir, int side, index_map map>
-    void applyBC_absorbing(std::vector<Real *>& halo)
+    void applyBC_absorbing(RealPtrVec_t& halo)
     {
         _setup<dir>();
 
@@ -89,7 +83,7 @@ public:
 
 
     template<int dir, int side, index_map map>
-    void applyBC_reflecting(std::vector<Real *>& halo)
+    void applyBC_reflecting(RealPtrVec_t& halo)
     {
         _setup<dir>();
 

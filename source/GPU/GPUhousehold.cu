@@ -8,8 +8,7 @@
 #include <vector>
 
 #include "CUDA_Timer.cuh"
-#include "NodeBlock.h"
-#include "GPU.h"
+#include "GPU.h" // includes Types.h
 
 enum { VSIZE = NodeBlock::NVAR };
 
@@ -33,12 +32,12 @@ Real *d_Pm, *d_Pp;
 Real *d_hllc_vel;
 Real *d_sumG, *d_sumP, *d_divU;
 
-// 3D arrays
-std::vector<cudaArray_t> d_SOA(VSIZE, NULL);
+// 3D arrays (GPU input)
+std::vector<cudaArray_t> d_SOAin(VSIZE, NULL);
 
 // Max SOS
-int* h_maxSOS; // host, mapped
-int* d_maxSOS; // device, mapped (different address)
+int *h_maxSOS; // host, mapped
+int *d_maxSOS; // device, mapped (different address)
 
 // use non-null stream (async)
 cudaStream_t stream1;
@@ -74,30 +73,27 @@ extern "C"
     ///////////////////////////////////////////////////////////////////////////
     // GPU Memory alloc / dealloc
     ///////////////////////////////////////////////////////////////////////////
-    void GPU::alloc(void** sos, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t BSZ_GPU, const uint_t CHUNK_WIDTH)
+    void GPU::alloc(void** sos, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t BSZ_GPU, const uint_t CHUNK_WIDTH, const bool isroot)
     {
 #ifndef _MUTE_GPU_
-        // THE FOLLOWING ASSUMES CUBIC DOAMIN
+
+        // processing slice size (normal to z-direction)
         const uint_t SLICE_GPU = BSX_GPU * BSY_GPU;
 
         // GPU output size
         const uint_t outputSize = SLICE_GPU * CHUNK_WIDTH;
 
-        // Fluxes (use one array later, process after each flux dimension)
+        // fluxes (TODO: use one array later, process after each flux computation)
         const uint_t bSflx = (BSX_GPU+1)*BSY_GPU*CHUNK_WIDTH;
         const uint_t bSfly = BSX_GPU*(BSY_GPU+1)*CHUNK_WIDTH;
         const uint_t bSflz = BSX_GPU*BSY_GPU*(CHUNK_WIDTH+1);
 
-        // Ghosts
-        /* const uint_t xgSize = 3*BSY_GPU*BSZ_GPU; */
-        /* const uint_t ygSize = BSX_GPU*3*BSZ_GPU; */
-        /* const uint_t xgSize = 3 * SLICE_GPU; */
-        /* const uint_t ygSize = 3 * SLICE_GPU; */
+        // x-/yghosts
         const uint_t xgSize = 3*BSY_GPU*CHUNK_WIDTH;
         const uint_t ygSize = BSX_GPU*3*CHUNK_WIDTH;
 
-        // Allocate
-        cudaChannelFormatDesc fmt =  cudaCreateChannelDesc<Real>();
+        // GPU allocation
+        cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
         for (int var = 0; var < VSIZE; ++var)
         {
             //tmp
@@ -116,17 +112,18 @@ extern "C"
             cudaMemset(d_yflux[var], 0, bSfly*sizeof(Real));
             cudaMemset(d_zflux[var], 0, bSflz*sizeof(Real));
 
-            // ghosts
+            // x-/yghosts
             cudaMalloc(&d_xgl[var], xgSize*sizeof(Real));
             cudaMalloc(&d_xgr[var], xgSize*sizeof(Real));
+
             cudaMalloc(&d_ygl[var], ygSize*sizeof(Real));
             cudaMalloc(&d_ygr[var], ygSize*sizeof(Real));
 
-            // GPU input SOA
-            cudaMalloc3DArray(&d_SOA[var], &fmt, make_cudaExtent(BSX_GPU, BSY_GPU, CHUNK_WIDTH+6));
+            // GPU input SOA (+6 slices for zghosts)
+            cudaMalloc3DArray(&d_SOAin[var], &fmt, make_cudaExtent(BSX_GPU, BSY_GPU, CHUNK_WIDTH+6));
         }
 
-        // extraterm for advection
+        // extraterm for advection (TODO: remove this uglyness!)
         cudaMalloc(&d_Gm, bSflz * sizeof(Real));
         cudaMalloc(&d_Gp, bSflz * sizeof(Real));
         cudaMalloc(&d_Pm, bSflz * sizeof(Real));
@@ -136,18 +133,18 @@ extern "C"
         cudaMalloc(&d_sumP, outputSize * sizeof(Real));
         cudaMalloc(&d_divU, outputSize * sizeof(Real));
 
-        // zero-copy maxSOS
+        // zero-copy maxSOS (TODO: should this be unsigned int??)
         cudaSetDeviceFlags(cudaDeviceMapHost);
         cudaHostAlloc((void**)&h_maxSOS, sizeof(int), cudaHostAllocMapped);
         cudaHostGetDevicePointer(&d_maxSOS, h_maxSOS, 0);
         *(int**)sos = h_maxSOS; // return a reference to the caller
 
-        // create stream
+        // create streams
         cudaStreamCreate(&stream1);
         cudaStreamCreate(&stream2);
         cudaStreamCreate(&stream3);
 
-        // create event
+        // create events
         cudaEventCreate(&divergence_completed);
         cudaEventCreate(&update_completed);
         cudaEventCreate(&h2d_3Darray_completed);
@@ -156,26 +153,29 @@ extern "C"
         cudaEventCreate(&d2h_tmp_completed);
 
         // Stats
-        int dev;
-        cudaDeviceProp prop;
-        cudaGetDevice(&dev);
-        cudaGetDeviceProperties(&prop, dev);
+        if (isroot)
+        {
+            int dev;
+            cudaDeviceProp prop;
+            cudaGetDevice(&dev);
+            cudaGetDeviceProperties(&prop, dev);
 
-        printf("=====================================================================\n");
-        printf("[GPU ALLOCATION FOR %s]\n", prop.name);
-        printf("[%5.1f MB (input SOA)]\n", VSIZE*(SLICE_GPU*(CHUNK_WIDTH+6))*sizeof(Real) / 1024. / 1024);
-        printf("[%5.1f MB (tmp)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
-        printf("[%5.1f MB (rhs)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
-        printf("[%5.1f MB (flux storage)]\n", VSIZE*(bSflx + bSfly + bSflz)*sizeof(Real) / 1024. / 1024);
-        printf("[%5.1f MB (x/yghosts)]\n", VSIZE*(xgSize + ygSize)*2*sizeof(Real) / 1024. / 1024);
-        printf("[%5.1f MB (extraterm)]\n", (5*bSflx + 3*outputSize)*sizeof(Real) / 1024. / 1024);
-        GPU::tell_memUsage_GPU();
-        printf("=====================================================================\n");
+            printf("=====================================================================\n");
+            printf("[GPU ALLOCATION FOR %s]\n", prop.name);
+            printf("[%5.1f MB (input SOA)]\n", VSIZE*(SLICE_GPU*(CHUNK_WIDTH+6))*sizeof(Real) / 1024. / 1024);
+            printf("[%5.1f MB (tmp)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
+            printf("[%5.1f MB (rhs)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
+            printf("[%5.1f MB (flux storage)]\n", VSIZE*(bSflx + bSfly + bSflz)*sizeof(Real) / 1024. / 1024);
+            printf("[%5.1f MB (x/yghosts)]\n", VSIZE*(xgSize + ygSize)*2*sizeof(Real) / 1024. / 1024);
+            printf("[%5.1f MB (extraterm)]\n", (5*bSflx + 3*outputSize)*sizeof(Real) / 1024. / 1024);
+            GPU::tell_memUsage_GPU();
+            printf("=====================================================================\n");
+        }
 #endif
     }
 
 
-    void GPU::dealloc()
+    void GPU::dealloc(const bool isroot)
     {
 #ifndef _MUTE_GPU_
         for (int var = 0; var < VSIZE; ++var)
@@ -191,14 +191,14 @@ extern "C"
             cudaFree(d_yflux[var]);
             cudaFree(d_zflux[var]);
 
-            // ghosts
+            // x-/yghosts
             cudaFree(d_xgl[var]);
             cudaFree(d_xgr[var]);
             cudaFree(d_ygl[var]);
             cudaFree(d_ygr[var]);
 
             // input SOA
-            cudaFreeArray(d_SOA[var]);
+            cudaFreeArray(d_SOAin[var]);
         }
 
         // extraterms
@@ -214,7 +214,7 @@ extern "C"
         // Max SOS
         cudaFreeHost(h_maxSOS);
 
-        // destroy stream
+        // destroy streams
         cudaStreamDestroy(stream1);
         cudaStreamDestroy(stream2);
         cudaStreamDestroy(stream3);
@@ -228,15 +228,18 @@ extern "C"
         cudaEventDestroy(d2h_tmp_completed);
 
         // Stats
-        int dev;
-        cudaDeviceProp prop;
-        cudaGetDevice(&dev);
-        cudaGetDeviceProperties(&prop, dev);
+        if (isroot)
+        {
+            int dev;
+            cudaDeviceProp prop;
+            cudaGetDevice(&dev);
+            cudaGetDeviceProperties(&prop, dev);
 
-        printf("=====================================================================\n");
-        printf("[FREE GPU %s]\n", prop.name);
-        GPU::tell_memUsage_GPU();
-        printf("=====================================================================\n");
+            printf("=====================================================================\n");
+            printf("[FREE GPU %s]\n", prop.name);
+            GPU::tell_memUsage_GPU();
+            printf("=====================================================================\n");
+        }
 #endif
     }
 
@@ -248,6 +251,8 @@ extern "C"
             const uint_t Nyghost, const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r)
     {
 #ifndef _MUTE_GPU_
+        // TODO: use larger arrays for ghosts to minimize API overhead +
+        // increase BW performance
         for (int i = 0; i < VSIZE; ++i)
         {
             // x
@@ -267,7 +272,7 @@ extern "C"
         GPUtimer upload;
         upload.start(stream1);
         for (int i = 0; i < VSIZE; ++i)
-            _h2d_3DArray(d_SOA[i], src[i], NX, NY, NZ);
+            _h2d_3DArray(d_SOAin[i], src[i], NX, NY, NZ);
         upload.stop(stream1);
         upload.print("[GPU UPLOAD 3DArray]: ");
 

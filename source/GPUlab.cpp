@@ -58,7 +58,7 @@ GPUlab::GPUlab(GridMPI& G, const uint_t CL)
 ///////////////////////////////////////////////////////////////////////////////
 // PRIVATE
 ///////////////////////////////////////////////////////////////////////////////
-template <GPUlab::index_map map>
+template <index_map map>
 void GPUlab::_copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE)
 {
     assert(Nhalos == (xE-xS)*(yE-yS)*(zE-zS));
@@ -207,10 +207,10 @@ void GPUlab::load_ghosts(const double t)
 {
     // TODO: THIS NEEDS THOROUGH TESTING!
 
-    if (myFeature[0] == FLESH) _copysend_halos< halomap_x<0,sizeY,3>        >(0, &halox.send_left[0], halox.Nhalo, 0, 3, 0, sizeY, 0, sizeZ);
-    if (myFeature[1] == FLESH) _copysend_halos< halomap_x<-sizeX+3,sizeY,3> >(1, &halox.send_right[0],halox.Nhalo, sizeX-3, sizeX, 0, sizeY, 0, sizeZ);
-    if (myFeature[2] == FLESH) _copysend_halos< halomap_y<0,sizeX,3>        >(2, &haloy.send_left[0], haloy.Nhalo, 0, sizeX, 0, 3, 0, sizeZ);
-    if (myFeature[3] == FLESH) _copysend_halos< halomap_y<-sizeY+3,sizeX,3> >(3, &haloy.send_right[0],haloy.Nhalo, 0, sizeX, sizeY-3, sizeY, 0, sizeZ);
+    if (myFeature[0] == FLESH) _copysend_halos<flesh2ghost::X_L>(0, &halox.send_left[0], halox.Nhalo, 0, 3, 0, sizeY, 0, sizeZ);
+    if (myFeature[1] == FLESH) _copysend_halos<flesh2ghost::X_R>(1, &halox.send_right[0],halox.Nhalo, sizeX-3, sizeX, 0, sizeY, 0, sizeZ);
+    if (myFeature[2] == FLESH) _copysend_halos<flesh2ghost::Y_L>(2, &haloy.send_left[0], haloy.Nhalo, 0, sizeX, 0, 3, 0, sizeZ);
+    if (myFeature[3] == FLESH) _copysend_halos<flesh2ghost::Y_R>(3, &haloy.send_right[0],haloy.Nhalo, 0, sizeX, sizeY-3, sizeY, 0, sizeZ);
     if (myFeature[4] == FLESH) _copysend_halos(4, &haloz.send_left[0], haloz.Nhalo, 0);
     if (myFeature[5] == FLESH) _copysend_halos(5, &haloz.send_right[0],haloz.Nhalo, sizeZ-3);
 

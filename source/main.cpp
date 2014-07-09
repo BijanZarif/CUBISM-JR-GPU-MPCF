@@ -280,12 +280,12 @@ class GPUlabSOD : public GPUlab
         {
             /* BoundaryConditions<GridMPI> bc(grid.pdata(), current_iz, current_length); */
             BoundaryConditions<GridMPI> bc(grid.pdata()); // call this constructor if all halos are fetched at one time
-            if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0, halomap_x<0,sizeY,3> >(halox.left);
-            if (myFeature[1] == SKIN) bc.template applyBC_absorbing<0,1, halomap_x<0,sizeY,3> >(halox.right);
-            if (myFeature[2] == SKIN) bc.template applyBC_absorbing<1,0, halomap_y<0,sizeX,3> >(haloy.left);
-            if (myFeature[3] == SKIN) bc.template applyBC_absorbing<1,1, halomap_y<0,sizeX,3> >(haloy.right);
-            if (myFeature[4] == SKIN) bc.template applyBC_absorbing<2,0, halomap_z<0,sizeX,sizeY> >(haloz.left);
-            if (myFeature[5] == SKIN) bc.template applyBC_absorbing<2,1, halomap_z<0,sizeX,sizeY> >(haloz.right);
+            if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0,ghostmap::X>(halox.left);
+            if (myFeature[1] == SKIN) bc.template applyBC_absorbing<0,1,ghostmap::X>(halox.right);
+            if (myFeature[2] == SKIN) bc.template applyBC_absorbing<1,0,ghostmap::Y>(haloy.left);
+            if (myFeature[3] == SKIN) bc.template applyBC_absorbing<1,1,ghostmap::Y>(haloy.right);
+            if (myFeature[4] == SKIN) bc.template applyBC_absorbing<2,0,ghostmap::Z>(haloz.left);
+            if (myFeature[5] == SKIN) bc.template applyBC_absorbing<2,1,ghostmap::Z>(haloz.right);
         }
 
     public:
@@ -300,12 +300,12 @@ class GPUlabSB : public GPUlab
         {
             /* BoundaryConditions<GridMPI> bc(grid.pdata(), current_iz, current_length); */
             BoundaryConditions<GridMPI> bc(grid.pdata()); // call this constructor if all halos are fetched at one time
-            if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0, halomap_x<0,sizeY,3> >(halox.left);
-            if (myFeature[1] == SKIN) bc.template applyBC_absorbing<0,1, halomap_x<0,sizeY,3> >(halox.right);
-            if (myFeature[2] == SKIN) bc.template applyBC_reflecting<1,0, halomap_y<0,sizeX,3> >(haloy.left);
-            if (myFeature[3] == SKIN) bc.template applyBC_reflecting<1,1, halomap_y<0,sizeX,3> >(haloy.right);
-            if (myFeature[4] == SKIN) bc.template applyBC_absorbing<2,0, halomap_z<0,sizeX,sizeY> >(haloz.left);
-            if (myFeature[5] == SKIN) bc.template applyBC_absorbing<2,1, halomap_z<0,sizeX,sizeY> >(haloz.right);
+            if (myFeature[0] == SKIN) bc.template applyBC_absorbing <0,0,ghostmap::X>(halox.left);
+            if (myFeature[1] == SKIN) bc.template applyBC_absorbing <0,1,ghostmap::X>(halox.right);
+            if (myFeature[2] == SKIN) bc.template applyBC_reflecting<1,0,ghostmap::Y>(haloy.left);
+            if (myFeature[3] == SKIN) bc.template applyBC_reflecting<1,1,ghostmap::Y>(haloy.right);
+            if (myFeature[4] == SKIN) bc.template applyBC_absorbing <2,0,ghostmap::Z>(haloz.left);
+            if (myFeature[5] == SKIN) bc.template applyBC_absorbing <2,1,ghostmap::Z>(haloz.right);
         }
 
     public:
@@ -361,7 +361,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t chunk_slices = 256;
+    const size_t chunk_slices = 32;
     Lab myGPU(mygrid, chunk_slices);
     /* myGPU.toggle_verbosity(); */
 
