@@ -23,9 +23,21 @@ typedef unsigned int uint_t;
 
 
 ///////////////////////////////////////////////////////////////////////////////
-// INDEX MAPPINGS USED FOR GPU FOR GHOST BUFFERS
+// INDEX MAPPINGS USED FOR HOST AND DEVICE GHOST BUFFERS
 ///////////////////////////////////////////////////////////////////////////////
-#define ID3(x,y,z,NX,NY) ((x) + (NX) * ((y) + (NY) * (z)))
+#define ID3(ix,iy,iz,NX,NY) ((ix) + (NX) * ((iy) + (NY) * (iz)))
+/* *
+ * Actual mappings into ghost buffers.  Macros are used here because these
+ * mappings are used in host code as well as device code.  In C-notation, the
+ * mappings defined below are used for bounds:
+ *
+ * GHOSTX[NodeBlock::sizeZ][3][NodeBlock::sizeY]
+ * GHOSTY[NodeBlock::sizeZ][NodeBlock::sizeX][3]
+ *
+ * The layout is chosen such that a warp access is coalesced
+ * */
+#define GHOSTMAPX(ix,iy,iz) ((iy) + NodeBlock::sizeY * ((ix) + 3 * (iz)))
+#define GHOSTMAPY(ix,iy,iz) ((iy) + 3 * ((ix) + NodeBlock::sizeX * (iz)))
 
 extern "C"
 {
@@ -33,13 +45,9 @@ extern "C"
 
     struct ghostmap
     {
-        /* *
-         * These mappings define the access pattern into the ghost buffers used
-         * on the GPU.  The mappings are chosen such that a coalesced global
-         * memory block can be read by a warp.
-         * */
-        static inline uint_t X(const int ix, const int iy, const int iz) { return ID3(iy, ix, iz, NodeBlock::sizeY, 3); }
-        static inline uint_t Y(const int ix, const int iy, const int iz) { return ID3(iy, ix, iz, 3, NodeBlock::sizeX); }
+        // Used for host code (more convenient and less error prone)
+        static inline uint_t X(const int ix, const int iy, const int iz) { return GHOSTMAPX(ix,iy,iz); }
+        static inline uint_t Y(const int ix, const int iy, const int iz) { return GHOSTMAPY(ix,iy,iz); }
         static inline uint_t Z(const int ix, const int iy, const int iz) { return ID3(ix, iy, iz, NodeBlock::sizeX, NodeBlock::sizeY); }
     };
 

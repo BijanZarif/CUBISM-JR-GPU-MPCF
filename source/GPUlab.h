@@ -19,12 +19,6 @@
 #include <vector>
 #include <string>
 
-#ifndef _PAGEABLE_HOST_MEM_
-#include "cudaHostAllocator.h"
-typedef std::vector<Real, cudaHostAllocator<Real> > cuda_vector_t;
-#else
-typedef std::vector<Real> cuda_vector_t;
-#endif
 
 #ifdef _FLOAT_PRECISION_
 #define _MPI_REAL_ MPI_FLOAT

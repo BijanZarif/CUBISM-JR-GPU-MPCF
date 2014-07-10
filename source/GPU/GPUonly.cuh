@@ -9,8 +9,80 @@
 #include "GPU.h" // includes Types.h
 
 
-// DEVICE FUNCTIONS
+struct devPtrSet // 7 fluid quantities
+{
+    // helper structure to pass compound flow variables as one kernel argument
+    Real *r;
+    Real *u;
+    Real *v;
+    Real *w;
+    Real *e;
+    Real *G;
+    Real *P;
+    devPtrSet(RealPtrVec_t& c) : r(c[0]), u(c[1]), v(c[2]), w(c[3]), e(c[4]), G(c[5]), P(c[6]) { assert(c.size() == 7); }
+};
 
+
+struct Stencil
+{
+    // stencil data compound centered around a face with ID i-1/2:
+    // (i-3) (i-2) (i-1) | (i) (i+1) (i+2)
+    // the face with ID i-1/2 is indicated by "|"
+    Real im3, im2, im1, i, ip1, ip2;
+
+    __device__
+    Stencil(): im3(0), im2(0), im1(0), i(0), ip1(0), ip2(0) { }
+};
+
+
+///////////////////////////////////////////////////////////////////////////////
+//                           GLOBAL VARIABLES                                //
+///////////////////////////////////////////////////////////////////////////////
+extern RealPtrVec_t d_tmp;
+extern RealPtrVec_t d_rhs;
+extern RealPtrVec_t d_xgl;
+extern RealPtrVec_t d_xgr;
+extern RealPtrVec_t d_ygl;
+extern RealPtrVec_t d_ygr;
+
+extern RealPtrVec_t d_xflux;
+extern RealPtrVec_t d_yflux;
+extern RealPtrVec_t d_zflux;
+
+// 3D arrays
+extern std::vector<cudaArray_t> d_SOAin;
+
+// extraterms for advection equations
+extern Real *d_Gm, *d_Gp;
+extern Real *d_Pm, *d_Pp;
+extern Real *d_hllc_vel;
+extern Real *d_sumG, *d_sumP, *d_divU;
+
+// max SOS
+extern int *d_maxSOS;
+
+// use non-null stream (async)
+extern cudaStream_t stream1;
+extern cudaStream_t stream2;
+
+// events
+extern cudaEvent_t h2d_tmp_completed;
+extern cudaEvent_t divergence_completed;
+extern cudaEvent_t update_completed;
+
+// texture references
+texture<float, 3, cudaReadModeElementType> texR;
+texture<float, 3, cudaReadModeElementType> texU;
+texture<float, 3, cudaReadModeElementType> texV;
+texture<float, 3, cudaReadModeElementType> texW;
+texture<float, 3, cudaReadModeElementType> texE;
+texture<float, 3, cudaReadModeElementType> texG;
+texture<float, 3, cudaReadModeElementType> texP;
+
+
+///////////////////////////////////////////////////////////////////////////////
+//                             DEVICE FUNCTIONS                              //
+///////////////////////////////////////////////////////////////////////////////
 __device__
 inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, const Real f)
 {
@@ -110,6 +182,71 @@ inline Real _weno_minus_clipped(const Real a, const Real b, const Real c, const 
 
 
 __device__
+inline void _print_stencil(const Stencil& s, const uint_t ix, const uint_t iy, const uint_t iz)
+{
+    printf("(%d,%d,%d) im3 = %f, im2 = %f, im1 = %f, i = %f, ip1 = %f, ip2 = %f\n",ix,iy,iz,s.im3,s.im2,s.im1,s.i,s.ip1,s.ip2);
+}
+
+
+__device__
+inline void _load_stencil_tex3D_X(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex, const uint_t ix, const uint_t iy, const uint_t iz)
+{
+    // read textures (clamped x-addressing)
+    s.im3 = tex3D(tex, ix-3, iy, iz);
+    s.im2 = tex3D(tex, ix-2, iy, iz);
+    s.im1 = tex3D(tex, ix-1, iy, iz);
+    s.i   = tex3D(tex, ix,   iy, iz);
+    s.ip1 = tex3D(tex, ix+1, iy, iz);
+    s.ip2 = tex3D(tex, ix+2, iy, iz);
+    assert(!isnan(s.im3));
+    assert(!isnan(s.im2));
+    assert(!isnan(s.im1));
+    assert(!isnan(s.i));
+    assert(!isnan(s.ip1));
+    assert(!isnan(s.ip2));
+}
+
+
+__device__
+inline void _load_3ghosts_X(Real& g0, Real& g1, Real& g2, const Real * const ghosts, const uint_t iy, const uint_t iz)
+{
+    g0 = ghosts[GHOSTMAPX(0, iy, iz)];
+    g1 = ghosts[GHOSTMAPX(1, iy, iz)];
+    g2 = ghosts[GHOSTMAPX(2, iy, iz)];
+    assert(!isnan(g0));
+    assert(!isnan(g1));
+    assert(!isnan(g2));
+}
+
+
+__device__
+inline void _load_2ghosts_X(Real& g0, Real& g1, const uint_t ix0, const uint_t ix1, const Real * const ghosts, const uint_t iy, const uint_t iz)
+{
+    assert(ix0 < 3 && ix1 < 3);
+    g0 = ghosts[GHOSTMAPX(ix0, iy, iz)];
+    g1 = ghosts[GHOSTMAPX(ix1, iy, iz)];
+    assert(!isnan(g0));
+    assert(!isnan(g1));
+}
+
+
+__device__
+inline void _load_1ghost_X(Real& g0, const uint_t ix0, const Real * const ghosts, const uint_t iy, const uint_t iz)
+{
+    assert(ix0 < 3);
+    g0 = ghosts[GHOSTMAPX(ix0, iy, iz)];
+    assert(!isnan(g0));
+}
+
+/* __device__ */
+/* inline void _load_ghost_X(const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz, */
+/*         Real buf[][_NTHREADS_], const Real * const ghost) */
+/* { */
+/*     printf("(%d, %d, %d) maps to %d\n", ix, iy, iz, GHOSTMAPX(ix, iy, iz+global_iz)); */
+/* } */
+
+
+__device__
 inline void _xfetch_data(const texture<float, 3, cudaReadModeElementType> tex,
         const Real * const ghostL, const Real * const ghostR,
         const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz,
@@ -142,75 +279,75 @@ inline void _xfetch_data(const texture<float, 3, cudaReadModeElementType> tex,
 
     /* const uint_t iz3 = iz + 3; */
 
-    if (ix == 0)
-    {
-        qm3 = ghostL[idxm3];
-        qm2 = ghostL[idxm2];
-        qm1 = ghostL[idxm1];
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = tex3D(tex, ix+1, iy, iz);
-        qp3 = tex3D(tex, ix+2, iy, iz);
-    }
-    else if (ix == 1)
-    {
-        qm3 = ghostL[idxm2];
-        qm2 = ghostL[idxm1];
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = tex3D(tex, ix+1, iy, iz);
-        qp3 = tex3D(tex, ix+2, iy, iz);
-    }
-    else if (ix == 2)
-    {
-        qm3 = ghostL[idxm1];
-        qm2 = tex3D(tex, ix-2, iy, iz);
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = tex3D(tex, ix+1, iy, iz);
-        qp3 = tex3D(tex, ix+2, iy, iz);
-    }
-    else if (ix == NX-3)
-    {
-        qm3 = tex3D(tex, ix-3, iy, iz);
-        qm2 = tex3D(tex, ix-2, iy, iz);
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = tex3D(tex, ix+1, iy, iz);
-        qp3 = ghostR[idxp1];
-    }
-    else if (ix == NX-2)
-    {
-        qm3 = tex3D(tex, ix-3, iy, iz);
-        qm2 = tex3D(tex, ix-2, iy, iz);
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = ghostR[idxp1];
-        qp3 = ghostR[idxp2];
-    }
-    else if (ix == NX-1)
-    {
-        qm3 = tex3D(tex, ix-3, iy, iz);
-        qm2 = tex3D(tex, ix-2, iy, iz);
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = ghostR[idxp1];
-        qp2 = ghostR[idxp2];
-        qp3 = ghostR[idxp3];
-    }
-    else
-    {
-        qm3 = tex3D(tex, ix-3, iy, iz);
-        qm2 = tex3D(tex, ix-2, iy, iz);
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = tex3D(tex, ix+1, iy, iz);
-        qp3 = tex3D(tex, ix+2, iy, iz);
-    }
-    assert(!isnan(qm3));
-    assert(!isnan(qm2));
-    assert(!isnan(qm1));
-    assert(!isnan(qp1));
-    assert(!isnan(qp2));
-    assert(!isnan(qp3));
+    /* if (ix == 0) */
+    /* { */
+    /*     qm3 = ghostL[idxm3]; */
+    /*     qm2 = ghostL[idxm2]; */
+    /*     qm1 = ghostL[idxm1]; */
+    /*     qp1 = tex3D(tex, ix,   iy, iz); */
+    /*     qp2 = tex3D(tex, ix+1, iy, iz); */
+    /*     qp3 = tex3D(tex, ix+2, iy, iz); */
+    /* } */
+    /* else if (ix == 1) */
+    /* { */
+    /*     qm3 = ghostL[idxm2]; */
+    /*     qm2 = ghostL[idxm1]; */
+    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
+    /*     qp1 = tex3D(tex, ix,   iy, iz); */
+    /*     qp2 = tex3D(tex, ix+1, iy, iz); */
+    /*     qp3 = tex3D(tex, ix+2, iy, iz); */
+    /* } */
+    /* else if (ix == 2) */
+    /* { */
+    /*     qm3 = ghostL[idxm1]; */
+    /*     qm2 = tex3D(tex, ix-2, iy, iz); */
+    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
+    /*     qp1 = tex3D(tex, ix,   iy, iz); */
+    /*     qp2 = tex3D(tex, ix+1, iy, iz); */
+    /*     qp3 = tex3D(tex, ix+2, iy, iz); */
+    /* } */
+    /* else if (ix == NX-3) */
+    /* { */
+    /*     qm3 = tex3D(tex, ix-3, iy, iz); */
+    /*     qm2 = tex3D(tex, ix-2, iy, iz); */
+    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
+    /*     qp1 = tex3D(tex, ix,   iy, iz); */
+    /*     qp2 = tex3D(tex, ix+1, iy, iz); */
+    /*     qp3 = ghostR[idxp1]; */
+    /* } */
+    /* else if (ix == NX-2) */
+    /* { */
+    /*     qm3 = tex3D(tex, ix-3, iy, iz); */
+    /*     qm2 = tex3D(tex, ix-2, iy, iz); */
+    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
+    /*     qp1 = tex3D(tex, ix,   iy, iz); */
+    /*     qp2 = ghostR[idxp1]; */
+    /*     qp3 = ghostR[idxp2]; */
+    /* } */
+    /* else if (ix == NX-1) */
+    /* { */
+    /*     qm3 = tex3D(tex, ix-3, iy, iz); */
+    /*     qm2 = tex3D(tex, ix-2, iy, iz); */
+    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
+    /*     qp1 = ghostR[idxp1]; */
+    /*     qp2 = ghostR[idxp2]; */
+    /*     qp3 = ghostR[idxp3]; */
+    /* } */
+    /* else */
+    /* { */
+    /*     qm3 = tex3D(tex, ix-3, iy, iz); */
+    /*     qm2 = tex3D(tex, ix-2, iy, iz); */
+    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
+    /*     qp1 = tex3D(tex, ix,   iy, iz); */
+    /*     qp2 = tex3D(tex, ix+1, iy, iz); */
+    /*     qp3 = tex3D(tex, ix+2, iy, iz); */
+    /* } */
+    /* assert(!isnan(qm3)); */
+    /* assert(!isnan(qm2)); */
+    /* assert(!isnan(qm1)); */
+    /* assert(!isnan(qp1)); */
+    /* assert(!isnan(qp2)); */
+    /* assert(!isnan(qp3)); */
 }
 
 

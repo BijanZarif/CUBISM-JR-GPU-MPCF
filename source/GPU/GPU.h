@@ -6,7 +6,20 @@
  * */
 #pragma once
 
+#include <vector>
 #include "Types.h"
+
+#ifndef _NTHREADS_
+#define _NTHREADS_ 64
+#endif
+
+
+#ifndef _PAGEABLE_HOST_MEM_
+#include "cudaHostAllocator.h"
+typedef std::vector<Real, cudaHostAllocator<Real> > cuda_vector_t;
+#else
+typedef std::vector<Real> cuda_vector_t;
+#endif
 
 
 // include these declarations in host code
@@ -58,5 +71,8 @@ namespace GPU
         void divergence(const Real a, const Real dtinvh, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH);
         void update(const Real b, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH);
         void MaxSpeedOfSound(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH);
+
+        // Test Kernel wrapper
+        void TestKernel();
     }
 }
