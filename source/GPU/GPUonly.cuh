@@ -8,6 +8,10 @@
 
 #include "GPU.h" // includes Types.h
 
+#define NX NodeBlock::sizeX
+#define NY NodeBlock::sizeY
+#define NXP1 NodeBlock::sizeX+1
+#define NYP1 NodeBlock::sizeY+1
 
 struct devPtrSet // 7 fluid quantities
 {
@@ -32,6 +36,15 @@ struct Stencil
 
     __device__
     Stencil(): im3(0), im2(0), im1(0), i(0), ip1(0), ip2(0) { }
+
+    __device__
+    inline bool operator>(const Real f) { return (im3>f && im2>f && im1>f && i>f && ip1>f && ip2>f); }
+    __device__
+    inline bool operator>=(const Real f) { return (im3>=f && im2>=f && im1>=f && i>=f && ip1>=f && ip2>=f); }
+    __device__
+    inline bool operator<(const Real f) { return (im3<f && im2<f && im1<f && i<f && ip1<f && ip2<f); }
+    __device__
+    inline bool operator<=(const Real f) { return (im3<=f && im2<=f && im1<=f && i<=f && ip1<=f && ip2<=f); }
 };
 
 
@@ -238,6 +251,56 @@ inline void _load_1ghost_X(Real& g0, const uint_t ix0, const Real * const ghosts
     assert(!isnan(g0));
 }
 
+__device__
+inline void _load_stencil_tex3D_Y(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex, const uint_t ix, const uint_t iy, const uint_t iz)
+{
+    // read textures (clamped y-addressing)
+    s.im3 = tex3D(tex, ix, iy-3, iz);
+    s.im2 = tex3D(tex, ix, iy-2, iz);
+    s.im1 = tex3D(tex, ix, iy-1, iz);
+    s.i   = tex3D(tex, ix, iy,   iz);
+    s.ip1 = tex3D(tex, ix, iy+1, iz);
+    s.ip2 = tex3D(tex, ix, iy+2, iz);
+    assert(!isnan(s.im3));
+    assert(!isnan(s.im2));
+    assert(!isnan(s.im1));
+    assert(!isnan(s.i));
+    assert(!isnan(s.ip1));
+    assert(!isnan(s.ip2));
+}
+
+
+__device__
+inline void _load_3ghosts_Y(Real& g0, Real& g1, Real& g2, const Real * const ghosts, const uint_t ix, const uint_t iz)
+{
+    g0 = ghosts[GHOSTMAPY(ix, 0, iz)];
+    g1 = ghosts[GHOSTMAPY(ix, 1, iz)];
+    g2 = ghosts[GHOSTMAPY(ix, 2, iz)];
+    assert(!isnan(g0));
+    assert(!isnan(g1));
+    assert(!isnan(g2));
+}
+
+
+__device__
+inline void _load_2ghosts_Y(Real& g0, Real& g1, const uint_t iy0, const uint_t iy1, const Real * const ghosts, const uint_t ix, const uint_t iz)
+{
+    assert(iy0 < 3 && iy1 < 3);
+    g0 = ghosts[GHOSTMAPY(ix, iy0, iz)];
+    g1 = ghosts[GHOSTMAPY(ix, iy1, iz)];
+    assert(!isnan(g0));
+    assert(!isnan(g1));
+}
+
+
+__device__
+inline void _load_1ghost_Y(Real& g0, const uint_t iy0, const Real * const ghosts, const uint_t ix, const uint_t iz)
+{
+    assert(iy0 < 3);
+    g0 = ghosts[GHOSTMAPY(ix, iy0, iz)];
+    assert(!isnan(g0));
+}
+
 /* __device__ */
 /* inline void _load_ghost_X(const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz, */
 /*         Real buf[][_NTHREADS_], const Real * const ghost) */
@@ -247,196 +310,472 @@ inline void _load_1ghost_X(Real& g0, const uint_t ix0, const Real * const ghosts
 
 
 __device__
+inline void _read_stencil_X(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex,
+        const Real * const ghostL, const Real * const ghostR,
+        const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz)
+{
+    switch (ix)
+    {
+        case 0:
+            s.im3 = ghostL[GHOSTMAPX(0, iy, iz-3+global_iz)];
+            s.im2 = ghostL[GHOSTMAPX(1, iy, iz-3+global_iz)];
+            s.im1 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)];
+            s.i   = tex3D(tex, ix,   iy, iz);
+            s.ip1 = tex3D(tex, ix+1, iy, iz);
+            s.ip2 = tex3D(tex, ix+2, iy, iz);
+            break;
+        case 1:
+            s.im3 = ghostL[GHOSTMAPX(1, iy, iz-3+global_iz)];
+            s.im2 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)];
+            s.im1 = tex3D(tex, ix-1, iy, iz);
+            s.i   = tex3D(tex, ix,   iy, iz);
+            s.ip1 = tex3D(tex, ix+1, iy, iz);
+            s.ip2 = tex3D(tex, ix+2, iy, iz);
+            break;
+        case 2:
+            s.im3 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)];
+            s.im2 = tex3D(tex, ix-2, iy, iz);
+            s.im1 = tex3D(tex, ix-1, iy, iz);
+            s.i   = tex3D(tex, ix,   iy, iz);
+            s.ip1 = tex3D(tex, ix+1, iy, iz);
+            s.ip2 = tex3D(tex, ix+2, iy, iz);
+            break;
+        case NXP1-3:
+            s.im3 = tex3D(tex, ix-3, iy, iz);
+            s.im2 = tex3D(tex, ix-2, iy, iz);
+            s.im1 = tex3D(tex, ix-1, iy, iz);
+            s.i   = tex3D(tex, ix,   iy, iz);
+            s.ip1 = tex3D(tex, ix+1, iy, iz);
+            s.ip2 = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)];
+            break;
+        case NXP1-2:
+            s.im3 = tex3D(tex, ix-3, iy, iz);
+            s.im2 = tex3D(tex, ix-2, iy, iz);
+            s.im1 = tex3D(tex, ix-1, iy, iz);
+            s.i   = tex3D(tex, ix,   iy, iz);
+            s.ip1 = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)];
+            s.ip2 = ghostR[GHOSTMAPX(1, iy, iz-3+global_iz)];
+            break;
+        case NXP1-1:
+            s.im3 = tex3D(tex, ix-3, iy, iz);
+            s.im2 = tex3D(tex, ix-2, iy, iz);
+            s.im1 = tex3D(tex, ix-1, iy, iz);
+            s.i   = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)];
+            s.ip1 = ghostR[GHOSTMAPX(1, iy, iz-3+global_iz)];
+            s.ip2 = ghostR[GHOSTMAPX(2, iy, iz-3+global_iz)];
+            break;
+        default:
+            s.im3 = tex3D(tex, ix-3, iy, iz);
+            s.im2 = tex3D(tex, ix-2, iy, iz);
+            s.im1 = tex3D(tex, ix-1, iy, iz);
+            s.i   = tex3D(tex, ix,   iy, iz);
+            s.ip1 = tex3D(tex, ix+1, iy, iz);
+            s.ip2 = tex3D(tex, ix+2, iy, iz);
+            break;
+    }
+    /* if (ix == 0) */
+    /* { */
+    /*     s.im3 = ghostL[GHOSTMAPX(0, iy, iz-3+global_iz)]; */
+    /*     s.im2 = ghostL[GHOSTMAPX(1, iy, iz-3+global_iz)]; */
+    /*     s.im1 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)]; */
+    /*     s.i   = tex3D(tex, ix,   iy, iz); */
+    /*     s.ip1 = tex3D(tex, ix+1, iy, iz); */
+    /*     s.ip2 = tex3D(tex, ix+2, iy, iz); */
+    /* } */
+    /* else if (ix == 1) */
+    /* { */
+    /*     s.im2 = ghostL[GHOSTMAPX(1, iy, iz-3+global_iz)]; */
+    /*     s.im1 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)]; */
+    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
+    /*     s.i   = tex3D(tex, ix,   iy, iz); */
+    /*     s.ip1 = tex3D(tex, ix+1, iy, iz); */
+    /*     s.ip2 = tex3D(tex, ix+2, iy, iz); */
+    /* } */
+    /* else if (ix == 2) */
+    /* { */
+    /*     s.im1 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)]; */
+    /*     s.im2 = tex3D(tex, ix-2, iy, iz); */
+    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
+    /*     s.i   = tex3D(tex, ix,   iy, iz); */
+    /*     s.ip1 = tex3D(tex, ix+1, iy, iz); */
+    /*     s.ip2 = tex3D(tex, ix+2, iy, iz); */
+    /* } */
+    /* else if (ix == NXP1-3) */
+    /* { */
+    /*     s.im3 = tex3D(tex, ix-3, iy, iz); */
+    /*     s.im2 = tex3D(tex, ix-2, iy, iz); */
+    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
+    /*     s.i   = tex3D(tex, ix,   iy, iz); */
+    /*     s.ip1 = tex3D(tex, ix+1, iy, iz); */
+    /*     s.ip2 = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)]; */
+    /* } */
+    /* else if (ix == NXP1-2) */
+    /* { */
+    /*     s.im3 = tex3D(tex, ix-3, iy, iz); */
+    /*     s.im2 = tex3D(tex, ix-2, iy, iz); */
+    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
+    /*     s.i   = tex3D(tex, ix,   iy, iz); */
+    /*     s.ip1 = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)]; */
+    /*     s.ip2 = ghostR[GHOSTMAPX(1, iy, iz-3+global_iz)]; */
+    /* } */
+    /* else if (ix == NXP1-1) */
+    /* { */
+    /*     s.im3 = tex3D(tex, ix-3, iy, iz); */
+    /*     s.im2 = tex3D(tex, ix-2, iy, iz); */
+    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
+    /*     s.i   = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)]; */
+    /*     s.ip1 = ghostR[GHOSTMAPX(1, iy, iz-3+global_iz)]; */
+    /*     s.ip2 = ghostR[GHOSTMAPX(2, iy, iz-3+global_iz)]; */
+    /* } */
+    /* else */
+    /* { */
+    /*     s.im3 = tex3D(tex, ix-3, iy, iz); */
+    /*     s.im2 = tex3D(tex, ix-2, iy, iz); */
+    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
+    /*     s.i   = tex3D(tex, ix,   iy, iz); */
+    /*     s.ip1 = tex3D(tex, ix+1, iy, iz); */
+    /*     s.ip2 = tex3D(tex, ix+2, iy, iz); */
+    /* } */
+    assert(!isnan(s.im3));
+    assert(!isnan(s.im2));
+    assert(!isnan(s.im1));
+    assert(!isnan(s.i));
+    assert(!isnan(s.ip1));
+    assert(!isnan(s.ip2));
+}
+
+
+__device__
+inline void _read_stencil_Y(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex,
+        const Real * const ghostL, const Real * const ghostR,
+        const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz)
+{
+    switch (iy)
+    {
+        case 0:
+            s.im3 = ghostL[GHOSTMAPY(ix, 0, iz-3+global_iz)];
+            s.im2 = ghostL[GHOSTMAPY(ix, 1, iz-3+global_iz)];
+            s.im1 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)];
+            s.i   = tex3D(tex, ix, iy,   iz);
+            s.ip1 = tex3D(tex, ix, iy+1, iz);
+            s.ip2 = tex3D(tex, ix, iy+2, iz);
+            break;
+        case 1:
+            s.im3 = ghostL[GHOSTMAPY(ix, 1, iz-3+global_iz)];
+            s.im2 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)];
+            s.im1 = tex3D(tex, ix, iy-1, iz);
+            s.i   = tex3D(tex, ix, iy,   iz);
+            s.ip1 = tex3D(tex, ix, iy+1, iz);
+            s.ip2 = tex3D(tex, ix, iy+2, iz);
+            break;
+        case 2:
+            s.im3 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)];
+            s.im2 = tex3D(tex, ix, iy-2, iz);
+            s.im1 = tex3D(tex, ix, iy-1, iz);
+            s.i   = tex3D(tex, ix, iy,   iz);
+            s.ip1 = tex3D(tex, ix, iy+1, iz);
+            s.ip2 = tex3D(tex, ix, iy+2, iz);
+            break;
+        case NYP1-3:
+            s.im3 = tex3D(tex, ix, iy-3, iz);
+            s.im2 = tex3D(tex, ix, iy-2, iz);
+            s.im1 = tex3D(tex, ix, iy-1, iz);
+            s.i   = tex3D(tex, ix, iy,   iz);
+            s.ip1 = tex3D(tex, ix, iy+1, iz);
+            s.ip2 = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)];
+            break;
+        case NYP1-2:
+            s.im3 = tex3D(tex, ix, iy-3, iz);
+            s.im2 = tex3D(tex, ix, iy-2, iz);
+            s.im1 = tex3D(tex, ix, iy-1, iz);
+            s.i   = tex3D(tex, ix, iy,   iz);
+            s.ip1 = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)];
+            s.ip2 = ghostR[GHOSTMAPY(ix, 1, iz-3+global_iz)];
+            break;
+        case NYP1-1:
+            s.im3 = tex3D(tex, ix, iy-3, iz);
+            s.im2 = tex3D(tex, ix, iy-2, iz);
+            s.im1 = tex3D(tex, ix, iy-1, iz);
+            s.i   = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)];
+            s.ip1 = ghostR[GHOSTMAPY(ix, 1, iz-3+global_iz)];
+            s.ip2 = ghostR[GHOSTMAPY(ix, 2, iz-3+global_iz)];
+            break;
+        default:
+            s.im3 = tex3D(tex, ix, iy-3, iz);
+            s.im2 = tex3D(tex, ix, iy-2, iz);
+            s.im1 = tex3D(tex, ix, iy-1, iz);
+            s.i   = tex3D(tex, ix, iy,   iz);
+            s.ip1 = tex3D(tex, ix, iy+1, iz);
+            s.ip2 = tex3D(tex, ix, iy+2, iz);
+            break;
+    }
+    /* if (iy == 0) */
+    /* { */
+    /*     s.im3 = ghostL[GHOSTMAPY(ix, 0, iz-3+global_iz)]; */
+    /*     s.im2 = ghostL[GHOSTMAPY(ix, 1, iz-3+global_iz)]; */
+    /*     s.im1 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)]; */
+    /*     s.i   = tex3D(tex, ix, iy,   iz); */
+    /*     s.ip1 = tex3D(tex, ix, iy+1, iz); */
+    /*     s.ip2 = tex3D(tex, ix, iy+2, iz); */
+    /* } */
+    /* else if (iy == 1) */
+    /* { */
+    /*     s.im3 = ghostL[GHOSTMAPY(ix, 1, iz-3+global_iz)]; */
+    /*     s.im2 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)]; */
+    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
+    /*     s.i   = tex3D(tex, ix, iy,   iz); */
+    /*     s.ip1 = tex3D(tex, ix, iy+1, iz); */
+    /*     s.ip2 = tex3D(tex, ix, iy+2, iz); */
+    /* } */
+    /* else if (iy == 2) */
+    /* { */
+    /*     s.im3 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)]; */
+    /*     s.im2 = tex3D(tex, ix, iy-2, iz); */
+    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
+    /*     s.i   = tex3D(tex, ix, iy,   iz); */
+    /*     s.ip1 = tex3D(tex, ix, iy+1, iz); */
+    /*     s.ip2 = tex3D(tex, ix, iy+2, iz); */
+    /* } */
+    /* else if (iy == NYP1-3) */
+    /* { */
+    /*     s.im3 = tex3D(tex, ix, iy-3, iz); */
+    /*     s.im2 = tex3D(tex, ix, iy-2, iz); */
+    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
+    /*     s.i   = tex3D(tex, ix, iy,   iz); */
+    /*     s.ip1 = tex3D(tex, ix, iy+1, iz); */
+    /*     s.ip2 = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)]; */
+    /* } */
+    /* else if (iy == NYP1-2) */
+    /* { */
+    /*     s.im3 = tex3D(tex, ix, iy-3, iz); */
+    /*     s.im2 = tex3D(tex, ix, iy-2, iz); */
+    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
+    /*     s.i   = tex3D(tex, ix, iy,   iz); */
+    /*     s.ip1 = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)]; */
+    /*     s.ip2 = ghostR[GHOSTMAPY(ix, 1, iz-3+global_iz)]; */
+    /* } */
+    /* else if (iy == NYP1-1) */
+    /* { */
+    /*     s.im3 = tex3D(tex, ix, iy-3, iz); */
+    /*     s.im2 = tex3D(tex, ix, iy-2, iz); */
+    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
+    /*     s.i   = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)]; */
+    /*     s.ip1 = ghostR[GHOSTMAPY(ix, 1, iz-3+global_iz)]; */
+    /*     s.ip2 = ghostR[GHOSTMAPY(ix, 2, iz-3+global_iz)]; */
+    /* } */
+    /* else */
+    /* { */
+    /*     s.im3 = tex3D(tex, ix, iy-3, iz); */
+    /*     s.im2 = tex3D(tex, ix, iy-2, iz); */
+    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
+    /*     s.i   = tex3D(tex, ix, iy,   iz); */
+    /*     s.ip1 = tex3D(tex, ix, iy+1, iz); */
+    /*     s.ip2 = tex3D(tex, ix, iy+2, iz); */
+    /* } */
+    assert(!isnan(s.im3));
+    assert(!isnan(s.im2));
+    assert(!isnan(s.im1));
+    assert(!isnan(s.i));
+    assert(!isnan(s.ip1));
+    assert(!isnan(s.ip2));
+}
+
+
+__device__
+inline void _read_stencil_Z(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex,
+        const uint_t ix, const uint_t iy, const uint_t iz)
+{
+    s.im3 = tex3D(tex, ix, iy, iz-3);
+    s.im2 = tex3D(tex, ix, iy, iz-2);
+    s.im1 = tex3D(tex, ix, iy, iz-1);
+    s.i   = tex3D(tex, ix, iy, iz);
+    s.ip1 = tex3D(tex, ix, iy, iz+1);
+    s.ip2 = tex3D(tex, ix, iy, iz+2);
+    assert(!isnan(s.im3));
+    assert(!isnan(s.im2));
+    assert(!isnan(s.im1));
+    assert(!isnan(s.i));
+    assert(!isnan(s.ip1));
+    assert(!isnan(s.ip2));
+}
+
+
+__device__
 inline void _xfetch_data(const texture<float, 3, cudaReadModeElementType> tex,
         const Real * const ghostL, const Real * const ghostR,
         const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz,
         Real& qm3, Real& qm2, Real& qm1, Real& qp1, Real& qp2, Real& qp3)
 {
-    /* *
-     * -> use ghostmap here!
-     * */
-    //
-    //
     // Indexers for the left ghosts.  The starting element is in the
     // outermost layer.  iz must be shifted according to the currently
     // processed chunk, since all of the xghosts reside on the GPU.
 
-/*     const uint_t idxm1 = ID3(iy, 2, iz+global_iz, NY, 3); */
-/*     const uint_t idxm2 = ID3(iy, 1, iz+global_iz, NY, 3); */
-/*     const uint_t idxm3 = ID3(iy, 0, iz+global_iz, NY, 3); */
+    const uint_t idxm1 = GHOSTMAPX(2, iy, iz-3+global_iz);
+    const uint_t idxm2 = GHOSTMAPX(1, iy, iz-3+global_iz);
+    const uint_t idxm3 = GHOSTMAPX(0, iy, iz-3+global_iz);
 
     // Indexers for the right ghosts.  The starting element is in the
     // innermost layer.  iz must be shifted according to the currently
     // processed chunk, since all of the xghosts reside on the GPU.
 
-    /* const uint_t idxp1 = ID3(iy, 0, iz+global_iz, NY, 3); */
-    /* const uint_t idxp2 = ID3(iy, 1, iz+global_iz, NY, 3); */
-    /* const uint_t idxp3 = ID3(iy, 2, iz+global_iz, NY, 3); */
+    const uint_t idxp1 = GHOSTMAPX(0, iy, iz-3+global_iz);
+    const uint_t idxp2 = GHOSTMAPX(1, iy, iz-3+global_iz);
+    const uint_t idxp3 = GHOSTMAPX(2, iy, iz-3+global_iz);
 
-    // Input textures are current_chunk_length+6 slices wide along the
-    // z-direction.  Hence, a shift of 3 slices is required for the iz index
-    // when accessing textures
-
-    /* const uint_t iz3 = iz + 3; */
-
-    /* if (ix == 0) */
-    /* { */
-    /*     qm3 = ghostL[idxm3]; */
-    /*     qm2 = ghostL[idxm2]; */
-    /*     qm1 = ghostL[idxm1]; */
-    /*     qp1 = tex3D(tex, ix,   iy, iz); */
-    /*     qp2 = tex3D(tex, ix+1, iy, iz); */
-    /*     qp3 = tex3D(tex, ix+2, iy, iz); */
-    /* } */
-    /* else if (ix == 1) */
-    /* { */
-    /*     qm3 = ghostL[idxm2]; */
-    /*     qm2 = ghostL[idxm1]; */
-    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
-    /*     qp1 = tex3D(tex, ix,   iy, iz); */
-    /*     qp2 = tex3D(tex, ix+1, iy, iz); */
-    /*     qp3 = tex3D(tex, ix+2, iy, iz); */
-    /* } */
-    /* else if (ix == 2) */
-    /* { */
-    /*     qm3 = ghostL[idxm1]; */
-    /*     qm2 = tex3D(tex, ix-2, iy, iz); */
-    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
-    /*     qp1 = tex3D(tex, ix,   iy, iz); */
-    /*     qp2 = tex3D(tex, ix+1, iy, iz); */
-    /*     qp3 = tex3D(tex, ix+2, iy, iz); */
-    /* } */
-    /* else if (ix == NX-3) */
-    /* { */
-    /*     qm3 = tex3D(tex, ix-3, iy, iz); */
-    /*     qm2 = tex3D(tex, ix-2, iy, iz); */
-    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
-    /*     qp1 = tex3D(tex, ix,   iy, iz); */
-    /*     qp2 = tex3D(tex, ix+1, iy, iz); */
-    /*     qp3 = ghostR[idxp1]; */
-    /* } */
-    /* else if (ix == NX-2) */
-    /* { */
-    /*     qm3 = tex3D(tex, ix-3, iy, iz); */
-    /*     qm2 = tex3D(tex, ix-2, iy, iz); */
-    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
-    /*     qp1 = tex3D(tex, ix,   iy, iz); */
-    /*     qp2 = ghostR[idxp1]; */
-    /*     qp3 = ghostR[idxp2]; */
-    /* } */
-    /* else if (ix == NX-1) */
-    /* { */
-    /*     qm3 = tex3D(tex, ix-3, iy, iz); */
-    /*     qm2 = tex3D(tex, ix-2, iy, iz); */
-    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
-    /*     qp1 = ghostR[idxp1]; */
-    /*     qp2 = ghostR[idxp2]; */
-    /*     qp3 = ghostR[idxp3]; */
-    /* } */
-    /* else */
-    /* { */
-    /*     qm3 = tex3D(tex, ix-3, iy, iz); */
-    /*     qm2 = tex3D(tex, ix-2, iy, iz); */
-    /*     qm1 = tex3D(tex, ix-1, iy, iz); */
-    /*     qp1 = tex3D(tex, ix,   iy, iz); */
-    /*     qp2 = tex3D(tex, ix+1, iy, iz); */
-    /*     qp3 = tex3D(tex, ix+2, iy, iz); */
-    /* } */
-    /* assert(!isnan(qm3)); */
-    /* assert(!isnan(qm2)); */
-    /* assert(!isnan(qm1)); */
-    /* assert(!isnan(qp1)); */
-    /* assert(!isnan(qp2)); */
-    /* assert(!isnan(qp3)); */
-}
-
-
-__device__
-inline void _yfetch_data(const texture<float, 3, cudaReadModeElementType> tex, const Real* const ghostL, const Real* const ghostR,
-        const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz, const uint_t NX, const uint_t NY,
-        Real& qm3, Real& qm2, Real& qm1, Real& qp1, Real& qp2, Real& qp3)
-{
-    // Indexers for the left ghosts.  The starting element is in the
-    // outermost layer.  iz must be shifted according to the currently
-    // processed chunk, since all of the yghosts reside on the GPU.
-    const uint_t idxm1 = ID3(ix, 2, iz+global_iz, NX, 3);
-    const uint_t idxm2 = ID3(ix, 1, iz+global_iz, NX, 3);
-    const uint_t idxm3 = ID3(ix, 0, iz+global_iz, NX, 3);
-
-    // Indexers for the right ghosts.  The starting element is in the
-    // innermost layer.  iz must be shifted according to the currently
-    // processed chunk, since all of the yghosts reside on the GPU.
-    const uint_t idxp1 = ID3(ix, 0, iz+global_iz, NX, 3);
-    const uint_t idxp2 = ID3(ix, 1, iz+global_iz, NX, 3);
-    const uint_t idxp3 = ID3(ix, 2, iz+global_iz, NX, 3);
-
-    // Input textures are current_chunk_length+6 slices wide along the
-    // z-direction.  Hence, a shift of 3 slices is required for the iz index
-    // when accessing textures
-    const uint_t iz3 = iz + 3;
-
-    if (iy == 0)
+    if (ix == 0)
     {
         qm3 = ghostL[idxm3];
         qm2 = ghostL[idxm2];
         qm1 = ghostL[idxm1];
-        qp1 = tex3D(tex, ix, iy,   iz3);
-        qp2 = tex3D(tex, ix, iy+1, iz3);
-        qp3 = tex3D(tex, ix, iy+2, iz3);
+        qp1 = tex3D(tex, ix,   iy, iz);
+        qp2 = tex3D(tex, ix+1, iy, iz);
+        qp3 = tex3D(tex, ix+2, iy, iz);
     }
-    else if (iy == 1)
+    else if (ix == 1)
     {
         qm3 = ghostL[idxm2];
         qm2 = ghostL[idxm1];
-        qm1 = tex3D(tex, ix, iy-1, iz3);
-        qp1 = tex3D(tex, ix, iy,   iz3);
-        qp2 = tex3D(tex, ix, iy+1, iz3);
-        qp3 = tex3D(tex, ix, iy+2, iz3);
+        qm1 = tex3D(tex, ix-1, iy, iz);
+        qp1 = tex3D(tex, ix,   iy, iz);
+        qp2 = tex3D(tex, ix+1, iy, iz);
+        qp3 = tex3D(tex, ix+2, iy, iz);
     }
-    else if (iy == 2)
+    else if (ix == 2)
     {
         qm3 = ghostL[idxm1];
-        qm2 = tex3D(tex, ix, iy-2, iz3);
-        qm1 = tex3D(tex, ix, iy-1, iz3);
-        qp1 = tex3D(tex, ix, iy,   iz3);
-        qp2 = tex3D(tex, ix, iy+1, iz3);
-        qp3 = tex3D(tex, ix, iy+2, iz3);
+        qm2 = tex3D(tex, ix-2, iy, iz);
+        qm1 = tex3D(tex, ix-1, iy, iz);
+        qp1 = tex3D(tex, ix,   iy, iz);
+        qp2 = tex3D(tex, ix+1, iy, iz);
+        qp3 = tex3D(tex, ix+2, iy, iz);
     }
-    else if (iy == NY-3)
+    else if (ix == NXP1-3)
     {
-        qm3 = tex3D(tex, ix, iy-3, iz3);
-        qm2 = tex3D(tex, ix, iy-2, iz3);
-        qm1 = tex3D(tex, ix, iy-1, iz3);
-        qp1 = tex3D(tex, ix, iy,   iz3);
-        qp2 = tex3D(tex, ix, iy+1, iz3);
+        qm3 = tex3D(tex, ix-3, iy, iz);
+        qm2 = tex3D(tex, ix-2, iy, iz);
+        qm1 = tex3D(tex, ix-1, iy, iz);
+        qp1 = tex3D(tex, ix,   iy, iz);
+        qp2 = tex3D(tex, ix+1, iy, iz);
         qp3 = ghostR[idxp1];
     }
-    else if (iy == NY-2)
+    else if (ix == NXP1-2)
     {
-        qm3 = tex3D(tex, ix, iy-3, iz3);
-        qm2 = tex3D(tex, ix, iy-2, iz3);
-        qm1 = tex3D(tex, ix, iy-1, iz3);
-        qp1 = tex3D(tex, ix, iy,   iz3);
+        qm3 = tex3D(tex, ix-3, iy, iz);
+        qm2 = tex3D(tex, ix-2, iy, iz);
+        qm1 = tex3D(tex, ix-1, iy, iz);
+        qp1 = tex3D(tex, ix,   iy, iz);
         qp2 = ghostR[idxp1];
         qp3 = ghostR[idxp2];
     }
-    else if (iy == NY-1)
+    else if (ix == NXP1-1)
     {
-        qm3 = tex3D(tex, ix, iy-3, iz3);
-        qm2 = tex3D(tex, ix, iy-2, iz3);
-        qm1 = tex3D(tex, ix, iy-1, iz3);
+        qm3 = tex3D(tex, ix-3, iy, iz);
+        qm2 = tex3D(tex, ix-2, iy, iz);
+        qm1 = tex3D(tex, ix-1, iy, iz);
         qp1 = ghostR[idxp1];
         qp2 = ghostR[idxp2];
         qp3 = ghostR[idxp3];
     }
     else
     {
-        qm3 = tex3D(tex, ix, iy-3, iz3);
-        qm2 = tex3D(tex, ix, iy-2, iz3);
-        qm1 = tex3D(tex, ix, iy-1, iz3);
-        qp1 = tex3D(tex, ix, iy,   iz3);
-        qp2 = tex3D(tex, ix, iy+1, iz3);
-        qp3 = tex3D(tex, ix, iy+2, iz3);
+        qm3 = tex3D(tex, ix-3, iy, iz);
+        qm2 = tex3D(tex, ix-2, iy, iz);
+        qm1 = tex3D(tex, ix-1, iy, iz);
+        qp1 = tex3D(tex, ix,   iy, iz);
+        qp2 = tex3D(tex, ix+1, iy, iz);
+        qp3 = tex3D(tex, ix+2, iy, iz);
+    }
+    assert(!isnan(qm3));
+    assert(!isnan(qm2));
+    assert(!isnan(qm1));
+    assert(!isnan(qp1));
+    assert(!isnan(qp2));
+    assert(!isnan(qp3));
+}
+
+
+__device__
+inline void _yfetch_data(const texture<float, 3, cudaReadModeElementType> tex,
+        const Real* const ghostL, const Real* const ghostR,
+        const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz,
+        Real& qm3, Real& qm2, Real& qm1, Real& qp1, Real& qp2, Real& qp3)
+{
+    // Indexers for the left ghosts.  The starting element is in the
+    // outermost layer.  iz must be shifted according to the currently
+    // processed chunk, since all of the yghosts reside on the GPU.
+    const uint_t idxm1 = GHOSTMAPY(ix, 2, iz-3+global_iz);
+    const uint_t idxm2 = GHOSTMAPY(ix, 1, iz-3+global_iz);
+    const uint_t idxm3 = GHOSTMAPY(ix, 0, iz-3+global_iz);
+
+    // Indexers for the right ghosts.  The starting element is in the
+    // innermost layer.  iz must be shifted according to the currently
+    // processed chunk, since all of the yghosts reside on the GPU.
+    const uint_t idxp1 = GHOSTMAPY(ix, 0, iz-3+global_iz);
+    const uint_t idxp2 = GHOSTMAPY(ix, 1, iz-3+global_iz);
+    const uint_t idxp3 = GHOSTMAPY(ix, 2, iz-3+global_iz);
+
+    if (iy == 0)
+    {
+        qm3 = ghostL[idxm3];
+        qm2 = ghostL[idxm2];
+        qm1 = ghostL[idxm1];
+        qp1 = tex3D(tex, ix, iy,   iz);
+        qp2 = tex3D(tex, ix, iy+1, iz);
+        qp3 = tex3D(tex, ix, iy+2, iz);
+    }
+    else if (iy == 1)
+    {
+        qm3 = ghostL[idxm2];
+        qm2 = ghostL[idxm1];
+        qm1 = tex3D(tex, ix, iy-1, iz);
+        qp1 = tex3D(tex, ix, iy,   iz);
+        qp2 = tex3D(tex, ix, iy+1, iz);
+        qp3 = tex3D(tex, ix, iy+2, iz);
+    }
+    else if (iy == 2)
+    {
+        qm3 = ghostL[idxm1];
+        qm2 = tex3D(tex, ix, iy-2, iz);
+        qm1 = tex3D(tex, ix, iy-1, iz);
+        qp1 = tex3D(tex, ix, iy,   iz);
+        qp2 = tex3D(tex, ix, iy+1, iz);
+        qp3 = tex3D(tex, ix, iy+2, iz);
+    }
+    else if (iy == NYP1-3)
+    {
+        qm3 = tex3D(tex, ix, iy-3, iz);
+        qm2 = tex3D(tex, ix, iy-2, iz);
+        qm1 = tex3D(tex, ix, iy-1, iz);
+        qp1 = tex3D(tex, ix, iy,   iz);
+        qp2 = tex3D(tex, ix, iy+1, iz);
+        qp3 = ghostR[idxp1];
+    }
+    else if (iy == NYP1-2)
+    {
+        qm3 = tex3D(tex, ix, iy-3, iz);
+        qm2 = tex3D(tex, ix, iy-2, iz);
+        qm1 = tex3D(tex, ix, iy-1, iz);
+        qp1 = tex3D(tex, ix, iy,   iz);
+        qp2 = ghostR[idxp1];
+        qp3 = ghostR[idxp2];
+    }
+    else if (iy == NYP1-1)
+    {
+        qm3 = tex3D(tex, ix, iy-3, iz);
+        qm2 = tex3D(tex, ix, iy-2, iz);
+        qm1 = tex3D(tex, ix, iy-1, iz);
+        qp1 = ghostR[idxp1];
+        qp2 = ghostR[idxp2];
+        qp3 = ghostR[idxp3];
+    }
+    else
+    {
+        qm3 = tex3D(tex, ix, iy-3, iz);
+        qm2 = tex3D(tex, ix, iy-2, iz);
+        qm1 = tex3D(tex, ix, iy-1, iz);
+        qp1 = tex3D(tex, ix, iy,   iz);
+        qp2 = tex3D(tex, ix, iy+1, iz);
+        qp3 = tex3D(tex, ix, iy+2, iz);
     }
     assert(!isnan(qm3));
     assert(!isnan(qm2));
@@ -452,17 +791,12 @@ inline void _zfetch_data(const texture<float, 3, cudaReadModeElementType> tex,
         const uint_t ix, const uint_t iy, const uint_t iz,
         Real& qm3, Real& qm2, Real& qm1, Real& qp1, Real& qp2, Real& qp3)
 {
-    // Input textures are current_chunk_length+6 slices wide along the
-    // z-direction.  Hence, a shift of 3 slices is required for the iz index
-    // when accessing textures
-    const uint_t iz3 = iz + 3;
-
-    qm3 = tex3D(tex, ix, iy, iz3-3);
-    qm2 = tex3D(tex, ix, iy, iz3-2);
-    qm1 = tex3D(tex, ix, iy, iz3-1);
-    qp1 = tex3D(tex, ix, iy, iz3);
-    qp2 = tex3D(tex, ix, iy, iz3+1);
-    qp3 = tex3D(tex, ix, iy, iz3+2);
+    qm3 = tex3D(tex, ix, iy, iz-3);
+    qm2 = tex3D(tex, ix, iy, iz-2);
+    qm1 = tex3D(tex, ix, iy, iz-1);
+    qp1 = tex3D(tex, ix, iy, iz);
+    qp2 = tex3D(tex, ix, iy, iz+1);
+    qp3 = tex3D(tex, ix, iy, iz+2);
     assert(!isnan(qm3));
     assert(!isnan(qm2));
     assert(!isnan(qm1));
@@ -716,17 +1050,15 @@ inline Real _extraterm_hllc_vel(const Real um, const Real up,
 
 
 __device__
-inline void _fetch_flux(const uint_t ix, const uint_t iy, const uint_t iz, const uint_t NX, const uint_t NY,
+inline void _fetch_flux(const uint_t ix, const uint_t iy, const uint_t iz,
         const Real * const xflux, const Real * const yflux, const Real * const zflux,
         Real& fxp, Real& fxm, Real& fyp, Real& fym, Real& fzp, Real& fzm)
 {
-    /* fxp = xflux[ID3(ix+1, iy, iz, NX+1, NY)]; */
-    /* fxm = xflux[ID3(ix,   iy, iz, NX+1, NY)]; */
-    fxp = xflux[ID3(iy, ix+1, iz, NY, NX+1)];
-    fxm = xflux[ID3(iy, ix,   iz, NY, NX+1)];
+    fxp = xflux[ID3(ix+1, iy, iz, NXP1, NY)];
+    fxm = xflux[ID3(ix,   iy, iz, NXP1, NY)];
 
-    fyp = yflux[ID3(ix, iy+1, iz, NX, NY+1)];
-    fym = yflux[ID3(ix, iy,   iz, NX, NY+1)];
+    fyp = yflux[ID3(ix, iy+1, iz, NX, NYP1)];
+    fym = yflux[ID3(ix, iy,   iz, NX, NYP1)];
 
     fzp = zflux[ID3(ix, iy, iz+1, NX, NY)];
     fzm = zflux[ID3(ix, iy, iz,   NX, NY)];

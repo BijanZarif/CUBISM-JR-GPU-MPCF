@@ -5,7 +5,7 @@ LD ?= mpicxx
 
 NVCC ?= nvcc
 
-extra += -DCUDA_TIMER
+extra += -D_CUDA_TIMER_
 
 include ../../Makefile.config
 

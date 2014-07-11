@@ -7,8 +7,12 @@
 #include <stdio.h>
 #include <vector>
 
-#include "CUDA_Timer.cuh"
 #include "GPU.h" // includes Types.h
+
+#ifdef _CUDA_TIMER_
+#include "CUDA_Timer.cuh"
+#endif
+
 
 enum { VSIZE = NodeBlock::NVAR };
 
@@ -253,6 +257,7 @@ extern "C"
 #ifndef _MUTE_GPU_
         // TODO: use larger arrays for ghosts to minimize API overhead +
         // increase BW performance
+        tCUDA_START(stream1)
         for (int i = 0; i < VSIZE; ++i)
         {
             // x
@@ -262,6 +267,7 @@ extern "C"
             cudaMemcpyAsync(d_ygl[i], yghost_l[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
             cudaMemcpyAsync(d_ygr[i], yghost_r[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
         }
+        tCUDA_STOP(stream1, "[GPU UPLOAD X/YGHOSTS]: ")
 #endif
     }
 
@@ -269,13 +275,10 @@ extern "C"
     void GPU::h2d_3DArray(const RealPtrVec_t& src, const uint_t NX, const uint_t NY, const uint_t NZ)
     {
 #ifndef _MUTE_GPU_
-        GPUtimer upload;
-        upload.start(stream1);
+        tCUDA_START(stream1)
         for (int i = 0; i < VSIZE; ++i)
             _h2d_3DArray(d_SOAin[i], src[i], NX, NY, NZ);
-        upload.stop(stream1);
-        upload.print("[GPU UPLOAD 3DArray]: ");
-
+        tCUDA_STOP(stream1, "[GPU UPLOAD 3DArray]: ")
         cudaEventRecord(h2d_3Darray_completed, stream1);
 #endif
     }
@@ -286,13 +289,10 @@ extern "C"
 #ifndef _MUTE_GPU_
         cudaStreamWaitEvent(stream3, h2d_3Darray_completed, 0);
 
-        GPUtimer upload;
-        upload.start(stream3);
+        tCUDA_START(stream3)
         for (int i = 0; i < VSIZE; ++i)
             cudaMemcpyAsync(d_tmp[i], src[i], N*sizeof(Real), cudaMemcpyHostToDevice, stream3);
-        upload.stop(stream3);
-        upload.print("[GPU UPLOAD TMP]: ");
-
+        tCUDA_STOP(stream3, "[GPU UPLOAD TMP]: ")
         cudaEventRecord(h2d_tmp_completed, stream3);
 #endif
     }
@@ -304,13 +304,10 @@ extern "C"
         cudaStreamWaitEvent(stream2, divergence_completed, 0);
 
         // copy content of d_rhs to host, using the stream2 (after divergence)
-        GPUtimer download;
-        download.start(stream2);
+        tCUDA_START(stream2)
         for (int i = 0; i < VSIZE; ++i)
             cudaMemcpyAsync(dst[i], d_rhs[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream2);
-        download.stop(stream2);
-        download.print("[GPU DOWNLOAD RHS]: ");
-
+        tCUDA_STOP(stream2, "[GPU DOWNLOAD RHS]: ")
         cudaEventRecord(d2h_rhs_completed, stream2);
 #endif
     }
@@ -322,13 +319,10 @@ extern "C"
         cudaStreamWaitEvent(stream2, update_completed, 0);
 
         // copy content of d_tmp to host, using the stream1
-        GPUtimer download;
-        download.start(stream1);
+        tCUDA_START(stream1)
         for (int i = 0; i < VSIZE; ++i)
             cudaMemcpyAsync(dst[i], d_tmp[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream2);
-        download.stop(stream1);
-        download.print("[GPU DOWNLOAD TMP]: ");
-
+        tCUDA_STOP(stream1, "[GPU DOWNLOAD TMP]: ")
         cudaEventRecord(d2h_tmp_completed, stream2);
 #endif
     }

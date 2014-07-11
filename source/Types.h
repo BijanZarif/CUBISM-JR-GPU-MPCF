@@ -31,13 +31,13 @@ typedef unsigned int uint_t;
  * mappings are used in host code as well as device code.  In C-notation, the
  * mappings defined below are used for bounds:
  *
- * GHOSTX[NodeBlock::sizeZ][3][NodeBlock::sizeY]
- * GHOSTY[NodeBlock::sizeZ][NodeBlock::sizeX][3]
+ * GHOSTX[NodeBlock::sizeZ][NodeBlock::sizeY][3]
+ * GHOSTY[NodeBlock::sizeZ][3][NodeBlock::sizeX]
  *
  * The layout is chosen such that a warp access is coalesced
  * */
-#define GHOSTMAPX(ix,iy,iz) ((iy) + NodeBlock::sizeY * ((ix) + 3 * (iz)))
-#define GHOSTMAPY(ix,iy,iz) ((iy) + 3 * ((ix) + NodeBlock::sizeX * (iz)))
+#define GHOSTMAPX(ix,iy,iz) ((ix) + 3 * ((iy) + NodeBlock::sizeY * (iz)))
+#define GHOSTMAPY(ix,iy,iz) ((ix) + NodeBlock::sizeX * ((iy) + 3 * (iz)))
 
 extern "C"
 {

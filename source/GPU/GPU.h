@@ -22,6 +22,19 @@ typedef std::vector<Real> cuda_vector_t;
 #endif
 
 
+#if defined(_CUDA_TIMER_)
+#define tCUDA_START(stream) { \
+    GPUtimer tk; \
+    tk.start(stream);
+#define tCUDA_STOP(stream,msg) \
+    tk.stop(stream); \
+    tk.print(msg); }
+#else
+#define tCUDA_START(stream)
+#define tCUDA_STOP(stream,msg)
+#endif
+
+
 // include these declarations in host code
 namespace GPU
 {
