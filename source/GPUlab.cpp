@@ -169,7 +169,7 @@ void GPUlab::_init_next_chunk()
 }
 
 
-void GPUlab::_dump_chunk()
+void GPUlab::_dump_chunk(const int complete)
 {
     static unsigned int ndumps = 0;
     printf("Dumping Chunk %d (total dumps %d)...\n", curr_chunk_id, ++ndumps);
@@ -180,35 +180,109 @@ void GPUlab::_dump_chunk()
     herr_t status;
     hid_t file_id, dataset_id, fspace_id, fapl_id, mspace_id;
 
-    static const unsigned int NCHANNELS = 9;
-    const unsigned int NX = GridMPI::sizeX;
-    const unsigned int NY = GridMPI::sizeY;
-    const unsigned int NZ = curr_slices+6;
-    Real * array_all = new Real[NX * NY * NZ * NCHANNELS];
-
-    hsize_t count[4]  = {NZ, NY, NX, NCHANNELS};
-    hsize_t dims[4]   = {NZ, NY, NX, NCHANNELS};
-    hsize_t offset[4] = {0, 0, 0, 0};
-
     H5open();
     fapl_id = H5Pcreate(H5P_FILE_ACCESS);
     file_id = H5Fcreate(fname, H5F_ACC_TRUNC, H5P_DEFAULT, fapl_id);
     status = H5Pclose(fapl_id);
 
-    for(unsigned int iz = 0; iz < NZ; ++iz)
-        for(unsigned int iy = 0; iy < NY; ++iy)
-            for(unsigned int ix = 0; ix < NX; ++ix)
-            {
-                const unsigned int idx = ID3(ix,iy,iz,NX,NY);
-                Real output[NCHANNELS];
-                for(unsigned int i=0; i<NCHANNELS; ++i) output[i] = 0;
-                for(unsigned int i = 0; i < GridMPI::NVAR; ++i)
-                    output[i] = curr_buffer->GPUin[i][idx];
+    static const unsigned int NCHANNELS = 9;
+    Real *array_all;
+    hsize_t count[4];
+    hsize_t dims[4];
+    hsize_t offset[4] = {0, 0, 0, 0};
 
-                Real * const ptr = array_all + NCHANNELS*idx;
-                for(unsigned int i=0; i<NCHANNELS; ++i)
-                    ptr[i] = output[i];
-            }
+    if (complete)
+    {
+        const unsigned int NX = GridMPI::sizeX+6;
+        const unsigned int NY = GridMPI::sizeY+6;
+        const unsigned int NZ = curr_slices+6;
+        array_all = new Real[NX * NY * NZ * NCHANNELS];
+        dims[0]=count[0]=NZ; dims[1]=count[1]=NY; dims[2]=count[2]=NX;
+        dims[3]=count[3]=NCHANNELS;
+
+        // set all NaN
+        for (unsigned int i = 0; i < NX*NY*NZ*NCHANNELS; ++i)
+            array_all[i] = NAN;
+
+        // input buffer
+        for(unsigned int iz = 0; iz < NZ; ++iz)
+            for(unsigned int iy = 3; iy < NY-3; ++iy)
+                for(unsigned int ix = 3; ix < NX-3; ++ix)
+                {
+                    Real output[NCHANNELS] = {0};
+
+                    const unsigned int idx = ID3(ix-3,iy-3,iz,NX-6,NY-6);
+                    for(unsigned int i = 0; i < curr_buffer->GPUin.size(); ++i)
+                        output[i] = curr_buffer->GPUin[i][idx];
+
+                    const unsigned int gidx = ID3(ix,iy,iz,NX,NY);
+                    Real * const ptr = array_all + NCHANNELS*gidx;
+                    for(unsigned int i=0; i<NCHANNELS; ++i)
+                        ptr[i] = output[i];
+                }
+        // xghosts
+        for(unsigned int iz = 3; iz < NZ-3; ++iz)
+            for(unsigned int iy = 3; iy < NY-3; ++iy)
+                for(unsigned int ix = 0; ix < 3; ++ix)
+                {
+                    Real output[NCHANNELS] = {0};
+                    // left
+                    for(unsigned int i = 0; i < curr_buffer->xghost_l.size(); ++i)
+                        output[i] = curr_buffer->xghost_l[i][ghostmap::X(ix,iy-3,iz-3)];
+                    Real * ptr = array_all + NCHANNELS*ID3(ix,iy,iz,NX,NY);
+                    for(unsigned int i=0; i<NCHANNELS; ++i)
+                        ptr[i] = output[i];
+                    // right
+                    for(unsigned int i = 0; i < curr_buffer->xghost_r.size(); ++i)
+                        output[i] = curr_buffer->xghost_r[i][ghostmap::X(ix,iy-3,iz-3)];
+                    ptr = array_all + NCHANNELS*ID3(ix+GridMPI::sizeX+3,iy,iz,NX,NY);
+                    for(unsigned int i=0; i<NCHANNELS; ++i)
+                        ptr[i] = output[i];
+                }
+        // yghosts
+        for(unsigned int iz = 3; iz < NZ-3; ++iz)
+            for(unsigned int iy = 0; iy < 3; ++iy)
+                for(unsigned int ix = 3; ix < NX-3; ++ix)
+                {
+                    Real output[NCHANNELS] = {0};
+                    // left
+                    for(unsigned int i = 0; i < curr_buffer->yghost_l.size(); ++i)
+                        output[i] = curr_buffer->yghost_l[i][ghostmap::Y(ix-3,iy,iz-3)];
+                    Real * ptr = array_all + NCHANNELS*ID3(ix,iy,iz,NX,NY);
+                    for(unsigned int i=0; i<NCHANNELS; ++i)
+                        ptr[i] = output[i];
+                    // right
+                    for(unsigned int i = 0; i < curr_buffer->yghost_r.size(); ++i)
+                        output[i] = curr_buffer->yghost_r[i][ghostmap::Y(ix-3,iy,iz-3)];
+                    ptr = array_all + NCHANNELS*ID3(ix,iy+GridMPI::sizeY+3,iz,NX,NY);
+                    for(unsigned int i=0; i<NCHANNELS; ++i)
+                        ptr[i] = output[i];
+                }
+    }
+    else
+    {
+        const unsigned int NX = GridMPI::sizeX;
+        const unsigned int NY = GridMPI::sizeY;
+        const unsigned int NZ = curr_slices+6;
+        array_all = new Real[NX * NY * NZ * NCHANNELS];
+        dims[0]=count[0]=NZ; dims[1]=count[1]=NY; dims[2]=count[2]=NX;
+        dims[3]=count[3]=NCHANNELS;
+
+        for(unsigned int iz = 0; iz < NZ; ++iz)
+            for(unsigned int iy = 0; iy < NY; ++iy)
+                for(unsigned int ix = 0; ix < NX; ++ix)
+                {
+                    const unsigned int idx = ID3(ix,iy,iz,NX,NY);
+                    Real output[NCHANNELS] = {0};
+
+                    for(unsigned int i = 0; i < curr_buffer->GPUin.size(); ++i)
+                        output[i] = curr_buffer->GPUin[i][idx];
+
+                    Real * const ptr = array_all + NCHANNELS*idx;
+                    for(unsigned int i=0; i<NCHANNELS; ++i)
+                        ptr[i] = output[i];
+                }
+    }
 
     fapl_id = H5Pcreate(H5P_DATASET_XFER);
     fspace_id = H5Screate_simple(4, dims, NULL);
@@ -241,7 +315,10 @@ void GPUlab::_dump_chunk()
         fprintf(xmf, "     <Topology TopologyType=\"3DCORECTMesh\" Dimensions=\"%d %d %d\"/>\n", (int)dims[0], (int)dims[1], (int)dims[2]);
         fprintf(xmf, "     <Geometry GeometryType=\"ORIGIN_DXDYDZ\">\n");
         fprintf(xmf, "       <DataItem Name=\"Origin\" Dimensions=\"3\" NumberType=\"Float\" Precision=\"4\" Format=\"XML\">\n");
-        fprintf(xmf, "        %e %e %e\n", 0.,0.,grid.getH()*(curr_iz-3));
+        if (complete)
+            fprintf(xmf, "        %e %e %e\n", grid.getH()*((int)curr_iz-3), -3*grid.getH(), -3*grid.getH());
+        else
+            fprintf(xmf, "        %e %e %e\n", grid.getH()*((int)curr_iz-3), 0., 0.);
         fprintf(xmf, "       </DataItem>\n");
         fprintf(xmf, "       <DataItem Name=\"Spacing\" Dimensions=\"3\" NumberType=\"Float\" Precision=\"4\" Format=\"XML\">\n");
         fprintf(xmf, "        %e %e %e\n", grid.getH(), grid.getH(), grid.getH());

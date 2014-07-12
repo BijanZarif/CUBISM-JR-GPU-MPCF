@@ -194,7 +194,7 @@ class GPUlab
         inline void _syncStream(GPU::streamID s) { GPU::syncStream(s); }
         void _reset();
         void _init_next_chunk();
-        void _dump_chunk();
+        void _dump_chunk(const int complete = 0);
 
         inline void _copy_range(RealPtrVec_t& dst, const uint_t dstOFFSET, const RealPtrVec_t& src, const uint_t srcOFFSET, const uint_t Nelements)
         {
@@ -308,7 +308,7 @@ class GPUlab
             ///////////////////////////////////////////////////////////////////
             // 3.)
             ///////////////////////////////////////////////////////////////////
-             _dump_chunk();
+             _dump_chunk(1);
             Kflow convection(a, dtinvh);
             if (chatty) printf("\t[LAUNCH CONVECTION KERNEL CHUNK %d]\n", curr_chunk_id);
             /* convection.compute(curr_slices, curr_iz); */
