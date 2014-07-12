@@ -47,13 +47,13 @@ namespace GPU
     extern "C"
     {
         // alloc/dealloc
-        void alloc(void** h_maxSOS, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t BSZ_GPU, const uint_t CHUNK_WIDTH, const bool isroot = true);
+        void alloc(void** h_maxSOS, const uint_t nslices, const bool isroot = true);
         void dealloc(const bool isroot = true);
 
         // PCIe transfers
         void upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, const RealPtrVec_t& xghost_r,
                 const uint_t Nyghost, const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r);
-        void h2d_3DArray(const RealPtrVec_t& src, const uint_t NX, const uint_t NY, const uint_t NZ);
+        void h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices);
         void h2d_tmp(const RealPtrVec_t& src, const uint_t N);
         void d2h_rhs(RealPtrVec_t& dst, const uint_t N);
         void d2h_tmp(RealPtrVec_t& dst, const uint_t N);
@@ -78,12 +78,12 @@ namespace GPU
     {
         void bind_textures();
         void unbind_textures();
-        void xflux(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH, const uint_t global_iz);
-        void yflux(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH, const uint_t global_iz);
-        void zflux(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH);
-        void divergence(const Real a, const Real dtinvh, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH);
-        void update(const Real b, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH);
-        void MaxSpeedOfSound(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t CHUNK_WIDTH);
+        void xflux(const uint_t nslices, const uint_t global_iz);
+        void yflux(const uint_t nslices, const uint_t global_iz);
+        void zflux(const uint_t nslices);
+        void divergence(const Real a, const Real dtinvh, const uint_t nslices);
+        void update(const Real b, const uint_t nslices);
+        void MaxSpeedOfSound(const uint_t nslices);
 
         // Test Kernel wrapper
         void TestKernel();

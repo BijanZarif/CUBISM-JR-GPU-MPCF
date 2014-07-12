@@ -1217,7 +1217,7 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 ///////////////////////////////////////////////////////////////////////////////
 extern "C"
 {
-    void GPU::xflux(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t nslices, const uint_t global_iz)
+    void GPU::xflux(const uint_t nslices, const uint_t global_iz)
     {
 #ifndef _MUTE_GPU_
         devPtrSet xghostL(d_xgl);
@@ -1243,7 +1243,7 @@ extern "C"
     }
 
 
-    void GPU::yflux(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t nslices, const uint_t global_iz)
+    void GPU::yflux(const uint_t nslices, const uint_t global_iz)
     {
 #ifndef _MUTE_GPU_
         devPtrSet yghostL(d_ygl);
@@ -1269,7 +1269,7 @@ extern "C"
     }
 
 
-    void GPU::zflux(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t nslices)
+    void GPU::zflux(const uint_t nslices)
     {
 #ifndef _MUTE_GPU_
         devPtrSet zflux(d_zflux);
@@ -1289,7 +1289,7 @@ extern "C"
     }
 
 
-    void GPU::divergence(const Real a, const Real dtinvh, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t nslices)
+    void GPU::divergence(const Real a, const Real dtinvh, const uint_t nslices)
     {
 #ifndef _MUTE_GPU_
         cudaStreamWaitEvent(stream1, h2d_tmp_completed, 0);
@@ -1312,7 +1312,7 @@ extern "C"
     }
 
 
-    void GPU::update(const Real b, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t nslices)
+    void GPU::update(const Real b, const uint_t nslices)
     {
 #ifndef _MUTE_GPU_
         devPtrSet tmp(d_tmp);
@@ -1330,7 +1330,7 @@ extern "C"
     }
 
 
-    void GPU::MaxSpeedOfSound(const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t nslices)
+    void GPU::MaxSpeedOfSound(const uint_t nslices)
     {
 #ifndef _MUTE_GPU_
         const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);

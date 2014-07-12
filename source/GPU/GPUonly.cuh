@@ -301,13 +301,6 @@ inline void _load_1ghost_Y(Real& g0, const uint_t iy0, const Real * const ghosts
     assert(!isnan(g0));
 }
 
-/* __device__ */
-/* inline void _load_ghost_X(const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz, */
-/*         Real buf[][_NTHREADS_], const Real * const ghost) */
-/* { */
-/*     printf("(%d, %d, %d) maps to %d\n", ix, iy, iz, GHOSTMAPX(ix, iy, iz+global_iz)); */
-/* } */
-
 
 __device__
 inline void _read_stencil_X(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex,

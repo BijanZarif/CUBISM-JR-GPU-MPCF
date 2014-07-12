@@ -21,6 +21,6 @@ public:
     Convection_CUDA(const Real a, const Real dtinvh);
 
     //main method of the class, it evaluates the convection term of the RHS
-    void compute(const unsigned int BSX_GPU, const unsigned int BSY_GPU, const unsigned int CHUNK_WIDTH, const unsigned int global_iz);
+    void compute(const uint_t nslices, const uint_t global_iz);
 };
 

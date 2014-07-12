@@ -9,9 +9,9 @@
 #include "Update_CUDA.h"
 #include "GPU.h"
 
-void Update_CUDA::compute(const int BSX_GPU, const int BSY_GPU, const int CHUNK_WIDTH)
+void Update_CUDA::compute(const int nslices)
 {
     GPU::bind_textures();
-    GPU::update(m_b, BSX_GPU, BSY_GPU, CHUNK_WIDTH);
+    GPU::update(m_b, nslices);
     GPU::unbind_textures();
 }

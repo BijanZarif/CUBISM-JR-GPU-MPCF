@@ -60,12 +60,12 @@ cudaEvent_t d2h_tmp_completed;
 ///////////////////////////////////////////////////////////////////////////////
 // IMPLEMENTATION
 ///////////////////////////////////////////////////////////////////////////////
-static void _h2d_3DArray(cudaArray_t dst, const Real * const src, const int NX, const int NY, const int NZ)
+static void _h2d_3DArray(cudaArray_t dst, const Real * const src, const int nslices)
 {
     cudaMemcpy3DParms copyParams = {0};
-    copyParams.extent            = make_cudaExtent(NX, NY, NZ);
+    copyParams.extent            = make_cudaExtent(NodeBlock::sizeX, NodeBlock::sizeY, nslices);
     copyParams.kind              = cudaMemcpyHostToDevice;
-    copyParams.srcPtr            = make_cudaPitchedPtr((void *)src, NX * sizeof(Real), NX, NY);
+    copyParams.srcPtr            = make_cudaPitchedPtr((void *)src, NodeBlock::sizeX * sizeof(Real), NodeBlock::sizeX, NodeBlock::sizeY);
     copyParams.dstArray          = dst;
 
     cudaMemcpy3DAsync(&copyParams, stream1);
@@ -77,24 +77,24 @@ extern "C"
     ///////////////////////////////////////////////////////////////////////////
     // GPU Memory alloc / dealloc
     ///////////////////////////////////////////////////////////////////////////
-    void GPU::alloc(void** sos, const uint_t BSX_GPU, const uint_t BSY_GPU, const uint_t BSZ_GPU, const uint_t CHUNK_WIDTH, const bool isroot)
+    void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
     {
 #ifndef _MUTE_GPU_
 
         // processing slice size (normal to z-direction)
-        const uint_t SLICE_GPU = BSX_GPU * BSY_GPU;
+        const uint_t SLICE_GPU = NodeBlock::sizeX * NodeBlock::sizeY;
 
         // GPU output size
-        const uint_t outputSize = SLICE_GPU * CHUNK_WIDTH;
+        const uint_t outputSize = SLICE_GPU * nslices;
 
         // fluxes (TODO: use one array later, process after each flux computation)
-        const uint_t bSflx = (BSX_GPU+1)*BSY_GPU*CHUNK_WIDTH;
-        const uint_t bSfly = BSX_GPU*(BSY_GPU+1)*CHUNK_WIDTH;
-        const uint_t bSflz = BSX_GPU*BSY_GPU*(CHUNK_WIDTH+1);
+        const uint_t bSflx = (NodeBlock::sizeX+1)*NodeBlock::sizeY*nslices;
+        const uint_t bSfly = NodeBlock::sizeX*(NodeBlock::sizeY+1)*nslices;
+        const uint_t bSflz = NodeBlock::sizeX*NodeBlock::sizeY*(nslices+1);
 
         // x-/yghosts
-        const uint_t xgSize = 3*BSY_GPU*CHUNK_WIDTH;
-        const uint_t ygSize = BSX_GPU*3*CHUNK_WIDTH;
+        const uint_t xgSize = 3*NodeBlock::sizeY*nslices;
+        const uint_t ygSize = NodeBlock::sizeX*3*nslices;
 
         // GPU allocation
         cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
@@ -124,7 +124,7 @@ extern "C"
             cudaMalloc(&d_ygr[var], ygSize*sizeof(Real));
 
             // GPU input SOA (+6 slices for zghosts)
-            cudaMalloc3DArray(&d_SOAin[var], &fmt, make_cudaExtent(BSX_GPU, BSY_GPU, CHUNK_WIDTH+6));
+            cudaMalloc3DArray(&d_SOAin[var], &fmt, make_cudaExtent(NodeBlock::sizeX, NodeBlock::sizeY, nslices+6));
         }
 
         // extraterm for advection (TODO: remove this uglyness!)
@@ -166,7 +166,7 @@ extern "C"
 
             printf("=====================================================================\n");
             printf("[GPU ALLOCATION FOR %s]\n", prop.name);
-            printf("[%5.1f MB (input SOA)]\n", VSIZE*(SLICE_GPU*(CHUNK_WIDTH+6))*sizeof(Real) / 1024. / 1024);
+            printf("[%5.1f MB (input SOA)]\n", VSIZE*(SLICE_GPU*(nslices+6))*sizeof(Real) / 1024. / 1024);
             printf("[%5.1f MB (tmp)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
             printf("[%5.1f MB (rhs)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
             printf("[%5.1f MB (flux storage)]\n", VSIZE*(bSflx + bSfly + bSflz)*sizeof(Real) / 1024. / 1024);
@@ -272,12 +272,12 @@ extern "C"
     }
 
 
-    void GPU::h2d_3DArray(const RealPtrVec_t& src, const uint_t NX, const uint_t NY, const uint_t NZ)
+    void GPU::h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices)
     {
 #ifndef _MUTE_GPU_
         tCUDA_START(stream1)
         for (int i = 0; i < VSIZE; ++i)
-            _h2d_3DArray(d_SOAin[i], src[i], NX, NY, NZ);
+            _h2d_3DArray(d_SOAin[i], src[i], nslices);
         tCUDA_STOP(stream1, "[GPU UPLOAD 3DArray]: ")
         cudaEventRecord(h2d_3Darray_completed, stream1);
 #endif

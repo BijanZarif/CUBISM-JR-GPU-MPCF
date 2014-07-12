@@ -10,9 +10,9 @@
 #include "GPU.h"
 
 
-void MaxSpeedOfSound_CUDA::compute(const unsigned int BSX_GPU, const unsigned int BSY_GPU, const unsigned int CHUNK_WIDTH)
+void MaxSpeedOfSound_CUDA::compute(const uint_t nslices)
 {
     GPU::bind_textures();
-    GPU::MaxSpeedOfSound(BSX_GPU, BSY_GPU, CHUNK_WIDTH);
+    GPU::MaxSpeedOfSound(nslices);
     GPU::unbind_textures();
 }
