@@ -63,8 +63,8 @@ void NodeBlock::clear_tmp()
 
 void NodeBlock::get_pos(const unsigned int ix, const unsigned int iy, const unsigned int iz, double pos[3]) const
 {
-    // local position, relative to origin
-    pos[0] = origin[0] + h * ix;
-    pos[1] = origin[1] + h * iy;
-    pos[2] = origin[2] + h * iz;
+    // local position, relative to origin, cell center
+    pos[0] = origin[0] + h * (ix+0.5);
+    pos[1] = origin[1] + h * (iy+0.5);
+    pos[2] = origin[2] + h * (iz+0.5);
 }

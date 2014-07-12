@@ -37,7 +37,7 @@ Real *d_hllc_vel;
 Real *d_sumG, *d_sumP, *d_divU;
 
 // 3D arrays (GPU input)
-std::vector<cudaArray_t> d_SOAin(VSIZE, NULL);
+std::vector<cudaArray_t> d_GPUin(VSIZE, NULL);
 
 // Max SOS
 int *h_maxSOS; // host, mapped
@@ -123,8 +123,8 @@ extern "C"
             cudaMalloc(&d_ygl[var], ygSize*sizeof(Real));
             cudaMalloc(&d_ygr[var], ygSize*sizeof(Real));
 
-            // GPU input SOA (+6 slices for zghosts)
-            cudaMalloc3DArray(&d_SOAin[var], &fmt, make_cudaExtent(NodeBlock::sizeX, NodeBlock::sizeY, nslices+6));
+            // GPU input (+6 slices for zghosts)
+            cudaMalloc3DArray(&d_GPUin[var], &fmt, make_cudaExtent(NodeBlock::sizeX, NodeBlock::sizeY, nslices+6));
         }
 
         // extraterm for advection (TODO: remove this uglyness!)
@@ -166,7 +166,7 @@ extern "C"
 
             printf("=====================================================================\n");
             printf("[GPU ALLOCATION FOR %s]\n", prop.name);
-            printf("[%5.1f MB (input SOA)]\n", VSIZE*(SLICE_GPU*(nslices+6))*sizeof(Real) / 1024. / 1024);
+            printf("[%5.1f MB (input GPU)]\n", VSIZE*(SLICE_GPU*(nslices+6))*sizeof(Real) / 1024. / 1024);
             printf("[%5.1f MB (tmp)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
             printf("[%5.1f MB (rhs)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
             printf("[%5.1f MB (flux storage)]\n", VSIZE*(bSflx + bSfly + bSflz)*sizeof(Real) / 1024. / 1024);
@@ -201,8 +201,8 @@ extern "C"
             cudaFree(d_ygl[var]);
             cudaFree(d_ygr[var]);
 
-            // input SOA
-            cudaFreeArray(d_SOAin[var]);
+            // input GPU
+            cudaFreeArray(d_GPUin[var]);
         }
 
         // extraterms
@@ -277,7 +277,7 @@ extern "C"
 #ifndef _MUTE_GPU_
         tCUDA_START(stream1)
         for (int i = 0; i < VSIZE; ++i)
-            _h2d_3DArray(d_SOAin[i], src[i], nslices);
+            _h2d_3DArray(d_GPUin[i], src[i], nslices);
         tCUDA_STOP(stream1, "[GPU UPLOAD 3DArray]: ")
         cudaEventRecord(h2d_3Darray_completed, stream1);
 #endif

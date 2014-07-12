@@ -6,8 +6,17 @@
  * */
 #include "GPUlab.h"
 
+#ifdef _USE_HDF_
+#include <hdf5.h>
+#ifdef _FLOAT_PRECISION_
+#define _HDF_REAL_ H5T_NATIVE_FLOAT
+#else
+#define _HDF_REAL_ H5T_NATIVE_DOUBLE
+#endif
+#endif
 
-GPUlab::GPUlab(GridMPI& G, const uint_t nslices_) :
+
+GPUlab::GPUlab(GridMPI& G, const uint_t nslices_, const int verbosity) :
     GPU_input_size( SLICE_GPU * (nslices_+6) ),
     GPU_output_size( SLICE_GPU * nslices_ ),
     nslices(nslices_), nslices_last( sizeZ % nslices_ ), nchunks( (sizeZ + nslices_ - 1) / nslices_ ),
@@ -21,7 +30,7 @@ GPUlab::GPUlab(GridMPI& G, const uint_t nslices_) :
 {
     if (nslices_last != 0) // can be solved later
     {
-        fprintf(stderr, "[GPUlab ERROR: CURRENTLY CHUNK LENGTHS MUST BE AN INTEGER MULTIPLE of GridMPI::sizeZ\n");
+        fprintf(stderr, "[GPUlab ERROR: CURRENTLY nslices MUST BE AN INTEGER MULTIPLE of GridMPI::sizeZ\n");
         exit(1);
     }
 
@@ -32,6 +41,7 @@ GPUlab::GPUlab(GridMPI& G, const uint_t nslices_) :
     }
 
     chatty = QUIET;
+    if (2 == verbosity) chatty = VERBOSE;
 
     _alloc_GPU();
 
@@ -156,6 +166,99 @@ void GPUlab::_init_next_chunk()
     // set the number of ghosts in x/y direction for this buffer
     curr_buffer->Nxghost = 3*sizeY*curr_slices;
     curr_buffer->Nyghost = sizeX*3*curr_slices;
+}
+
+
+void GPUlab::_dump_chunk()
+{
+    static unsigned int ndumps = 0;
+    printf("Dumping Chunk %d (total dumps %d)...\n", curr_chunk_id, ++ndumps);
+
+    char fname[256];
+    sprintf(fname, "chunk_%02d-%04d.h5", curr_chunk_id, ndumps);
+
+    herr_t status;
+    hid_t file_id, dataset_id, fspace_id, fapl_id, mspace_id;
+
+    static const unsigned int NCHANNELS = 9;
+    const unsigned int NX = GridMPI::sizeX;
+    const unsigned int NY = GridMPI::sizeY;
+    const unsigned int NZ = curr_slices+6;
+    Real * array_all = new Real[NX * NY * NZ * NCHANNELS];
+
+    hsize_t count[4]  = {NZ, NY, NX, NCHANNELS};
+    hsize_t dims[4]   = {NZ, NY, NX, NCHANNELS};
+    hsize_t offset[4] = {0, 0, 0, 0};
+
+    H5open();
+    fapl_id = H5Pcreate(H5P_FILE_ACCESS);
+    file_id = H5Fcreate(fname, H5F_ACC_TRUNC, H5P_DEFAULT, fapl_id);
+    status = H5Pclose(fapl_id);
+
+    for(unsigned int iz = 0; iz < NZ; ++iz)
+        for(unsigned int iy = 0; iy < NY; ++iy)
+            for(unsigned int ix = 0; ix < NX; ++ix)
+            {
+                const unsigned int idx = ID3(ix,iy,iz,NX,NY);
+                Real output[NCHANNELS];
+                for(unsigned int i=0; i<NCHANNELS; ++i) output[i] = 0;
+                for(unsigned int i = 0; i < GridMPI::NVAR; ++i)
+                    output[i] = curr_buffer->GPUin[i][idx];
+
+                Real * const ptr = array_all + NCHANNELS*idx;
+                for(unsigned int i=0; i<NCHANNELS; ++i)
+                    ptr[i] = output[i];
+            }
+
+    fapl_id = H5Pcreate(H5P_DATASET_XFER);
+    fspace_id = H5Screate_simple(4, dims, NULL);
+    dataset_id = H5Dcreate(file_id, "data", _HDF_REAL_, fspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    fspace_id = H5Dget_space(dataset_id);
+    H5Sselect_hyperslab(fspace_id, H5S_SELECT_SET, offset, NULL, count, NULL);
+    mspace_id = H5Screate_simple(4, count, NULL);
+    status = H5Dwrite(dataset_id, _HDF_REAL_, mspace_id, fspace_id, fapl_id, array_all);
+
+    status = H5Sclose(mspace_id);
+    status = H5Sclose(fspace_id);
+    status = H5Dclose(dataset_id);
+    status = H5Pclose(fapl_id);
+    status = H5Fclose(file_id);
+    H5close();
+
+    delete [] array_all;
+
+    {
+        char wrapper[256];
+        sprintf(wrapper, "chunk_%02d-%04d.xmf", curr_chunk_id, ndumps);
+        FILE *xmf = 0;
+        xmf = fopen(wrapper, "w");
+        fprintf(xmf, "<?xml version=\"1.0\" ?>\n");
+        fprintf(xmf, "<!DOCTYPE Xdmf SYSTEM \"Xdmf.dtd\" []>\n");
+        fprintf(xmf, "<Xdmf Version=\"2.0\">\n");
+        fprintf(xmf, " <Domain>\n");
+        fprintf(xmf, "   <Grid GridType=\"Uniform\">\n");
+        fprintf(xmf, "     <Time Value=\"%05d\"/>\n", curr_chunk_id);
+        fprintf(xmf, "     <Topology TopologyType=\"3DCORECTMesh\" Dimensions=\"%d %d %d\"/>\n", (int)dims[0], (int)dims[1], (int)dims[2]);
+        fprintf(xmf, "     <Geometry GeometryType=\"ORIGIN_DXDYDZ\">\n");
+        fprintf(xmf, "       <DataItem Name=\"Origin\" Dimensions=\"3\" NumberType=\"Float\" Precision=\"4\" Format=\"XML\">\n");
+        fprintf(xmf, "        %e %e %e\n", 0.,0.,grid.getH()*(curr_iz-3));
+        fprintf(xmf, "       </DataItem>\n");
+        fprintf(xmf, "       <DataItem Name=\"Spacing\" Dimensions=\"3\" NumberType=\"Float\" Precision=\"4\" Format=\"XML\">\n");
+        fprintf(xmf, "        %e %e %e\n", grid.getH(), grid.getH(), grid.getH());
+        fprintf(xmf, "       </DataItem>\n");
+        fprintf(xmf, "     </Geometry>\n");
+
+        fprintf(xmf, "     <Attribute Name=\"data\" AttributeType=\"Tensor\" Center=\"Node\">\n");
+        fprintf(xmf, "       <DataItem Dimensions=\"%d %d %d %d\" NumberType=\"Float\" Precision=\"4\" Format=\"HDF\">\n", (int)dims[0], (int)dims[1], (int)dims[2], (int)dims[3]);
+        fprintf(xmf, "        %s:/data\n",fname);
+        fprintf(xmf, "       </DataItem>\n");
+        fprintf(xmf, "     </Attribute>\n");
+
+        fprintf(xmf, "   </Grid>\n");
+        fprintf(xmf, " </Domain>\n");
+        fprintf(xmf, "</Xdmf>\n");
+        fclose(xmf);
+    }
 }
 
 

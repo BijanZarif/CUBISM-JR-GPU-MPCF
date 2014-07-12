@@ -1400,13 +1400,13 @@ extern "C"
     void GPU::bind_textures()
     {
 #ifndef _MUTE_GPU_
-        _bindTexture(&texR, d_SOAin[0]);
-        _bindTexture(&texU, d_SOAin[1]);
-        _bindTexture(&texV, d_SOAin[2]);
-        _bindTexture(&texW, d_SOAin[3]);
-        _bindTexture(&texE, d_SOAin[4]);
-        _bindTexture(&texG, d_SOAin[5]);
-        _bindTexture(&texP, d_SOAin[6]);
+        _bindTexture(&texR, d_GPUin[0]);
+        _bindTexture(&texU, d_GPUin[1]);
+        _bindTexture(&texV, d_GPUin[2]);
+        _bindTexture(&texW, d_GPUin[3]);
+        _bindTexture(&texE, d_GPUin[4]);
+        _bindTexture(&texG, d_GPUin[5]);
+        _bindTexture(&texP, d_GPUin[6]);
 #endif
     }
 

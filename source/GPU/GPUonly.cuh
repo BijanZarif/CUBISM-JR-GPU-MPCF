@@ -63,7 +63,7 @@ extern RealPtrVec_t d_yflux;
 extern RealPtrVec_t d_zflux;
 
 // 3D arrays
-extern std::vector<cudaArray_t> d_SOAin;
+extern std::vector<cudaArray_t> d_GPUin;
 
 // extraterms for advection equations
 extern Real *d_Gm, *d_Gp;

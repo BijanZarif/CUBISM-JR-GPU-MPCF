@@ -19,6 +19,9 @@
 #include <vector>
 #include <string>
 
+#ifdef _USE_HDF_
+#include <hdf5.h>
+#endif
 
 #ifdef _FLOAT_PRECISION_
 #define _MPI_REAL_ MPI_FLOAT
@@ -191,6 +194,7 @@ class GPUlab
         inline void _syncStream(GPU::streamID s) { GPU::syncStream(s); }
         void _reset();
         void _init_next_chunk();
+        void _dump_chunk();
 
         inline void _copy_range(RealPtrVec_t& dst, const uint_t dstOFFSET, const RealPtrVec_t& src, const uint_t srcOFFSET, const uint_t Nelements)
         {
@@ -304,6 +308,7 @@ class GPUlab
             ///////////////////////////////////////////////////////////////////
             // 3.)
             ///////////////////////////////////////////////////////////////////
+             _dump_chunk();
             Kflow convection(a, dtinvh);
             if (chatty) printf("\t[LAUNCH CONVECTION KERNEL CHUNK %d]\n", curr_chunk_id);
             /* convection.compute(curr_slices, curr_iz); */
@@ -469,7 +474,7 @@ class GPUlab
 
     public:
 
-        GPUlab(GridMPI& G, const uint_t nslices);
+        GPUlab(GridMPI& G, const uint_t nslices, const int verbosity=0);
         virtual ~GPUlab() { _free_GPU(); }
 
         ///////////////////////////////////////////////////////////////////////
@@ -631,15 +636,7 @@ class GPUlab
 
         // info
         inline uint_t number_of_chunks() const { return nchunks; }
-        inline uint_t chunk_length() const { return curr_slices; }
+        inline uint_t chunk_slices() const { return curr_slices; }
         inline uint_t chunk_start_iz() const { return curr_iz; }
         inline uint_t chunk_id() const { return curr_chunk_id; }
-        inline void toggle_verbosity()
-        {
-            switch (chatty)
-            {
-                case QUIET:   chatty = VERBOSE; break;
-                case VERBOSE: chatty = QUIET; break;
-            }
-        }
 };

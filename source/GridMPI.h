@@ -106,8 +106,8 @@ class GridMPI : public NodeBlock
         pesize[1] = npeY;
         pesize[2] = npeZ;
 
-        h = maxextent / (std::max(pesize[0]*blocksize[0], std::max(pesize[1]*blocksize[1], pesize[2]*blocksize[2])) - 1);
-        bextent = h * (std::max(blocksize[0], std::max(blocksize[1], blocksize[2])) - 1);
+        h = maxextent / (std::max(pesize[0]*blocksize[0], std::max(pesize[1]*blocksize[1], pesize[2]*blocksize[2])));
+        bextent = h * (std::max(blocksize[0], std::max(blocksize[1], blocksize[2])));
 
         int world_size;
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
@@ -120,9 +120,8 @@ class GridMPI : public NodeBlock
 
         _get_nbr_ranks();
 
-        const double offset = bextent + h;
         for (int i = 0; i < 3; ++i)
-            origin[i] += offset * mypeindex[i];
+            origin[i] += bextent * mypeindex[i];
     }
 
     ~GridMPI()

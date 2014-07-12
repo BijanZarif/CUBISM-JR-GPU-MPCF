@@ -42,11 +42,6 @@ class NodeBlock
         double origin[3];
         double bextent;
         double h;
-        inline void _set_origin(const double O[3])
-        {
-            for (int i = 0; i < 3; ++i)
-                origin[i] = O[i];
-        }
 
         // Fluid data and tmp storage
         std::vector<Real *> data;
@@ -73,7 +68,7 @@ class NodeBlock
                 //origin{0.0, 0.0, 0.0}, // nvcc does not like this
                 bextent(e_), data(NVAR, NULL), tmp(NVAR, NULL)
         {
-            h = bextent / (std::max(_BLOCKSIZEX_, std::max(_BLOCKSIZEY_, _BLOCKSIZEZ_)) - 1);
+            h = bextent / (std::max(_BLOCKSIZEX_, std::max(_BLOCKSIZEY_, _BLOCKSIZEZ_)));
             origin[0] = origin[1] = origin[2] = 0.0;
             _alloc();
         }
