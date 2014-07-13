@@ -6,6 +6,9 @@
  * */
 #include "GPUlab.h"
 
+#include <string>
+using std::string;
+
 #ifdef _USE_HDF_
 #include <hdf5.h>
 #ifdef _FLOAT_PRECISION_
@@ -175,15 +178,6 @@ void GPUlab::_dump_chunk(const int complete)
     printf("Dumping Chunk %d (total dumps %d)...\n", curr_chunk_id, ++ndumps);
 
     char fname[256];
-    sprintf(fname, "chunk_%02d-%04d.h5", curr_chunk_id, ndumps);
-
-    herr_t status;
-    hid_t file_id, dataset_id, fspace_id, fapl_id, mspace_id;
-
-    H5open();
-    fapl_id = H5Pcreate(H5P_FILE_ACCESS);
-    file_id = H5Fcreate(fname, H5F_ACC_TRUNC, H5P_DEFAULT, fapl_id);
-    status = H5Pclose(fapl_id);
 
     static const unsigned int NCHANNELS = 9;
     Real *array_all;
@@ -193,6 +187,8 @@ void GPUlab::_dump_chunk(const int complete)
 
     if (complete)
     {
+        sprintf(fname, "chunk-all_%02d-%04d", curr_chunk_id, ndumps);
+
         const unsigned int NX = GridMPI::sizeX+6;
         const unsigned int NY = GridMPI::sizeY+6;
         const unsigned int NZ = curr_slices+6;
@@ -261,6 +257,8 @@ void GPUlab::_dump_chunk(const int complete)
     }
     else
     {
+        sprintf(fname, "chunk_%02d-%04d", curr_chunk_id, ndumps);
+
         const unsigned int NX = GridMPI::sizeX;
         const unsigned int NY = GridMPI::sizeY;
         const unsigned int NZ = curr_slices+6;
@@ -284,6 +282,16 @@ void GPUlab::_dump_chunk(const int complete)
                 }
     }
 
+    herr_t status;
+    hid_t file_id, dataset_id, fspace_id, fapl_id, mspace_id;
+
+    const string basename(fname);
+
+    H5open();
+    fapl_id = H5Pcreate(H5P_FILE_ACCESS);
+    file_id = H5Fcreate((basename+".h5").c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl_id);
+    status = H5Pclose(fapl_id);
+
     fapl_id = H5Pcreate(H5P_DATASET_XFER);
     fspace_id = H5Screate_simple(4, dims, NULL);
     dataset_id = H5Dcreate(file_id, "data", _HDF_REAL_, fspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
@@ -302,10 +310,8 @@ void GPUlab::_dump_chunk(const int complete)
     delete [] array_all;
 
     {
-        char wrapper[256];
-        sprintf(wrapper, "chunk_%02d-%04d.xmf", curr_chunk_id, ndumps);
         FILE *xmf = 0;
-        xmf = fopen(wrapper, "w");
+        xmf = fopen((basename+".xmf").c_str(), "w");
         fprintf(xmf, "<?xml version=\"1.0\" ?>\n");
         fprintf(xmf, "<!DOCTYPE Xdmf SYSTEM \"Xdmf.dtd\" []>\n");
         fprintf(xmf, "<Xdmf Version=\"2.0\">\n");
@@ -327,7 +333,7 @@ void GPUlab::_dump_chunk(const int complete)
 
         fprintf(xmf, "     <Attribute Name=\"data\" AttributeType=\"Tensor\" Center=\"Node\">\n");
         fprintf(xmf, "       <DataItem Dimensions=\"%d %d %d %d\" NumberType=\"Float\" Precision=\"4\" Format=\"HDF\">\n", (int)dims[0], (int)dims[1], (int)dims[2], (int)dims[3]);
-        fprintf(xmf, "        %s:/data\n",fname);
+        fprintf(xmf, "        %s:/data\n", (basename+".h5").c_str());
         fprintf(xmf, "       </DataItem>\n");
         fprintf(xmf, "     </Attribute>\n");
 

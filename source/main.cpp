@@ -88,7 +88,7 @@ static void _ic123(GridMPI& grid)
 }
 
 
-static void _icSOD(GridMPI& grid, ArgumentParser& parser, const unsigned int dims[3])
+static void _icSOD(GridMPI& grid, ArgumentParser& parser, const unsigned int dims[3], const bool reverse=false)
 {
     ///////////////////////////////////////////////////////////////////////////
     // SOD
@@ -116,8 +116,11 @@ static void _icSOD(GridMPI& grid, ArgumentParser& parser, const unsigned int dim
                 grid.get_pos(ix, iy, iz, pos);
 
                 // set up along x
-                bool x = pos[dims[0]] < x0;
-                /* bool x = pos[dims[0]] > x0; */
+                bool x;
+                if (reverse)
+                    x = pos[dims[0]] > x0;
+                else
+                    x = pos[dims[0]] < x0;
 
                 const double r = x * rho1 + !x * rho2;
                 const double p = x * p1   + !x * p2;
@@ -163,7 +166,7 @@ static void _getPostShockRatio(const Real pre_shock[3], const Real mach, const R
     postShock[1] = preShockU - postShockU;
 }
 
-static void _ic2DSB(GridMPI& grid, ArgumentParser& parser, const unsigned int dims[3])
+static void _ic2DSB(GridMPI& grid, ArgumentParser& parser, const unsigned int dims[3], const bool reverse=false)
 {
     ///////////////////////////////////////////////////////////////////////////
     // 2D Shock Bubble
@@ -234,10 +237,11 @@ static void _ic2DSB(GridMPI& grid, ArgumentParser& parser, const unsigned int di
     // init
     typedef GridMPI::PRIM var;
     const var momentum[3] = {var::U, var::V, var::W};
+    const unsigned int gridDim[3] = {GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ};
 #pragma omp paralell for
-    for (int iz = 0; iz < GridMPI::sizeZ; ++iz)
-        for (int iy = 0; iy < GridMPI::sizeY; ++iy)
-            for (int ix = 0; ix < GridMPI::sizeX; ++ix)
+    for (int iz = 0; iz < gridDim[2]; ++iz)
+        for (int iy = 0; iy < gridDim[1]; ++iy)
+            for (int ix = 0; ix < gridDim[0]; ++ix)
             {
                 double p[3];
                 grid.get_pos(ix, iy, iz, p);
@@ -272,10 +276,44 @@ static void _ic2DSB(GridMPI& grid, ArgumentParser& parser, const unsigned int di
                 const Real ke = 0.5*(pow(grid(ix, iy, iz, var::U),2)+pow(grid(ix, iy, iz, var::V),2)+pow(grid(ix, iy, iz, var::W),2))/grid(ix, iy, iz, var::R);
                 grid(ix, iy, iz, var::E) = pressure*grid(ix, iy, iz, var::G) + grid(ix, iy, iz, var::P) + ke;
             }
+    if (reverse)
+    {
+        int idx[3];
+        int rev[3];
+        for (idx[dims[0]]=0; idx[dims[0]]<gridDim[dims[0]]/2; ++idx[dims[0]])
+            for (idx[dims[2]]=0; idx[dims[2]]<gridDim[dims[2]]; ++idx[dims[2]])
+                for (idx[dims[1]]=0; idx[dims[1]]<gridDim[dims[1]]; ++idx[dims[1]])
+                {
+                    rev[dims[0]] = gridDim[dims[0]]-1 - idx[dims[0]];
+                    rev[dims[1]] = gridDim[dims[1]]-1 - idx[dims[1]];
+                    rev[dims[2]] = gridDim[dims[2]]-1 - idx[dims[2]];
+                    const Real tmp0 = grid(idx[0],idx[1],idx[2],var::R);
+                    const Real tmp1 = -grid(idx[0],idx[1],idx[2],var::U);
+                    const Real tmp2 = -grid(idx[0],idx[1],idx[2],var::V);
+                    const Real tmp3 = -grid(idx[0],idx[1],idx[2],var::W);
+                    const Real tmp4 = grid(idx[0],idx[1],idx[2],var::E);
+                    const Real tmp5 = grid(idx[0],idx[1],idx[2],var::G);
+                    const Real tmp6 = grid(idx[0],idx[1],idx[2],var::P);
+                    grid(idx[0],idx[1],idx[2],var::R) = grid(rev[0],rev[1],rev[2],var::R);
+                    grid(idx[0],idx[1],idx[2],var::U) = -grid(rev[0],rev[1],rev[2],var::U);
+                    grid(idx[0],idx[1],idx[2],var::V) = -grid(rev[0],rev[1],rev[2],var::V);
+                    grid(idx[0],idx[1],idx[2],var::W) = -grid(rev[0],rev[1],rev[2],var::W);
+                    grid(idx[0],idx[1],idx[2],var::E) = grid(rev[0],rev[1],rev[2],var::E);
+                    grid(idx[0],idx[1],idx[2],var::G) = grid(rev[0],rev[1],rev[2],var::G);
+                    grid(idx[0],idx[1],idx[2],var::P) = grid(rev[0],rev[1],rev[2],var::P);
+                    grid(rev[0],rev[1],rev[2],var::R) = tmp0;
+                    grid(rev[0],rev[1],rev[2],var::U) = tmp1;
+                    grid(rev[0],rev[1],rev[2],var::V) = tmp2;
+                    grid(rev[0],rev[1],rev[2],var::W) = tmp3;
+                    grid(rev[0],rev[1],rev[2],var::E) = tmp4;
+                    grid(rev[0],rev[1],rev[2],var::G) = tmp5;
+                    grid(rev[0],rev[1],rev[2],var::P) = tmp6;
+                }
+    }
 }
 
 
-void _symmetry_check(GridMPI& grid, const int verbose, const Real tol=1.0e-6, unsigned int dims[3]=NULL)
+void _symmetry_check(GridMPI& grid, const int verbosity, const Real tol=1.0e-6, unsigned int dims[3]=NULL)
 {
     // check for symmetry in minor direction
     if (dims == NULL)
@@ -294,7 +332,7 @@ void _symmetry_check(GridMPI& grid, const int verbose, const Real tol=1.0e-6, un
                 sym[dims[0]] = idx[dims[0]];
                 sym[dims[1]] = gridDim[dims[1]]-1 - idx[dims[1]];
                 sym[dims[2]] = idx[dims[2]];
-                if (verbose) printf("Symmetry Check: (%d,%d,%d)<->(%d,%d,%d) => ",idx[0],idx[1],idx[2],sym[0],sym[1],sym[2]);
+                if (verbosity) printf("Symmetry Check: (%d,%d,%d)<->(%d,%d,%d) => ",idx[0],idx[1],idx[2],sym[0],sym[1],sym[2]);
                 Real d0 = abs( grid(idx[0],idx[1],idx[2],var::R) - grid(sym[0],sym[1],sym[2],var::R) );
                 Real d1 = abs( grid(idx[0],idx[1],idx[2],var::U) - grid(sym[0],sym[1],sym[2],var::U) );
                 Real d2 = abs( grid(idx[0],idx[1],idx[2],var::V) - grid(sym[0],sym[1],sym[2],var::V) );
@@ -309,10 +347,10 @@ void _symmetry_check(GridMPI& grid, const int verbose, const Real tol=1.0e-6, un
                 assert(d4 < tol);
                 assert(d5 < tol);
                 assert(d6 < tol);
-                /* if (verbose) printf("abs-diff: (%f, %f, %f, %f, %f, %f, %f)\n",d0,d1,d2,d3,d4,d5,d6); */
+                /* if (verbosity) printf("abs-diff: (%f, %f, %f, %f, %f, %f, %f)\n",d0,d1,d2,d3,d4,d5,d6); */
                 Real Linf = max(d0,max(d1,max(d2,max(d3,max(d4,max(d5,d6))))));
                 Linf_global = max(Linf, Linf_global);
-                if (verbose) printf("Linf = %f\n", Linf);
+                if (verbosity) printf("Linf = %f\n", Linf);
 
                 /* assert(grid(idx[0],idx[1],idx[2],var::R) == grid(sym[0],sym[1],sym[2],var::R)); */
                 /* assert(grid(idx[0],idx[1],idx[2],var::U) == grid(sym[0],sym[1],sym[2],var::U)); */
@@ -416,7 +454,7 @@ int main(int argc, const char *argv[])
 
     ArgumentParser parser(argc, argv);
 
-    const int verbose = parser("-verbose").asInt(0);
+    const int verbosity = parser("-verbose").asInt(0);
 
     ///////////////////////////////////////////////////////////////////////////
     // Setup MPI grid
@@ -430,23 +468,23 @@ int main(int argc, const char *argv[])
     // Setup Initial Condition
     ///////////////////////////////////////////////////////////////////////////
     unsigned int dims[3] = {0,2,1}; // permutation of directions for 1D/2D stuff {principal, minor, dummy}
+    const bool reverse = true;
     /* _icCONST(mygrid, world_rank+1); */
     /* _ic123(mygrid); */
-    /* _icSOD(mygrid, parser, dims); */
-    _ic2DSB(mygrid, parser, dims);
+    /* _icSOD(mygrid, parser, dims, !reverse); */
+    _ic2DSB(mygrid, parser, dims, !reverse);
 
-    const Real tol = 1.0e-6;
-    _symmetry_check(mygrid, verbose, tol, dims);
+    _symmetry_check(mygrid, verbosity, 1.0e-6, dims);
 
     unsigned int fcount = 0;
     char fname[256];
-    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, _make_fname(fname, "data", fcount++));
+    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, _make_fname(fname, "data", fcount++)); */
 
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t nslices = 128;
-    Lab myGPU(mygrid, nslices, verbose);
+    const size_t nslices = 64;
+    Lab myGPU(mygrid, nslices, verbosity);
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
@@ -468,7 +506,7 @@ int main(int argc, const char *argv[])
         const double tsos = _maxSOS<MaxSpeedOfSound_CUDA>(&myGPU, sos);
         /* const double tsos = _maxSOS<MaxSpeedOfSound_CPP>(mygrid.pdata(), sos); */
         assert(sos > 0);
-        if (verbose) printf("sos = %f (took %f sec)\n", sos, tsos);
+        if (verbosity) printf("sos = %f (took %f sec)\n", sos, tsos);
 
         dt = cfl*h/sos;
         dt = (tend-t) < dt ? (tend-t) : dt;
@@ -479,19 +517,19 @@ int main(int argc, const char *argv[])
         {// stage 1
             myGPU.load_ghosts();
             trk1 = _LSRKstep<Lab>(0, 1./4, dt/h, myGPU);
-            if (verbose) printf("RK stage 1 takes %f sec\n", trk1);
+            if (verbosity) printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
             myGPU.load_ghosts();
             trk2 = _LSRKstep<Lab>(-17./32, 8./9, dt/h, myGPU);
-            if (verbose) printf("RK stage 2 takes %f sec\n", trk2);
+            if (verbosity) printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
             myGPU.load_ghosts();
             trk3 = _LSRKstep<Lab>(-32./27, 3./4, dt/h, myGPU);
-            if (verbose) printf("RK stage 3 takes %f sec\n", trk3);
+            if (verbosity) printf("RK stage 3 takes %f sec\n", trk3);
         }
-        if (verbose) printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
+        if (verbosity) printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
 
         t += dt;
         ++step;
@@ -501,14 +539,14 @@ int main(int argc, const char *argv[])
         if ((t-tlast)*1000 > 1.0 && (int)(t*1000) % 6 == 0)
         {
             tlast = t;
-            /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++)); */
+            DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++));
         }
         /* if (step % 10 == 0) DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++)); */
 
         if (step == nsteps) break;
     }
 
-    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++));
+    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++)); */
 
     // good night
     MPI_Finalize();
