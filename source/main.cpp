@@ -332,7 +332,7 @@ void _symmetry_check(GridMPI& grid, const int verbosity, const Real tol=1.0e-6, 
                 sym[dims[0]] = idx[dims[0]];
                 sym[dims[1]] = gridDim[dims[1]]-1 - idx[dims[1]];
                 sym[dims[2]] = idx[dims[2]];
-                if (verbosity) printf("Symmetry Check: (%d,%d,%d)<->(%d,%d,%d) => ",idx[0],idx[1],idx[2],sym[0],sym[1],sym[2]);
+                if (verbosity==3) printf("Symmetry Check: (%d,%d,%d)<->(%d,%d,%d) => ",idx[0],idx[1],idx[2],sym[0],sym[1],sym[2]);
                 Real d0 = abs( grid(idx[0],idx[1],idx[2],var::R) - grid(sym[0],sym[1],sym[2],var::R) );
                 Real d1 = abs( grid(idx[0],idx[1],idx[2],var::U) - grid(sym[0],sym[1],sym[2],var::U) );
                 Real d2 = abs( grid(idx[0],idx[1],idx[2],var::V) - grid(sym[0],sym[1],sym[2],var::V) );
@@ -350,7 +350,7 @@ void _symmetry_check(GridMPI& grid, const int verbosity, const Real tol=1.0e-6, 
                 /* if (verbosity) printf("abs-diff: (%f, %f, %f, %f, %f, %f, %f)\n",d0,d1,d2,d3,d4,d5,d6); */
                 Real Linf = max(d0,max(d1,max(d2,max(d3,max(d4,max(d5,d6))))));
                 Linf_global = max(Linf, Linf_global);
-                if (verbosity) printf("Linf = %f\n", Linf);
+                if (verbosity==3) printf("Linf = %f\n", Linf);
 
                 /* assert(grid(idx[0],idx[1],idx[2],var::R) == grid(sym[0],sym[1],sym[2],var::R)); */
                 /* assert(grid(idx[0],idx[1],idx[2],var::U) == grid(sym[0],sym[1],sym[2],var::U)); */
@@ -408,20 +408,20 @@ class GPUlabSB : public GPUlab
             /* if (myFeature[5] == SKIN) bc.template applyBC_absorbing <2,1,ghostmap::Z>(haloz.right); */
 
             // yx / zx
-            /* if (myFeature[0] == SKIN) bc.template applyBC_reflecting<0,0,ghostmap::X>(halox.left); */
-            /* if (myFeature[1] == SKIN) bc.template applyBC_reflecting<0,1,ghostmap::X>(halox.right); */
-            /* if (myFeature[2] == SKIN) bc.template applyBC_absorbing <1,0,ghostmap::Y>(haloy.left); */
-            /* if (myFeature[3] == SKIN) bc.template applyBC_absorbing <1,1,ghostmap::Y>(haloy.right); */
-            /* if (myFeature[4] == SKIN) bc.template applyBC_absorbing <2,0,ghostmap::Z>(haloz.left); */
-            /* if (myFeature[5] == SKIN) bc.template applyBC_absorbing <2,1,ghostmap::Z>(haloz.right); */
-
-            // yz / xz
-            if (myFeature[0] == SKIN) bc.template applyBC_absorbing <0,0,ghostmap::X>(halox.left);
-            if (myFeature[1] == SKIN) bc.template applyBC_absorbing <0,1,ghostmap::X>(halox.right);
+            if (myFeature[0] == SKIN) bc.template applyBC_reflecting<0,0,ghostmap::X>(halox.left);
+            if (myFeature[1] == SKIN) bc.template applyBC_reflecting<0,1,ghostmap::X>(halox.right);
             if (myFeature[2] == SKIN) bc.template applyBC_absorbing <1,0,ghostmap::Y>(haloy.left);
             if (myFeature[3] == SKIN) bc.template applyBC_absorbing <1,1,ghostmap::Y>(haloy.right);
-            if (myFeature[4] == SKIN) bc.template applyBC_reflecting<2,0,ghostmap::Z>(haloz.left);
-            if (myFeature[5] == SKIN) bc.template applyBC_reflecting<2,1,ghostmap::Z>(haloz.right);
+            if (myFeature[4] == SKIN) bc.template applyBC_absorbing <2,0,ghostmap::Z>(haloz.left);
+            if (myFeature[5] == SKIN) bc.template applyBC_absorbing <2,1,ghostmap::Z>(haloz.right);
+
+            // yz / xz
+            /* if (myFeature[0] == SKIN) bc.template applyBC_absorbing <0,0,ghostmap::X>(halox.left); */
+            /* if (myFeature[1] == SKIN) bc.template applyBC_absorbing <0,1,ghostmap::X>(halox.right); */
+            /* if (myFeature[2] == SKIN) bc.template applyBC_absorbing <1,0,ghostmap::Y>(haloy.left); */
+            /* if (myFeature[3] == SKIN) bc.template applyBC_absorbing <1,1,ghostmap::Y>(haloy.right); */
+            /* if (myFeature[4] == SKIN) bc.template applyBC_reflecting<2,0,ghostmap::Z>(haloz.left); */
+            /* if (myFeature[5] == SKIN) bc.template applyBC_reflecting<2,1,ghostmap::Z>(haloz.right); */
         }
 
     public:
@@ -467,7 +467,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Setup Initial Condition
     ///////////////////////////////////////////////////////////////////////////
-    unsigned int dims[3] = {0,2,1}; // permutation of directions for 1D/2D stuff {principal, minor, dummy}
+    unsigned int dims[3] = {2,0,1}; // permutation of directions for 1D/2D stuff {principal, minor, dummy}
     const bool reverse = true;
     /* _icCONST(mygrid, world_rank+1); */
     /* _ic123(mygrid); */
@@ -478,13 +478,12 @@ int main(int argc, const char *argv[])
 
     unsigned int fcount = 0;
     char fname[256];
-    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, _make_fname(fname, "data", fcount++)); */
+    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, _make_fname(fname, "data", fcount++));
 
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    const size_t nslices = 64;
-    Lab myGPU(mygrid, nslices, verbosity);
+    Lab myGPU(mygrid, 512, verbosity);
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
@@ -497,8 +496,11 @@ int main(int argc, const char *argv[])
 
     const double h = mygrid.getH();
     float sos;
-    double t = 0, dt, tlast = 0;
+    double t = 0, dt;
     unsigned int step = 0;
+
+    const double save_interval = parser("-saveinterval").asDouble(6e-3);
+    double tnext = save_interval;
 
     while (t < tend)
     {
@@ -510,6 +512,8 @@ int main(int argc, const char *argv[])
 
         dt = cfl*h/sos;
         dt = (tend-t) < dt ? (tend-t) : dt;
+        dt = (tnext-t) < dt ? (tnext-t) : dt; // accurate time for file dump
+
         MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, mygrid.getCartComm());
 
         // 2.) Compute RHS and update using LSRK3
@@ -536,10 +540,10 @@ int main(int argc, const char *argv[])
 
         printf("step id is %d, physical time %f (dt = %f)\n", step, t, dt);
 
-        if ((t-tlast)*1000 > 1.0 && (int)(t*1000) % 6 == 0)
+        if ((float)t == (float)tnext)
         {
-            tlast = t;
-            DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++));
+            tnext += save_interval;
+            /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++)); */
         }
         /* if (step % 10 == 0) DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++)); */
 

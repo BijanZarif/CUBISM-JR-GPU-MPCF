@@ -841,7 +841,7 @@ void _zflux(const uint_t nslices, devPtrSet flux,
     {
         Stencil r, u, v, w, e, G, P;
         Stencil p; // for reconstruction
-        for (uint_t iz = 3; iz < (nslices+1)+3; ++iz) // first and last 3 slices are zghosts, need to compute nslices+1 fluxes in z-direction
+        for (uint_t iz = 3; iz < (nslices+1)+3; ++iz) // first and last 3 slices are zghosts; need to compute nslices+1 fluxes in z-direction
         {
             /* *
              * The general task order is (for each chunk slice along NZ):
@@ -1278,7 +1278,6 @@ extern "C"
         const dim3 blocks(_NTHREADS_, 1, 1);
 
         tCUDA_START(stream1)
-        // if only everything would be as easy as this!
         _zflux<<<grid, blocks, 0, stream1>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
         tCUDA_STOP(stream1, "[_zflux Kernel]: ")
 

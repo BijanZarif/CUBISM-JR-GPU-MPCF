@@ -308,7 +308,7 @@ class GPUlab
             ///////////////////////////////////////////////////////////////////
             // 3.)
             ///////////////////////////////////////////////////////////////////
-             _dump_chunk(1);
+             /* _dump_chunk(1); */
             Kflow convection(a, dtinvh);
             if (chatty) printf("\t[LAUNCH CONVECTION KERNEL CHUNK %d]\n", curr_chunk_id);
             /* convection.compute(curr_slices, curr_iz); */
