@@ -15,6 +15,14 @@
 #include "CUDA_Timer.cuh"
 #endif
 
+#if _BLOCKSIZEX_ < 5
+#error Minimum _BLOCKSIZEX_ is 5
+#elif _BLOCKSIZEY_ < 5
+#error Minimum _BLOCKSIZEY_ is 5
+#elif _BLOCKSIZEZ_ < 1
+#error Minimum _BLOCKSIZEZ_ is 1
+#endif
+
 
 ///////////////////////////////////////////////////////////////////////////////
 //                             DEVICE FUNCTIONS                              //

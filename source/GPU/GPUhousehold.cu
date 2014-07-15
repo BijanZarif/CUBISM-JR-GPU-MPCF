@@ -6,6 +6,8 @@
  * */
 #include <stdio.h>
 #include <vector>
+#include <algorithm>
+using namespace std;
 
 #include "GPU.h" // includes Types.h
 
@@ -26,6 +28,7 @@ RealPtrVec_t d_xgr(VSIZE, NULL);
 RealPtrVec_t d_ygl(VSIZE, NULL);
 RealPtrVec_t d_ygr(VSIZE, NULL);
 
+/* RealPtrVec_t d_flux(VSIZE, NULL); */
 RealPtrVec_t d_xflux(VSIZE, NULL);
 RealPtrVec_t d_yflux(VSIZE, NULL);
 RealPtrVec_t d_zflux(VSIZE, NULL);
@@ -37,7 +40,7 @@ Real *d_hllc_vel;
 Real *d_sumG, *d_sumP, *d_divU;
 
 // 3D arrays (GPU input)
-std::vector<cudaArray_t> d_GPUin(VSIZE, NULL);
+vector<cudaArray_t> d_GPUin(VSIZE, NULL);
 
 // Max SOS
 int *h_maxSOS; // host, mapped
@@ -87,10 +90,11 @@ extern "C"
         // GPU output size
         const uint_t outputSize = SLICE_GPU * nslices;
 
-        // fluxes (TODO: use one array later, process after each flux computation)
-        const uint_t bSflx = (NodeBlock::sizeX+1)*NodeBlock::sizeY*nslices;
-        const uint_t bSfly = NodeBlock::sizeX*(NodeBlock::sizeY+1)*nslices;
-        const uint_t bSflz = NodeBlock::sizeX*NodeBlock::sizeY*(nslices+1);
+        // fluxes
+        const uint_t xflxSize = (NodeBlock::sizeX+1)*NodeBlock::sizeY*nslices;
+        const uint_t yflxSize = NodeBlock::sizeX*(NodeBlock::sizeY+1)*nslices;
+        const uint_t zflxSize = NodeBlock::sizeX*NodeBlock::sizeY*(nslices+1);
+        const uint_t maxflxSize = max(xflxSize, max(yflxSize, zflxSize));
 
         // x-/yghosts
         const uint_t xgSize = 3*NodeBlock::sizeY*nslices;
@@ -109,12 +113,14 @@ extern "C"
             cudaMemset(d_rhs[var], 0, outputSize*sizeof(Real));
 
             // fluxes
-            cudaMalloc(&d_xflux[var], bSflx*sizeof(Real));
-            cudaMalloc(&d_yflux[var], bSfly*sizeof(Real));
-            cudaMalloc(&d_zflux[var], bSflz*sizeof(Real));
-            cudaMemset(d_xflux[var], 0, bSflx*sizeof(Real));
-            cudaMemset(d_yflux[var], 0, bSfly*sizeof(Real));
-            cudaMemset(d_zflux[var], 0, bSflz*sizeof(Real));
+            /* cudaMalloc(&d_flux[var], maxflxSize*sizeof(Real)); */
+            /* cudaMemset(d_flux[var], 0, maxflxSize*sizeof(Real)); */
+            cudaMalloc(&d_xflux[var], xflxSize*sizeof(Real));
+            cudaMalloc(&d_yflux[var], yflxSize*sizeof(Real));
+            cudaMalloc(&d_zflux[var], zflxSize*sizeof(Real));
+            cudaMemset(d_xflux[var], 0, xflxSize*sizeof(Real));
+            cudaMemset(d_yflux[var], 0, yflxSize*sizeof(Real));
+            cudaMemset(d_zflux[var], 0, zflxSize*sizeof(Real));
 
             // x-/yghosts
             cudaMalloc(&d_xgl[var], xgSize*sizeof(Real));
@@ -127,12 +133,12 @@ extern "C"
             cudaMalloc3DArray(&d_GPUin[var], &fmt, make_cudaExtent(NodeBlock::sizeX, NodeBlock::sizeY, nslices+6));
         }
 
-        // extraterm for advection (TODO: remove this uglyness!)
-        cudaMalloc(&d_Gm, bSflz * sizeof(Real));
-        cudaMalloc(&d_Gp, bSflz * sizeof(Real));
-        cudaMalloc(&d_Pm, bSflz * sizeof(Real));
-        cudaMalloc(&d_Pp, bSflz * sizeof(Real));
-        cudaMalloc(&d_hllc_vel, bSflz * sizeof(Real));
+        // extraterm for advection
+        cudaMalloc(&d_Gm, maxflxSize * sizeof(Real));
+        cudaMalloc(&d_Gp, maxflxSize * sizeof(Real));
+        cudaMalloc(&d_Pm, maxflxSize * sizeof(Real));
+        cudaMalloc(&d_Pp, maxflxSize * sizeof(Real));
+        cudaMalloc(&d_hllc_vel, maxflxSize * sizeof(Real));
         cudaMalloc(&d_sumG, outputSize * sizeof(Real));
         cudaMalloc(&d_sumP, outputSize * sizeof(Real));
         cudaMalloc(&d_divU, outputSize * sizeof(Real));
@@ -169,9 +175,9 @@ extern "C"
             printf("[%5.1f MB (input GPU)]\n", VSIZE*(SLICE_GPU*(nslices+6))*sizeof(Real) / 1024. / 1024);
             printf("[%5.1f MB (tmp)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
             printf("[%5.1f MB (rhs)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
-            printf("[%5.1f MB (flux storage)]\n", VSIZE*(bSflx + bSfly + bSflz)*sizeof(Real) / 1024. / 1024);
+            printf("[%5.1f MB (flux storage)]\n", VSIZE*(xflxSize + yflxSize + zflxSize)*sizeof(Real) / 1024. / 1024);
             printf("[%5.1f MB (x/yghosts)]\n", VSIZE*(xgSize + ygSize)*2*sizeof(Real) / 1024. / 1024);
-            printf("[%5.1f MB (extraterm)]\n", (5*bSflx + 3*outputSize)*sizeof(Real) / 1024. / 1024);
+            printf("[%5.1f MB (extraterm)]\n", (5*maxflxSize + 3*outputSize)*sizeof(Real) / 1024. / 1024);
             GPU::tell_memUsage_GPU();
             printf("=====================================================================\n");
         }
@@ -191,6 +197,7 @@ extern "C"
             cudaFree(d_rhs[var]);
 
             // fluxes
+            /* cudaFree(d_flux[var]); */
             cudaFree(d_xflux[var]);
             cudaFree(d_yflux[var]);
             cudaFree(d_zflux[var]);
