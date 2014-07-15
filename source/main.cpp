@@ -66,23 +66,25 @@ static void _icCONST(GridMPI& grid, const Real val = 0)
 }
 
 
-static void _ic123(GridMPI& grid)
+static void _ic123(GridMPI& grid, const unsigned int dims[3])
 {
     // 1 2 3 4 5 6 7 8 9 .........
     typedef GridMPI::PRIM var;
     unsigned int cnt = 0;
+    unsigned int gridDim[3] = {GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ};
+    int idx[3];
 #pragma omp paralell for
-    for (int iz = 0; iz < GridMPI::sizeZ; ++iz)
-        for (int iy = 0; iy < GridMPI::sizeY; ++iy)
-            for (int ix = 0; ix < GridMPI::sizeX; ++ix)
+    for (idx[dims[2]]=0; idx[dims[2]]<gridDim[dims[2]]; ++idx[dims[2]])
+        for (idx[dims[1]]=0; idx[dims[1]]<gridDim[dims[1]]; ++idx[dims[1]])
+            for (idx[dims[0]]=0; idx[dims[0]]<gridDim[dims[0]]; ++idx[dims[0]])
             {
-                grid(ix, iy, iz, var::R) = cnt;
-                grid(ix, iy, iz, var::U) = cnt;
-                grid(ix, iy, iz, var::V) = cnt;
-                grid(ix, iy, iz, var::W) = cnt;
-                grid(ix, iy, iz, var::E) = cnt;
-                grid(ix, iy, iz, var::G) = cnt;
-                grid(ix, iy, iz, var::P) = cnt++;
+                grid(idx[0], idx[1], idx[2], var::R) = cnt;
+                grid(idx[0], idx[1], idx[2], var::U) = cnt;
+                grid(idx[0], idx[1], idx[2], var::V) = cnt;
+                grid(idx[0], idx[1], idx[2], var::W) = cnt;
+                grid(idx[0], idx[1], idx[2], var::E) = cnt;
+                grid(idx[0], idx[1], idx[2], var::G) = cnt;
+                grid(idx[0], idx[1], idx[2], var::P) = cnt++;
             }
 
 }
@@ -400,20 +402,20 @@ class GPUlabSB : public GPUlab
             /* BoundaryConditions<GridMPI> bc(grid.pdata(), current_iz, current_length); */
             BoundaryConditions<GridMPI> bc(grid.pdata()); // call this constructor if all halos are fetched at one time
             // xy / zy
-            /* if (myFeature[0] == SKIN) bc.template applyBC_absorbing <0,0,ghostmap::X>(halox.left); */
-            /* if (myFeature[1] == SKIN) bc.template applyBC_absorbing <0,1,ghostmap::X>(halox.right); */
-            /* if (myFeature[2] == SKIN) bc.template applyBC_reflecting<1,0,ghostmap::Y>(haloy.left); */
-            /* if (myFeature[3] == SKIN) bc.template applyBC_reflecting<1,1,ghostmap::Y>(haloy.right); */
-            /* if (myFeature[4] == SKIN) bc.template applyBC_absorbing <2,0,ghostmap::Z>(haloz.left); */
-            /* if (myFeature[5] == SKIN) bc.template applyBC_absorbing <2,1,ghostmap::Z>(haloz.right); */
-
-            // yx / zx
-            if (myFeature[0] == SKIN) bc.template applyBC_reflecting<0,0,ghostmap::X>(halox.left);
-            if (myFeature[1] == SKIN) bc.template applyBC_reflecting<0,1,ghostmap::X>(halox.right);
-            if (myFeature[2] == SKIN) bc.template applyBC_absorbing <1,0,ghostmap::Y>(haloy.left);
-            if (myFeature[3] == SKIN) bc.template applyBC_absorbing <1,1,ghostmap::Y>(haloy.right);
+            if (myFeature[0] == SKIN) bc.template applyBC_absorbing <0,0,ghostmap::X>(halox.left);
+            if (myFeature[1] == SKIN) bc.template applyBC_absorbing <0,1,ghostmap::X>(halox.right);
+            if (myFeature[2] == SKIN) bc.template applyBC_reflecting<1,0,ghostmap::Y>(haloy.left);
+            if (myFeature[3] == SKIN) bc.template applyBC_reflecting<1,1,ghostmap::Y>(haloy.right);
             if (myFeature[4] == SKIN) bc.template applyBC_absorbing <2,0,ghostmap::Z>(haloz.left);
             if (myFeature[5] == SKIN) bc.template applyBC_absorbing <2,1,ghostmap::Z>(haloz.right);
+
+            // yx / zx
+            /* if (myFeature[0] == SKIN) bc.template applyBC_reflecting<0,0,ghostmap::X>(halox.left); */
+            /* if (myFeature[1] == SKIN) bc.template applyBC_reflecting<0,1,ghostmap::X>(halox.right); */
+            /* if (myFeature[2] == SKIN) bc.template applyBC_absorbing <1,0,ghostmap::Y>(haloy.left); */
+            /* if (myFeature[3] == SKIN) bc.template applyBC_absorbing <1,1,ghostmap::Y>(haloy.right); */
+            /* if (myFeature[4] == SKIN) bc.template applyBC_absorbing <2,0,ghostmap::Z>(haloz.left); */
+            /* if (myFeature[5] == SKIN) bc.template applyBC_absorbing <2,1,ghostmap::Z>(haloz.right); */
 
             // yz / xz
             /* if (myFeature[0] == SKIN) bc.template applyBC_absorbing <0,0,ghostmap::X>(halox.left); */
@@ -467,10 +469,10 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Setup Initial Condition
     ///////////////////////////////////////////////////////////////////////////
-    unsigned int dims[3] = {2,0,1}; // permutation of directions for 1D/2D stuff {principal, minor, dummy}
+    unsigned int dims[3] = {0,1,2}; // permutation of directions for 1D/2D stuff {principal, minor, dummy}
     const bool reverse = true;
     /* _icCONST(mygrid, world_rank+1); */
-    /* _ic123(mygrid); */
+    /* _ic123(mygrid, dims); */
     /* _icSOD(mygrid, parser, dims, !reverse); */
     _ic2DSB(mygrid, parser, dims, !reverse);
 
@@ -483,7 +485,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    Lab myGPU(mygrid, 512, verbosity);
+    Lab myGPU(mygrid, 5, verbosity);
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
@@ -543,14 +545,14 @@ int main(int argc, const char *argv[])
         if ((float)t == (float)tnext)
         {
             tnext += save_interval;
-            /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++)); */
+            DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++));
         }
         /* if (step % 10 == 0) DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++)); */
 
         if (step == nsteps) break;
     }
 
-    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++)); */
+    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++));
 
     // good night
     MPI_Finalize();
