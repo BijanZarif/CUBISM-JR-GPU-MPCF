@@ -12,6 +12,7 @@
 
 #include <cassert>
 #include <mpi.h>
+#include <iostream>
 
 #ifdef _USE_HDF_
 #include <hdf5.h>

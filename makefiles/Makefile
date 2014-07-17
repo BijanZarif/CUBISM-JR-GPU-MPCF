@@ -44,10 +44,11 @@ ifneq "$(findstring rosa,$(shell hostname))" ""
 endif
 
 ifneq "$(findstring daint,$(shell hostname))" ""
-        mpi-inc = $(CRAY_MPICH2_DIR)/include/
-        mpi-lib = $(CRAY_MPICH2_DIR)/lib/
-        fftw-inc = $(FFTW_INC)#/users/petrosk/fftw-2.1.5_gcc/include/
-        fftw-lib = $(FFTW_DIR)#/users/petrosk/fftw-2.1.5_gcc/lib/
+	mpi-inc = $(CRAY_MPICH2_DIR)/include/
+	mpi-lib = $(CRAY_MPICH2_DIR)/lib/
+	fftw-inc = $(FFTW_INC)#/users/petrosk/fftw-2.1.5_gcc/include/
+	fftw-lib = $(FFTW_DIR)#/users/petrosk/fftw-2.1.5_gcc/lib/
+	CUFLAGS += -arch=compute_35
 endif
 
 ifneq "$(findstring localhost.localdomain,$(shell hostname))" "" #Cyrus
@@ -146,6 +147,5 @@ clean:
 	rm -f *.o mpcf-cluster *~
 
 cleanall:
-	(cd ../../MPCFnode/makefiles; make cleanall)
 	make clean;
 
