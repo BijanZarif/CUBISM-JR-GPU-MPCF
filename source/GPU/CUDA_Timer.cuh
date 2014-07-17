@@ -23,7 +23,6 @@ class EventTimer {
             cudaEventDestroy(mStart);
             cudaEventDestroy(mStop);
         }
-#if defined(CUDA_TIMER)
         void start(cudaStream_t s = 0) { cudaEventRecord(mStart, s);
             mStarted = true; mStopped = false; }
         void stop(cudaStream_t s = 0)  { assert(mStarted);
@@ -45,11 +44,6 @@ class EventTimer {
             else
                 std::cout << "\t" << tag << tElapsed*0.001f << "s" << std::endl;
         }
-#else
-        inline void start(cudaStream_t s = 0) { }
-        inline void stop(cudaStream_t s = 0)  { }
-        inline void print(const std::string tag = "") { }
-#endif
 
     private:
         bool mStarted, mStopped;

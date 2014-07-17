@@ -8,9 +8,10 @@
  */
 #pragma once
 
+#include "Types.h"
 
 class MaxSpeedOfSound_CUDA
 {
     public:
-        void compute(const unsigned int BSX_GPU, const unsigned int BSY_GPU, const unsigned int CHUNK_WIDTH);
+        void compute(const uint_t nslices);
 };

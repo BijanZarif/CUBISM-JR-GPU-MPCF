@@ -18,7 +18,60 @@ typedef float Real;
 typedef double Real;
 #endif
 
+typedef std::vector<Real *> RealPtrVec_t;
+typedef unsigned int uint_t;
 
+
+///////////////////////////////////////////////////////////////////////////////
+// INDEX MAPPINGS USED FOR HOST AND DEVICE GHOST BUFFERS
+///////////////////////////////////////////////////////////////////////////////
+#define ID3(ix,iy,iz,NX,NY) ((ix) + (NX) * ((iy) + (NY) * (iz)))
+/* *
+ * Actual mappings into ghost buffers.  Macros are used here because these
+ * mappings are used in host code as well as device code.  In C-notation, the
+ * mappings defined below are used for bounds:
+ *
+ * GHOSTX[NodeBlock::sizeZ][NodeBlock::sizeY][3]
+ * GHOSTY[NodeBlock::sizeZ][3][NodeBlock::sizeX]
+ *
+ * The layout is chosen such that a warp access is coalesced
+ * */
+#define GHOSTMAPX(ix,iy,iz) ((ix) + 3 * ((iy) + NodeBlock::sizeY * (iz)))
+#define GHOSTMAPY(ix,iy,iz) ((ix) + NodeBlock::sizeX * ((iy) + 3 * (iz)))
+
+extern "C"
+{
+    typedef uint_t (*index_map)(const int, const int, const int);
+
+    struct ghostmap
+    {
+        // Used for host code (more convenient and less error prone)
+        static inline uint_t X(const int ix, const int iy, const int iz) { return GHOSTMAPX(ix,iy,iz); }
+        static inline uint_t Y(const int ix, const int iy, const int iz) { return GHOSTMAPY(ix,iy,iz); }
+        static inline uint_t Z(const int ix, const int iy, const int iz) { return ID3(ix, iy, iz, NodeBlock::sizeX, NodeBlock::sizeY); }
+    };
+
+    struct flesh2ghost
+    {
+        /* *
+         * These indexers define offsets used to fill the GPU ghost buffers
+         * according to the mapping defined in ghostmap when extracting halo
+         * cells from the internal grid (flesh).  These buffers are
+         * communicated with MPI.
+         * A note on left (L) and right (R): say coordinate q1 < q2 in some
+         * frame of reference, then q1 corresponds to L and q2 to R.
+         * */
+        static inline uint_t X_L(const int ix, const int iy, const int iz) { return ghostmap::X(ix, iy, iz); }
+        static inline uint_t X_R(const int ix, const int iy, const int iz) { return ghostmap::X(ix-NodeBlock::sizeX+3, iy, iz); }
+        static inline uint_t Y_L(const int ix, const int iy, const int iz) { return ghostmap::Y(ix, iy, iz); }
+        static inline uint_t Y_R(const int ix, const int iy, const int iz) { return ghostmap::Y(ix, iy-NodeBlock::sizeY+3, iz); }
+    };
+}
+
+
+///////////////////////////////////////////////////////////////////////////////
+// OUTPUT STREAMER
+///////////////////////////////////////////////////////////////////////////////
 struct StreamerGridPointIterative //dummy
 {
     static const int channels = 7;

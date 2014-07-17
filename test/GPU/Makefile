@@ -5,7 +5,9 @@ LD ?= mpicxx
 
 NVCC ?= nvcc
 
-include ../Makefile.config
+extra += -D_CUDA_TIMER_
+
+include ../../Makefile.config
 
 mpi-inc ?=.
 mpi-lib ?=.
@@ -90,42 +92,21 @@ endif
 # CUFLAGS += --maxrregcount 50
 
 ##################
-VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU
-.DEFAULT_GOAL := mpcf-cluster
+CPPFLAGS += -I../../source -I../../source/GPU
+
+VPATH := ../../source/ ../../source/GPU
+.DEFAULT_GOAL := GPUTest
 
 # CPP
 OBJECTS  = main.o
-# OBJECTS += NodeBlock.o GPUlab.o WaveletCompressor.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CUDA.o
-OBJECTS += NodeBlock.o GPUlab.o MaxSpeedOfSound_CUDA.o MaxSpeedOfSound.o Convection_CUDA.o Update_CUDA.o
+# OBJECTS +=
 # CUDA
 OBJECTS += cudaHostAllocator.o GPUhousehold.o GPUkernels.o
 
-ifeq "$(fftw)"  "1"
-	OBJECTS += PoissonSolverScalarFFTW_MPI.o
-endif
 
-#../../Cubism/makefiles/
-# OBJECTS += Profiler.o Histogram.o
+all: GPUTest
 
-ifeq "$(qpx)" "1"
-	OBJECTS += ../../MPCFcore/makefiles/WenoSOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/HLLESOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/DivSOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/Convection_QPX_HLLC.o
-	OBJECTS += ../../MPCFcore/makefiles/HLLCSOA2D_QPX.o
-endif
-
-ifeq "$(qpxemu)" "1"
-	OBJECTS += ../../MPCFcore/makefiles/WenoSOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/HLLESOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/DivSOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/Convection_QPX_HLLC.o
-	OBJECTS += ../../MPCFcore/makefiles/HLLCSOA2D_QPX.o
-endif
-
-all: mpcf-cluster
-
-mpcf-cluster: $(OBJECTS)
+GPUTest: $(OBJECTS)
 	$(CC) $(OPTFLAGS) $(extra) $^ -o $@ $(LIBS)
 
 %.o: %.cpp
@@ -145,8 +126,4 @@ show:
 	@echo "EXTRA    = $(extra)"
 
 clean:
-	rm -f *.o mpcf-cluster *~
-
-cleanall:
-	make clean;
-
+	rm -f *.o GPUTest *~

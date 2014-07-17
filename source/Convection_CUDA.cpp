@@ -12,12 +12,12 @@
 
 Convection_CUDA::Convection_CUDA(const Real a, const Real dtinvh) : a(a), dtinvh(dtinvh) { }
 
-void Convection_CUDA::compute(const unsigned int BSX_GPU, const unsigned int BSY_GPU, const unsigned int CHUNK_WIDTH, const unsigned int global_iz)
+void Convection_CUDA::compute(const uint_t nslices, const uint_t global_iz)
 {
     GPU::bind_textures();
-    GPU::xflux(BSX_GPU, BSY_GPU, CHUNK_WIDTH, global_iz);
-    GPU::yflux(BSX_GPU, BSY_GPU, CHUNK_WIDTH, global_iz);
-    GPU::zflux(BSX_GPU, BSY_GPU, CHUNK_WIDTH);
-    GPU::divergence(a, dtinvh, BSX_GPU, BSY_GPU, CHUNK_WIDTH);
+    GPU::xflux(nslices, global_iz);
+    GPU::yflux(nslices, global_iz);
+    GPU::zflux(nslices);
+    GPU::divergence(a, dtinvh, nslices);
     GPU::unbind_textures();
 }

@@ -23,5 +23,5 @@ class Update_CUDA
     public:
         Update_CUDA(const Real b = 1) : m_b(b) { }
 
-        void compute(const int BSX_GPU, const int BSY_GPU, const int CHUNK_WIDTH);
+        void compute(const int nslices);
 };
