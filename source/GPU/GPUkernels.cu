@@ -1223,164 +1223,161 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 ///////////////////////////////////////////////////////////////////////////////
 //                              KERNEL WRAPPERS                              //
 ///////////////////////////////////////////////////////////////////////////////
-extern "C"
+void GPU::xflux(const uint_t nslices, const uint_t global_iz)
 {
-    void GPU::xflux(const uint_t nslices, const uint_t global_iz)
-    {
 #ifndef _MUTE_GPU_
-        devPtrSet xghostL(d_xgl);
-        devPtrSet xghostR(d_xgr);
-        devPtrSet xflux(d_xflux);
+    devPtrSet xghostL(d_xgl);
+    devPtrSet xghostR(d_xgr);
+    devPtrSet xflux(d_xflux);
 
-        const dim3 blocks(_NTHREADS_, 1, 1);
+    const dim3 blocks(_NTHREADS_, 1, 1);
 
-        {
-            const dim3 grid((NXP1 + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-            tCUDA_START(stream1)
-            _xflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-            tCUDA_STOP(stream1, "[_xflux Kernel]: ")
-        }
-
-        {
-            const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-            tCUDA_START(stream1)
-            _xextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-            tCUDA_STOP(stream1, "[_xextraterm Kernel]: ")
-        }
-#endif
-    }
-
-
-    void GPU::yflux(const uint_t nslices, const uint_t global_iz)
     {
-#ifndef _MUTE_GPU_
-        devPtrSet yghostL(d_ygl);
-        devPtrSet yghostR(d_ygr);
-        devPtrSet yflux(d_yflux);
-
-        const dim3 blocks(_NTHREADS_, 1, 1);
-
-        {
-            const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1);
-            tCUDA_START(stream1)
-            _yflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-            tCUDA_STOP(stream1, "[_yflux Kernel]: ")
-        }
-
-        {
-            const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-            tCUDA_START(stream1)
-            _yextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-            tCUDA_STOP(stream1, "[_yextraterm Kernel]: ")
-        }
-#endif
-    }
-
-
-    void GPU::zflux(const uint_t nslices)
-    {
-#ifndef _MUTE_GPU_
-        devPtrSet zflux(d_zflux);
-
-        const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-        const dim3 blocks(_NTHREADS_, 1, 1);
-
+        const dim3 grid((NXP1 + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
         tCUDA_START(stream1)
+            _xflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        tCUDA_STOP(stream1, "[_xflux Kernel]: ")
+    }
+
+    {
+        const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+        tCUDA_START(stream1)
+            _xextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+        tCUDA_STOP(stream1, "[_xextraterm Kernel]: ")
+    }
+#endif
+}
+
+
+void GPU::yflux(const uint_t nslices, const uint_t global_iz)
+{
+#ifndef _MUTE_GPU_
+    devPtrSet yghostL(d_ygl);
+    devPtrSet yghostR(d_ygr);
+    devPtrSet yflux(d_yflux);
+
+    const dim3 blocks(_NTHREADS_, 1, 1);
+
+    {
+        const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1);
+        tCUDA_START(stream1)
+            _yflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        tCUDA_STOP(stream1, "[_yflux Kernel]: ")
+    }
+
+    {
+        const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+        tCUDA_START(stream1)
+            _yextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+        tCUDA_STOP(stream1, "[_yextraterm Kernel]: ")
+    }
+#endif
+}
+
+
+void GPU::zflux(const uint_t nslices)
+{
+#ifndef _MUTE_GPU_
+    devPtrSet zflux(d_zflux);
+
+    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+    const dim3 blocks(_NTHREADS_, 1, 1);
+
+    tCUDA_START(stream1)
         _zflux<<<grid, blocks, 0, stream1>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-        tCUDA_STOP(stream1, "[_zflux Kernel]: ")
+    tCUDA_STOP(stream1, "[_zflux Kernel]: ")
 
         tCUDA_START(stream1)
         _zextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-        tCUDA_STOP(stream1, "[_zextraterm Kernel]: ")
+    tCUDA_STOP(stream1, "[_zextraterm Kernel]: ")
 #endif
-    }
+}
 
 
-    void GPU::divergence(const Real a, const Real dtinvh, const uint_t nslices)
-    {
+void GPU::divergence(const Real a, const Real dtinvh, const uint_t nslices)
+{
 #ifndef _MUTE_GPU_
-        cudaStreamWaitEvent(stream1, h2d_tmp_completed, 0);
+    cudaStreamWaitEvent(stream1, h2d_tmp_completed, 0);
 
-        devPtrSet xflux(d_xflux);
-        devPtrSet yflux(d_yflux);
-        devPtrSet zflux(d_zflux);
-        devPtrSet rhs(d_rhs);
-        devPtrSet tmp(d_tmp);
+    devPtrSet xflux(d_xflux);
+    devPtrSet yflux(d_yflux);
+    devPtrSet zflux(d_zflux);
+    devPtrSet rhs(d_rhs);
+    devPtrSet tmp(d_tmp);
 
-        const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-        const dim3 blocks(_NTHREADS_, 1, 1);
+    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+    const dim3 blocks(_NTHREADS_, 1, 1);
 
-        tCUDA_START(stream1)
+    tCUDA_START(stream1)
         _divergence<<<grid, blocks, 0, stream1>>>(nslices, xflux, yflux, zflux, rhs, a, dtinvh, tmp, d_sumG, d_sumP, d_divU);
-        tCUDA_STOP(stream1, "[_divergence Kernel]: ")
+    tCUDA_STOP(stream1, "[_divergence Kernel]: ")
 
         cudaEventRecord(divergence_completed, stream1);
 #endif
-    }
+}
 
 
-    void GPU::update(const Real b, const uint_t nslices)
-    {
+void GPU::update(const Real b, const uint_t nslices)
+{
 #ifndef _MUTE_GPU_
-        devPtrSet tmp(d_tmp);
-        devPtrSet rhs(d_rhs);
+    devPtrSet tmp(d_tmp);
+    devPtrSet rhs(d_rhs);
 
-        const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-        const dim3 blocks(_NTHREADS_, 1, 1);
+    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+    const dim3 blocks(_NTHREADS_, 1, 1);
 
-        tCUDA_START(stream1)
+    tCUDA_START(stream1)
         _update<<<grid, blocks, 0, stream1>>>(nslices, b, tmp, rhs);
-        tCUDA_STOP(stream1, "[_update Kernel]: ")
+    tCUDA_STOP(stream1, "[_update Kernel]: ")
 
         cudaEventRecord(update_completed, stream1);
 #endif
-    }
+}
 
 
-    void GPU::MaxSpeedOfSound(const uint_t nslices)
-    {
+void GPU::MaxSpeedOfSound(const uint_t nslices)
+{
 #ifndef _MUTE_GPU_
-        const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-        const dim3 blocks(_NTHREADS_, 1, 1);
+    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+    const dim3 blocks(_NTHREADS_, 1, 1);
 
-        tCUDA_START(stream1)
+    tCUDA_START(stream1)
         _maxSOS<<<grid, blocks, 0, stream1>>>(nslices, d_maxSOS);
-        tCUDA_STOP(stream1, "[_maxSOS Kernel]: ")
+    tCUDA_STOP(stream1, "[_maxSOS Kernel]: ")
 #endif
-    }
+}
 
-    ///////////////////////////////////////////////////////////////////////////
-    // TEST SECTION
-    ///////////////////////////////////////////////////////////////////////////
-    void GPU::TestKernel()
+///////////////////////////////////////////////////////////////////////////
+// TEST SECTION
+///////////////////////////////////////////////////////////////////////////
+void GPU::TestKernel()
+{
+    devPtrSet xghostL(d_xgl);
+    devPtrSet xghostR(d_xgr);
+    devPtrSet xflux(d_xflux);
+
+    devPtrSet yghostL(d_ygl);
+    devPtrSet yghostR(d_ygr);
+    devPtrSet yflux(d_yflux);
+
+    devPtrSet zflux(d_zflux);
+
     {
-        devPtrSet xghostL(d_xgl);
-        devPtrSet xghostR(d_xgr);
-        devPtrSet xflux(d_xflux);
+        const uint_t nslices = NodeBlock::sizeZ;
 
-        devPtrSet yghostL(d_ygl);
-        devPtrSet yghostR(d_ygr);
-        devPtrSet yflux(d_yflux);
+        const dim3 blocks(_NTHREADS_, 1, 1);
+        const dim3 xgrid((NXP1 + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
+        const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1);
+        const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
 
-        devPtrSet zflux(d_zflux);
-
-        {
-            const uint_t nslices = NodeBlock::sizeZ;
-
-            const dim3 blocks(_NTHREADS_, 1, 1);
-            const dim3 xgrid((NXP1 + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
-            const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1);
-            const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
-
-            tCUDA_START(0)
+        tCUDA_START(0)
             /* _xflux<<<xgrid, blocks>>>(nslices, 0, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
             /* _yflux<<<ygrid, blocks>>>(nslices, 0, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
             _zflux<<<zgrid, blocks>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-            tCUDA_STOP(0, "[Testing Kernel]: ")
-        }
-
-
+        tCUDA_STOP(0, "[Testing Kernel]: ")
     }
+
+
 }
 
 
@@ -1402,32 +1399,29 @@ static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex,
 }
 
 
-extern "C"
+void GPU::bind_textures()
 {
-    void GPU::bind_textures()
-    {
 #ifndef _MUTE_GPU_
-        _bindTexture(&texR, d_GPUin[0]);
-        _bindTexture(&texU, d_GPUin[1]);
-        _bindTexture(&texV, d_GPUin[2]);
-        _bindTexture(&texW, d_GPUin[3]);
-        _bindTexture(&texE, d_GPUin[4]);
-        _bindTexture(&texG, d_GPUin[5]);
-        _bindTexture(&texP, d_GPUin[6]);
+    _bindTexture(&texR, d_GPUin[0]);
+    _bindTexture(&texU, d_GPUin[1]);
+    _bindTexture(&texV, d_GPUin[2]);
+    _bindTexture(&texW, d_GPUin[3]);
+    _bindTexture(&texE, d_GPUin[4]);
+    _bindTexture(&texG, d_GPUin[5]);
+    _bindTexture(&texP, d_GPUin[6]);
 #endif
-    }
+}
 
 
-    void GPU::unbind_textures()
-    {
+void GPU::unbind_textures()
+{
 #ifndef _MUTE_GPU_
-        cudaUnbindTexture(&texR);
-        cudaUnbindTexture(&texU);
-        cudaUnbindTexture(&texV);
-        cudaUnbindTexture(&texW);
-        cudaUnbindTexture(&texE);
-        cudaUnbindTexture(&texG);
-        cudaUnbindTexture(&texP);
+    cudaUnbindTexture(&texR);
+    cudaUnbindTexture(&texU);
+    cudaUnbindTexture(&texV);
+    cudaUnbindTexture(&texW);
+    cudaUnbindTexture(&texE);
+    cudaUnbindTexture(&texG);
+    cudaUnbindTexture(&texP);
 #endif
-    }
 }

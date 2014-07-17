@@ -6,17 +6,14 @@
  * */
 #include <cstdlib>
 
-extern "C"
+void *_cudaAllocHost(const std::size_t bytes)
 {
-    void *_cudaAllocHost(const std::size_t bytes)
-    {
-        void *palloc;
-        cudaHostAlloc(&palloc, bytes, cudaHostAllocDefault);
-        return palloc;
-    }
+    void *palloc;
+    cudaHostAlloc(&palloc, bytes, cudaHostAllocDefault);
+    return palloc;
+}
 
-    void _cudaFreeHost(void *ptr)
-    {
-        cudaFreeHost(ptr);
-    }
+void _cudaFreeHost(void *ptr)
+{
+    cudaFreeHost(ptr);
 }

@@ -9,11 +9,8 @@
 #include <limits>
 
 
-extern "C"
-{
-    void *_cudaAllocHost(const std::size_t bytes);
-    void  _cudaFreeHost(void *ptr);
-}
+void *_cudaAllocHost(const std::size_t bytes);
+void  _cudaFreeHost(void *ptr);
 
 
 template <typename T>
