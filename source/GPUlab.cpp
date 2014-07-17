@@ -402,7 +402,7 @@ void GPUlab::load_ghosts(const double t)
     // need more digging here! TODO: use MPI_Irecv ? even better: hide MPI
     // latency with communicating per chunk on the host.  With this you can
     // hide MPI comm with GPU
-    if (myFeature[0] == FLESH) _issue_recv(&halox.recv_left[0],  halox.Allhalos, 0); // x/yhalos directly into pinned mem and H2D ALLLLLLL
+    if (myFeature[0] == FLESH) _issue_recv(&halox.recv_left[0],  halox.Allhalos, 0); // x/yhalos directly into pinned mem and H2D
     if (myFeature[1] == FLESH) _issue_recv(&halox.recv_right[0], halox.Allhalos, 1);
     if (myFeature[2] == FLESH) _issue_recv(&haloy.recv_left[0],  haloy.Allhalos, 2);
     if (myFeature[3] == FLESH) _issue_recv(&haloy.recv_right[0], haloy.Allhalos, 3);

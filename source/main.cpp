@@ -317,7 +317,7 @@ static void _ic2DSB(GridMPI& grid, ArgumentParser& parser, const unsigned int di
 
 void _symmetry_check(GridMPI& grid, const int verbosity, const Real tol=1.0e-6, unsigned int dims[3]=NULL)
 {
-    // check for symmetry in minor direction
+    // check for symmetry in minor direction -> dims = {principal, minor, dummy}
     if (dims == NULL)
         for (unsigned int i = 0; i < 3; ++i)
             dims[i] = i;
@@ -349,18 +349,9 @@ void _symmetry_check(GridMPI& grid, const int verbosity, const Real tol=1.0e-6, 
                 assert(d4 < tol);
                 assert(d5 < tol);
                 assert(d6 < tol);
-                /* if (verbosity) printf("abs-diff: (%f, %f, %f, %f, %f, %f, %f)\n",d0,d1,d2,d3,d4,d5,d6); */
                 Real Linf = max(d0,max(d1,max(d2,max(d3,max(d4,max(d5,d6))))));
                 Linf_global = max(Linf, Linf_global);
                 if (verbosity==3) printf("Linf = %f\n", Linf);
-
-                /* assert(grid(idx[0],idx[1],idx[2],var::R) == grid(sym[0],sym[1],sym[2],var::R)); */
-                /* assert(grid(idx[0],idx[1],idx[2],var::U) == grid(sym[0],sym[1],sym[2],var::U)); */
-                /* assert(grid(idx[0],idx[1],idx[2],var::V) == grid(sym[0],sym[1],sym[2],var::V)); */
-                /* assert(grid(idx[0],idx[1],idx[2],var::W) == grid(sym[0],sym[1],sym[2],var::W)); */
-                /* assert(grid(idx[0],idx[1],idx[2],var::E) == grid(sym[0],sym[1],sym[2],var::E)); */
-                /* assert(grid(idx[0],idx[1],idx[2],var::G) == grid(sym[0],sym[1],sym[2],var::G)); */
-                /* assert(grid(idx[0],idx[1],idx[2],var::P) == grid(sym[0],sym[1],sym[2],var::P)); */
             }
     printf("Global Linf = %f\n", Linf_global);
 }
@@ -402,20 +393,20 @@ class GPUlabSB : public GPUlab
             /* BoundaryConditions<GridMPI> bc(grid.pdata(), current_iz, current_length); */
             BoundaryConditions<GridMPI> bc(grid.pdata()); // call this constructor if all halos are fetched at one time
             // xy / zy
-            if (myFeature[0] == SKIN) bc.template applyBC_absorbing <0,0,ghostmap::X>(halox.left);
-            if (myFeature[1] == SKIN) bc.template applyBC_absorbing <0,1,ghostmap::X>(halox.right);
-            if (myFeature[2] == SKIN) bc.template applyBC_reflecting<1,0,ghostmap::Y>(haloy.left);
-            if (myFeature[3] == SKIN) bc.template applyBC_reflecting<1,1,ghostmap::Y>(haloy.right);
-            if (myFeature[4] == SKIN) bc.template applyBC_absorbing <2,0,ghostmap::Z>(haloz.left);
-            if (myFeature[5] == SKIN) bc.template applyBC_absorbing <2,1,ghostmap::Z>(haloz.right);
-
-            // yx / zx
-            /* if (myFeature[0] == SKIN) bc.template applyBC_reflecting<0,0,ghostmap::X>(halox.left); */
-            /* if (myFeature[1] == SKIN) bc.template applyBC_reflecting<0,1,ghostmap::X>(halox.right); */
-            /* if (myFeature[2] == SKIN) bc.template applyBC_absorbing <1,0,ghostmap::Y>(haloy.left); */
-            /* if (myFeature[3] == SKIN) bc.template applyBC_absorbing <1,1,ghostmap::Y>(haloy.right); */
+            /* if (myFeature[0] == SKIN) bc.template applyBC_absorbing <0,0,ghostmap::X>(halox.left); */
+            /* if (myFeature[1] == SKIN) bc.template applyBC_absorbing <0,1,ghostmap::X>(halox.right); */
+            /* if (myFeature[2] == SKIN) bc.template applyBC_reflecting<1,0,ghostmap::Y>(haloy.left); */
+            /* if (myFeature[3] == SKIN) bc.template applyBC_reflecting<1,1,ghostmap::Y>(haloy.right); */
             /* if (myFeature[4] == SKIN) bc.template applyBC_absorbing <2,0,ghostmap::Z>(haloz.left); */
             /* if (myFeature[5] == SKIN) bc.template applyBC_absorbing <2,1,ghostmap::Z>(haloz.right); */
+
+            // yx / zx
+            if (myFeature[0] == SKIN) bc.template applyBC_reflecting<0,0,ghostmap::X>(halox.left);
+            if (myFeature[1] == SKIN) bc.template applyBC_reflecting<0,1,ghostmap::X>(halox.right);
+            if (myFeature[2] == SKIN) bc.template applyBC_absorbing <1,0,ghostmap::Y>(haloy.left);
+            if (myFeature[3] == SKIN) bc.template applyBC_absorbing <1,1,ghostmap::Y>(haloy.right);
+            if (myFeature[4] == SKIN) bc.template applyBC_absorbing <2,0,ghostmap::Z>(haloz.left);
+            if (myFeature[5] == SKIN) bc.template applyBC_absorbing <2,1,ghostmap::Z>(haloz.right);
 
             // yz / xz
             /* if (myFeature[0] == SKIN) bc.template applyBC_absorbing <0,0,ghostmap::X>(halox.left); */
@@ -456,7 +447,7 @@ int main(int argc, const char *argv[])
 
     ArgumentParser parser(argc, argv);
 
-    const int verbosity = parser("-verbose").asInt(0);
+    const int verbosity = parser("-verb").asInt(0);
 
     ///////////////////////////////////////////////////////////////////////////
     // Setup MPI grid
@@ -469,7 +460,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Setup Initial Condition
     ///////////////////////////////////////////////////////////////////////////
-    unsigned int dims[3] = {0,1,2}; // permutation of directions for 1D/2D stuff {principal, minor, dummy}
+    unsigned int dims[3] = {1,0,2}; // permutation of directions for 1D/2D stuff {principal, minor, dummy}
     const bool reverse = true;
     /* _icCONST(mygrid, world_rank+1); */
     /* _ic123(mygrid, dims); */
@@ -485,7 +476,8 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Init GPU
     ///////////////////////////////////////////////////////////////////////////
-    Lab myGPU(mygrid, 5, verbosity);
+    const unsigned int nslices = parser("-nslices").asInt(1);
+    Lab myGPU(mygrid, nslices, verbosity);
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver

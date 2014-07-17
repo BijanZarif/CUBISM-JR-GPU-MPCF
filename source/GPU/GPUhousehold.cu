@@ -83,6 +83,8 @@ extern "C"
     void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
     {
 #ifndef _MUTE_GPU_
+        /* cudaDeviceReset(); */
+        /* cudaSetDeviceFlags(cudaDeviceMapHost); */
 
         // processing slice size (normal to z-direction)
         const uint_t SLICE_GPU = NodeBlock::sizeX * NodeBlock::sizeY;
@@ -143,8 +145,7 @@ extern "C"
         cudaMalloc(&d_sumP, outputSize * sizeof(Real));
         cudaMalloc(&d_divU, outputSize * sizeof(Real));
 
-        // zero-copy maxSOS (TODO: should this be unsigned int??)
-        cudaSetDeviceFlags(cudaDeviceMapHost);
+        // zero-copy maxSOS (TODO: should this be unsigned int?)
         cudaHostAlloc((void**)&h_maxSOS, sizeof(int), cudaHostAllocMapped);
         cudaHostGetDevicePointer(&d_maxSOS, h_maxSOS, 0);
         *(int**)sos = h_maxSOS; // return a reference to the caller
