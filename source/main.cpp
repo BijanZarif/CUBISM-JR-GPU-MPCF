@@ -460,7 +460,7 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Setup Initial Condition
     ///////////////////////////////////////////////////////////////////////////
-    unsigned int dims[3] = {1,0,2}; // permutation of directions for 1D/2D stuff {principal, minor, dummy}
+    unsigned int dims[3] = {2,0,1}; // permutation of directions for 1D/2D stuff {principal, minor, dummy}
     const bool reverse = true;
     /* _icCONST(mygrid, world_rank+1); */
     /* _ic123(mygrid, dims); */
