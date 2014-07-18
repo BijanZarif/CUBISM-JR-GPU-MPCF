@@ -1203,7 +1203,7 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
             const Real G = tex3D(texG, ix, iy, iz);
             const Real P = tex3D(texP, ix, iy, iz);
 
-            const Real p = (e - 0.5f*(u*u + v*v + w*w)/r - P) / G;
+            const Real p = (e - (u*u + v*v + w*w)*(0.5f/r) - P) / G;
             const Real c = sqrtf(((p + P) / G + p) / r);
 
             sos = fmaxf(sos, c + fmaxf(fmaxf(fabsf(u), fabsf(v)), fabsf(w)) / r);
@@ -1215,6 +1215,7 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
         {
             for (int i = 1; i < _NTHREADS_; ++i)
                 sos = fmaxf(sos, block_sos[i]);
+            assert(sos > 0);
             atomicMax(g_maxSOS, __float_as_int(sos));
         }
     }
