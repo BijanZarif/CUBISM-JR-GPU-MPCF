@@ -21,6 +21,7 @@ typedef double Real;
 typedef std::vector<Real *> RealPtrVec_t;
 typedef unsigned int uint_t;
 
+enum Coord {X, Y, Z};
 
 ///////////////////////////////////////////////////////////////////////////////
 // INDEX MAPPINGS USED FOR HOST AND DEVICE GHOST BUFFERS
@@ -66,6 +67,18 @@ struct flesh2ghost
 };
 
 
+// Simulation framework
+class Simulation
+{
+    protected:
+        virtual void _setup() { }
+
+    public:
+        virtual void run() = 0;
+        virtual ~Simulation() { }
+};
+
+
 ///////////////////////////////////////////////////////////////////////////////
 // OUTPUT STREAMER
 ///////////////////////////////////////////////////////////////////////////////
@@ -76,7 +89,7 @@ struct StreamerGridPointIterative //dummy
     static const int NY = NodeBlock::sizeY;
     static const int NZ = NodeBlock::sizeZ;
 
-    inline int _id(const int ix, const int iy, const int iz) const { assert(ix + NX * (iy + NY * iz) < NX*NY*NZ); return ix + NX * (iy + NY * iz); }
+    inline int _id(const int ix, const int iy, const int iz) const { assert(ID3(ix,iy,iz,NX,NY) < NX*NY*NZ); return ID3(ix,iy,iz,NX,NY); }
 
     typedef const Real * const const_ptr;
     const_ptr r, u, v, w, e, G, P;
