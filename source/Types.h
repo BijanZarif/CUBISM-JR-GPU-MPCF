@@ -106,8 +106,6 @@ struct myTensorialStreamer
     static const int NY = NodeBlock::sizeY;
     static const int NZ = NodeBlock::sizeZ;
 
-    inline int _id(const int ix, const int iy, const int iz) const { assert(ix + NX * (iy + NY * iz) < NX*NY*NZ); return ix + NX * (iy + NY * iz); }
-
     typedef const Real * const const_ptr;
     const_ptr r, u, v, w, e, G, P;
 
@@ -115,7 +113,7 @@ struct myTensorialStreamer
 
     void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
     {
-        const int idx = _id(ix,iy,iz);
+        const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
         out[0] = r[idx];
         out[1] = u[idx]/r[idx];
@@ -126,13 +124,6 @@ struct myTensorialStreamer
         out[6] = P[idx];
         out[7] = 0.;
         out[8] = 0.;
-    }
-
-    void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz) const
-    {
-        const int idx = _id(ix,iy,iz);
-        assert(idx < NX * NY * NZ);
-        // dummy
     }
 
     static const char * getAttributeName() { return "Tensor"; }
@@ -146,8 +137,6 @@ struct myScalarStreamer
     static const int NY = NodeBlock::sizeY;
     static const int NZ = NodeBlock::sizeZ;
 
-    inline int _id(const int ix, const int iy, const int iz) const { assert(ix + NX * (iy + NY * iz) < NX*NY*NZ); return ix + NX * (iy + NY * iz); }
-
     typedef const Real * const const_ptr;
     const_ptr r, u, v, w, e, G, P;
 
@@ -155,17 +144,52 @@ struct myScalarStreamer
 
     void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
     {
-        const int idx = _id(ix,iy,iz);
+        const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
         out[0] = r[idx];
     }
 
-    void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz) const
+    static const char * getAttributeName() { return "Scalar"; }
+};
+
+
+struct mySaveStreamer
+{
+    static const int NCHANNELS = NodeBlock::NVAR;
+    static const int NX = NodeBlock::sizeX;
+    static const int NY = NodeBlock::sizeY;
+    static const int NZ = NodeBlock::sizeZ;
+
+    typedef Real * const flow_quantity;
+    flow_quantity r, u, v, w, e, G, P;
+
+    mySaveStreamer(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
+
+    void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
     {
-        const int idx = _id(ix,iy,iz);
+        const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        // dummy
+        out[0] = r[idx];
+        out[1] = u[idx];
+        out[2] = v[idx];
+        out[3] = w[idx];
+        out[4] = e[idx];
+        out[5] = G[idx];
+        out[6] = P[idx];
     }
 
-    static const char * getAttributeName() { return "Scalar"; }
+    void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz) const
+    {
+        const int idx = ID3(ix,iy,iz,NX,NY);
+        assert(idx < NX * NY * NZ);
+        r[idx] = input[0];
+        u[idx] = input[1];
+        v[idx] = input[2];
+        w[idx] = input[3];
+        e[idx] = input[4];
+        G[idx] = input[5];
+        P[idx] = input[6];
+    }
+
+    static const char * getAttributeName() { return "Save Data"; }
 };

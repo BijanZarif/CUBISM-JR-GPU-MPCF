@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <omp.h>
 #include <fstream>
+#include <iomanip>
 #include <vector>
 #include <cmath>
 using namespace std;
@@ -28,6 +29,38 @@ using namespace std;
 
 
 // Helper
+template <typename TGrid>
+static void _save(TGrid& grid, const uint_t step, const double t, const uint_t fcount, const bool isroot=true, const string dump_path=".")
+{
+    if (isroot)
+    {
+        ofstream saveinfo("save.info");
+        saveinfo << setprecision(15) << t << endl;
+        saveinfo << step << endl;
+        saveinfo << fcount << endl;
+        saveinfo.close();
+    }
+    DumpHDF5_MPI<TGrid, mySaveStreamer>(grid, step, "save.data", dump_path);
+}
+
+
+template <typename TGrid>
+static bool _restart(TGrid& grid, uint_t& step, double& t, uint_t& fcount, const string dump_path=".")
+{
+    ifstream saveinfo("save.info");
+    if (saveinfo.good())
+    {
+        saveinfo >> t;
+        saveinfo >> step;
+        saveinfo >> fcount;
+        ReadHDF5_MPI<TGrid, mySaveStreamer>(grid, "save.data", dump_path);
+        return true;
+    }
+    else
+        return false;
+}
+
+
 template <typename Ksos>
 static double _maxSOS(const RealPtrVec_t& src, float& sos)
 {
@@ -66,12 +99,12 @@ static void _icCONST(GridMPI& grid, const Real val = 0)
 }
 
 
-static void _ic123(GridMPI& grid, const unsigned int dims[3])
+static void _ic123(GridMPI& grid, const uint_t dims[3])
 {
     // 1 2 3 4 5 6 7 8 9 .........
     typedef GridMPI::PRIM var;
-    unsigned int cnt = 0;
-    unsigned int gridDim[3] = {GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ};
+    uint_t cnt = 0;
+    uint_t gridDim[3] = {GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ};
     int idx[3];
 #pragma omp paralell for
     for (idx[dims[2]]=0; idx[dims[2]]<gridDim[dims[2]]; ++idx[dims[2]])
@@ -90,7 +123,7 @@ static void _ic123(GridMPI& grid, const unsigned int dims[3])
 }
 
 
-static void _icSOD(GridMPI& grid, ArgumentParser& parser, const unsigned int dims[3], const bool reverse=false)
+static void _icSOD(GridMPI& grid, ArgumentParser& parser, const uint_t dims[3], const bool reverse=false)
 {
     ///////////////////////////////////////////////////////////////////////////
     // SOD
@@ -168,7 +201,7 @@ static void _getPostShockRatio(const Real pre_shock[3], const Real mach, const R
     postShock[1] = preShockU - postShockU;
 }
 
-static void _ic2DSB(GridMPI& grid, ArgumentParser& parser, const unsigned int dims[3], const bool reverse=false)
+static void _ic2DSB(GridMPI& grid, ArgumentParser& parser, const uint_t dims[3], const bool reverse=false)
 {
     ///////////////////////////////////////////////////////////////////////////
     // 2D Shock Bubble
@@ -217,7 +250,7 @@ static void _ic2DSB(GridMPI& grid, ArgumentParser& parser, const unsigned int di
         fprintf(stderr, "Can not load bubble file './%s'. ABORT\n", fname);
         exit(1);
     }
-    unsigned int nb;
+    uint_t nb;
     bubbleFile >> nb;
     Rb.resize(nb);
     posb.resize(nb);
@@ -239,7 +272,7 @@ static void _ic2DSB(GridMPI& grid, ArgumentParser& parser, const unsigned int di
     // init
     typedef GridMPI::PRIM var;
     const var momentum[3] = {var::U, var::V, var::W};
-    const unsigned int gridDim[3] = {GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ};
+    const uint_t gridDim[3] = {GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ};
 #pragma omp paralell for
     for (int iz = 0; iz < gridDim[2]; ++iz)
         for (int iy = 0; iy < gridDim[1]; ++iy)
@@ -315,17 +348,17 @@ static void _ic2DSB(GridMPI& grid, ArgumentParser& parser, const unsigned int di
 }
 
 
-void _symmetry_check(GridMPI& grid, const int verbosity, const Real tol=1.0e-6, unsigned int dims[3]=NULL)
+void _symmetry_check(GridMPI& grid, const int verbosity, const Real tol=1.0e-6, uint_t dims[3]=NULL)
 {
     // check for symmetry in minor direction -> dims = {principal, minor, dummy}
     if (dims == NULL)
-        for (unsigned int i = 0; i < 3; ++i)
+        for (uint_t i = 0; i < 3; ++i)
             dims[i] = i;
 
     int idx[3];
     int sym[3];
     Real Linf_global = 0;
-    const unsigned int gridDim[3] = {GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ};
+    const uint_t gridDim[3] = {GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ};
     typedef GridMPI::PRIM var;
     for (idx[dims[2]]=0; idx[dims[2]]<gridDim[dims[2]]; ++idx[dims[2]])
         for (idx[dims[1]]=0; idx[dims[1]]<gridDim[dims[1]]/2; ++idx[dims[1]])
@@ -381,7 +414,7 @@ class GPUlabSOD : public GPUlab
         }
 
     public:
-        GPUlabSOD(GridMPI& grid, const unsigned int nslices, const int verb) : GPUlab(grid, nslices, verb) { }
+        GPUlabSOD(GridMPI& grid, const uint_t nslices, const int verb) : GPUlab(grid, nslices, verb) { }
 };
 
 
@@ -418,7 +451,7 @@ class GPUlabSB : public GPUlab
         }
 
     public:
-        GPUlabSB(GridMPI& grid, const unsigned int nslices, const int verb) : GPUlab(grid, nslices, verb) { }
+        GPUlabSB(GridMPI& grid, const uint_t nslices, const int verb) : GPUlab(grid, nslices, verb) { }
 };
 
 /* typedef GPUlabSOD Lab; */
@@ -447,7 +480,18 @@ int main(int argc, const char *argv[])
 
     ArgumentParser parser(argc, argv);
 
+    // parse arguments
+    parser.set_strict_mode();
+    const double tend = parser("-tend").asDouble();
+    const double cfl  = parser("-cfl").asDouble();
+    const uint_t nslices = parser("-nslices").asInt();
+    const double dump_interval = parser("-dumpinterval").asDouble();
+    const uint_t save_interval = parser("-saveinterval").asInt();
+    parser.unset_strict_mode();
+
     const int verbosity = parser("-verb").asInt(0);
+    const bool restart = parser("-restart").asBool(false);
+    const uint_t nsteps = parser("-nsteps").asInt(0);
 
     ///////////////////////////////////////////////////////////////////////////
     // Setup MPI grid
@@ -460,41 +504,49 @@ int main(int argc, const char *argv[])
     ///////////////////////////////////////////////////////////////////////////
     // Setup Initial Condition
     ///////////////////////////////////////////////////////////////////////////
-    unsigned int dims[3] = {0,1,2}; // permutation of directions for 1D/2D stuff {principal, minor, dummy}
-    const bool reverse = true;
-    /* _icCONST(mygrid, world_rank+1); */
-    /* _ic123(mygrid, dims); */
-    /* _icSOD(mygrid, parser, dims, !reverse); */
-    _ic2DSB(mygrid, parser, dims, !reverse);
-
-    _symmetry_check(mygrid, verbosity, 1.0e-6, dims);
-
-    unsigned int fcount = 0;
+    double t = 0;
+    double tnext = dump_interval;
+    uint_t step = 0;
+    uint_t fcount = 0;
     char fname[256];
-    /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, 0, _make_fname(fname, "data", fcount++)); */
 
-    ///////////////////////////////////////////////////////////////////////////
-    // Init GPU
-    ///////////////////////////////////////////////////////////////////////////
-    const unsigned int nslices = parser("-nslices").asInt(1);
-    Lab myGPU(mygrid, nslices, verbosity);
+    if (restart)
+    {
+        if(_restart<GridMPI>(mygrid, step, t, fcount))
+        {
+            printf("Restarting at step %d, physical time %f\n", step, t);
+            DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, "restart_ic");
+            tnext = (fcount+1)*dump_interval;
+        }
+        else
+        {
+            printf("Loading restart file was not successful... Abort\n");
+            exit(1);
+        }
+    }
+    else
+    {
+        // permutation of directions for 1D/2D stuff {principal, minor, dummy}
+        uint_t dims[3] = {0,1,2};
+        const bool reverse = true;
+        /* _icCONST(mygrid, world_rank+1); */
+        /* _ic123(mygrid, dims); */
+        /* _icSOD(mygrid, parser, dims, !reverse); */
+        _ic2DSB(mygrid, parser, dims, !reverse);
+
+        _symmetry_check(mygrid, verbosity, 1.0e-6, dims);
+
+        DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++));
+    }
 
     ///////////////////////////////////////////////////////////////////////////
     // Run Solver
     ///////////////////////////////////////////////////////////////////////////
-    parser.set_strict_mode();
-    const double tend = parser("-tend").asDouble();
-    const double cfl  = parser("-cfl").asDouble();
-    parser.unset_strict_mode();
-    const unsigned int nsteps = parser("-nsteps").asInt(0);
+    Lab myGPU(mygrid, nslices, verbosity); // get GPU
 
     const double h = mygrid.getH();
     float sos;
-    double t = 0, dt;
-    unsigned int step = 0;
-
-    const double save_interval = parser("-saveinterval").asDouble(6e-3);
-    double tnext = save_interval;
+    double dt;
 
     while (t < tend)
     {
@@ -536,10 +588,16 @@ int main(int argc, const char *argv[])
 
         if ((float)t == (float)tnext)
         {
-            tnext += save_interval;
-            /* DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++)); */
+            tnext += dump_interval;
+            DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++));
         }
         /* if (step % 10 == 0) DumpHDF5_MPI<GridMPI, myTensorialStreamer>(mygrid, step, _make_fname(fname, "data", fcount++)); */
+
+        if (step % save_interval == 0)
+        {
+            printf("Saving time step...\n");
+            _save<GridMPI>(mygrid, step, t, fcount, isroot);
+        }
 
         if (step == nsteps) break;
     }
