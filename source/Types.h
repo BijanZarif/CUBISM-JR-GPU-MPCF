@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <assert.h>
 #include <vector>
+#include <cstdlib>
+#include <algorithm>
 
 #include "NodeBlock.h"
 
@@ -21,7 +23,7 @@ typedef double Real;
 typedef std::vector<Real *> RealPtrVec_t;
 typedef unsigned int uint_t;
 
-enum Coord {X, Y, Z};
+enum Coord {X=0, Y, Z};
 
 ///////////////////////////////////////////////////////////////////////////////
 // INDEX MAPPINGS USED FOR HOST AND DEVICE GHOST BUFFERS
@@ -70,12 +72,81 @@ struct flesh2ghost
 // Simulation framework
 class Simulation
 {
-    protected:
-        virtual void _setup() { }
-
     public:
+        virtual void setup() { }
         virtual void run() = 0;
         virtual ~Simulation() { }
+};
+
+
+// Simulation Tools
+class SimTools
+{
+    public:
+        static Real EPSILON;
+
+        static Real heaviside(const Real phi)
+        {
+            return (phi>0? 0:1);
+        }
+
+        static Real heaviside_smooth(const Real phi)
+        {
+            const Real alpha = M_PI*std::min(1., std::max(0., 0.5*(phi+EPSILON)/EPSILON));
+            return 0.5+0.5*std::cos(alpha);
+        }
+
+        static void getPostShockRatio(const Real pre_shock[3], const Real mach, const Real gamma, const Real pc, Real postShock[3])
+        {
+            const double Mpost = std::sqrt( (std::pow(mach,(Real)2.)*(gamma-1.)+2.) / (2.*gamma*std::pow(mach,(Real)2.)-(gamma-1.)) );
+            postShock[0] = (gamma+1.)*std::pow(mach,(Real)2.)/( (gamma-1.)*std::pow(mach,(Real)2.)+2.)*pre_shock[0] ;
+            postShock[2] = 1./(gamma+1.) * ( 2.*gamma*std::pow(mach,(Real)2.)-(gamma-1.))*pre_shock[2];
+            const double preShockU = mach*std::sqrt(gamma*(pc+pre_shock[2])/pre_shock[0]);
+            const double postShockU = Mpost*std::sqrt(gamma*(pc+postShock[2])/postShock[0]);
+            postShock[1] = preShockU - postShockU;
+        }
+
+        template <typename TGrid>
+            static void symmetry_check(TGrid& grid, const int verbosity, const Real tol=1.0e-6, uint_t dims[3]=NULL)
+            {
+                // check for symmetry in minor direction -> dims = {principal, minor, dummy}
+                if (dims == NULL)
+                    for (uint_t i = 0; i < 3; ++i)
+                        dims[i] = i;
+
+                int idx[3];
+                int sym[3];
+                Real Linf_global = 0;
+                const uint_t gridDim[3] = {TGrid::sizeX, TGrid::sizeY, TGrid::sizeZ};
+                typedef typename TGrid::PRIM var;
+                for (idx[dims[2]]=0; idx[dims[2]]<gridDim[dims[2]]; ++idx[dims[2]])
+                    for (idx[dims[1]]=0; idx[dims[1]]<gridDim[dims[1]]/2; ++idx[dims[1]])
+                        for (idx[dims[0]]=0; idx[dims[0]]<gridDim[dims[0]]; ++idx[dims[0]])
+                        {
+                            sym[dims[0]] = idx[dims[0]];
+                            sym[dims[1]] = gridDim[dims[1]]-1 - idx[dims[1]];
+                            sym[dims[2]] = idx[dims[2]];
+                            if (verbosity==3) printf("Symmetry Check: (%d,%d,%d)<->(%d,%d,%d) => ",idx[0],idx[1],idx[2],sym[0],sym[1],sym[2]);
+                            Real d0 = std::abs( grid(idx[0],idx[1],idx[2],var::R) - grid(sym[0],sym[1],sym[2],var::R) );
+                            Real d1 = std::abs( grid(idx[0],idx[1],idx[2],var::U) - grid(sym[0],sym[1],sym[2],var::U) );
+                            Real d2 = std::abs( grid(idx[0],idx[1],idx[2],var::V) - grid(sym[0],sym[1],sym[2],var::V) );
+                            Real d3 = std::abs( grid(idx[0],idx[1],idx[2],var::W) - grid(sym[0],sym[1],sym[2],var::W) );
+                            Real d4 = std::abs( grid(idx[0],idx[1],idx[2],var::E) - grid(sym[0],sym[1],sym[2],var::E) );
+                            Real d5 = std::abs( grid(idx[0],idx[1],idx[2],var::G) - grid(sym[0],sym[1],sym[2],var::G) );
+                            Real d6 = std::abs( grid(idx[0],idx[1],idx[2],var::P) - grid(sym[0],sym[1],sym[2],var::P) );
+                            assert(d0 < tol);
+                            assert(d1 < tol);
+                            assert(d2 < tol);
+                            assert(d3 < tol);
+                            assert(d4 < tol);
+                            assert(d5 < tol);
+                            assert(d6 < tol);
+                            Real Linf = std::max(d0,std::max(d1,std::max(d2,std::max(d3,std::max(d4,std::max(d5,d6))))));
+                            Linf_global = std::max(Linf, Linf_global);
+                            if (verbosity==3) printf("Linf = %f\n", Linf);
+                        }
+                printf("Global Linf = %f\n", Linf_global);
+            }
 };
 
 

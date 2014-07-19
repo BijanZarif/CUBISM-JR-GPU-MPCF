@@ -38,7 +38,6 @@ class Sim_SteadyStateMPI : public Simulation
         // helper
         ArgumentParser parser;
 
-        virtual void _setup();
         virtual void _allocGPU();
         virtual void _ic();
 
@@ -57,6 +56,7 @@ class Sim_SteadyStateMPI : public Simulation
             delete myGPU;
         }
 
+        virtual void setup();
         virtual void run();
 };
 
@@ -67,12 +67,12 @@ class GPUlabSteadyState : public GPUlab
         void _apply_bc(const double t = 0)
         {
             BoundaryConditions<GridMPI> bc(grid.pdata());
-            /* if (myFeature[0] == SKIN) bc.template applyBC_periodic<0,0,ghostmap::X>(halox.left); */
-            /* if (myFeature[1] == SKIN) bc.template applyBC_periodic<0,1,ghostmap::X>(halox.right); */
-            /* if (myFeature[2] == SKIN) bc.template applyBC_periodic<1,0,ghostmap::Y>(haloy.left); */
-            /* if (myFeature[3] == SKIN) bc.template applyBC_periodic<1,1,ghostmap::Y>(haloy.right); */
-            /* if (myFeature[4] == SKIN) bc.template applyBC_periodic<2,0,ghostmap::Z>(haloz.left); */
-            /* if (myFeature[5] == SKIN) bc.template applyBC_periodic<2,1,ghostmap::Z>(haloz.right); */
+            if (myFeature[0] == SKIN) bc.template applyBC_reflecting<0,0,ghostmap::X>(halox.left);
+            if (myFeature[1] == SKIN) bc.template applyBC_reflecting<0,1,ghostmap::X>(halox.right);
+            if (myFeature[2] == SKIN) bc.template applyBC_reflecting<1,0,ghostmap::Y>(haloy.left);
+            if (myFeature[3] == SKIN) bc.template applyBC_reflecting<1,1,ghostmap::Y>(haloy.right);
+            if (myFeature[4] == SKIN) bc.template applyBC_reflecting<2,0,ghostmap::Z>(haloz.left);
+            if (myFeature[5] == SKIN) bc.template applyBC_reflecting<2,1,ghostmap::Z>(haloz.right);
         }
 
     public:
