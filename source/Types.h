@@ -72,8 +72,10 @@ struct flesh2ghost
 // Simulation framework
 class Simulation
 {
+    protected:
+        virtual void _setup() { }
+
     public:
-        virtual void setup() { }
         virtual void run() = 0;
         virtual ~Simulation() { }
 };

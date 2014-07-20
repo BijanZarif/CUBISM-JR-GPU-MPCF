@@ -38,6 +38,7 @@ class Sim_SteadyStateMPI : public Simulation
         // helper
         ArgumentParser parser;
 
+        virtual void _setup();
         virtual void _allocGPU();
         virtual void _ic();
 
@@ -56,7 +57,6 @@ class Sim_SteadyStateMPI : public Simulation
             delete myGPU;
         }
 
-        virtual void setup();
         virtual void run();
 };
 

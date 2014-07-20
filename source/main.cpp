@@ -71,7 +71,6 @@ int main(int argc, const char *argv[])
         mysim = new Sim_2DSBIMPI(argc, argv, isroot);
 
     // setup & run
-    mysim->setup();
     mysim->run();
 
     // good night

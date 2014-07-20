@@ -96,7 +96,7 @@ VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU
 # CPP
 OBJECTS  = main.o
 # OBJECTS += NodeBlock.o GPUlab.o WaveletCompressor.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CUDA.o
-OBJECTS += Types.o NodeBlock.o GPUlab.o MaxSpeedOfSound.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CUDA.o Sim_SteadyStateMPI.o Sim_SodMPI.o Sim_2DSBIMPI.o
+OBJECTS += Types.o NodeBlock.o GPUlab.o LSRK3_IntegratorMPI.o MaxSpeedOfSound.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CUDA.o Sim_SteadyStateMPI.o Sim_SodMPI.o Sim_2DSBIMPI.o
 # CUDA
 OBJECTS += cudaHostAllocator.o GPUhousehold.o GPUkernels.o
 

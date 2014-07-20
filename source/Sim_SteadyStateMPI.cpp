@@ -6,16 +6,14 @@
  * */
 #include <cassert>
 #include <omp.h>
-#include <mpi.h>
 #include <string>
 #include <fstream>
 #include <iomanip>
 
 #include "Sim_SteadyStateMPI.h"
+#include "LSRK3_IntegratorMPI.h"
 #include "HDF5Dumper_MPI.h"
 /* #include "SerializerIO_WaveletCompression_MPI_Simple.h" */
-
-#include "MaxSpeedOfSound.h"
 
 using namespace std;
 
@@ -23,6 +21,58 @@ using namespace std;
 Sim_SteadyStateMPI::Sim_SteadyStateMPI(const int argc, const char ** argv, const int isroot_)
     : isroot(isroot_), t(0.0), step(0), fcount(0), mygrid(NULL), myGPU(NULL), parser(argc, argv)
 { }
+
+
+void Sim_SteadyStateMPI::_setup()
+{
+    // parse mandatory arguments
+    parser.set_strict_mode();
+    tend         = parser("-tend").asDouble();
+    CFL          = parser("-cfl").asDouble();
+    nslices      = parser("-nslices").asInt();
+    dumpinterval = parser("-dumpinterval").asDouble();
+    saveinterval = parser("-saveinterval").asInt();
+    parser.unset_strict_mode();
+
+    // parse optional aruments
+    verbosity = parser("-verb").asInt(0);
+    restart   = parser("-restart").asBool(false);
+    nsteps    = parser("-nsteps").asInt(0);
+
+    // MPI
+    npex = parser("-npex").asInt(1);
+    npey = parser("-npey").asInt(1);
+    npez = parser("-npez").asInt(1);
+
+    // assign dependent stuff
+    tnextdump = dumpinterval;
+    mygrid    = new GridMPI(npex, npey, npez);
+    assert(mygrid != NULL);
+
+    // setup initial condition
+    if (restart)
+    {
+        if(_restart())
+        {
+            printf("Restarting at step %d, physical time %f\n", step, t);
+            _dump("restart_ic");
+            tnextdump = (fcount+1)*dumpinterval;
+        }
+        else
+        {
+            printf("Loading restart file was not successful... Abort\n");
+            exit(1);
+        }
+    }
+    else
+    {
+        _ic();
+        _dump();
+    }
+
+    _allocGPU();
+    assert(myGPU != NULL);
+}
 
 
 void Sim_SteadyStateMPI::_allocGPU()
@@ -116,96 +166,17 @@ bool Sim_SteadyStateMPI::_restart()
 }
 
 
-void Sim_SteadyStateMPI::setup()
-{
-    // parse mandatory arguments
-    parser.set_strict_mode();
-    tend         = parser("-tend").asDouble();
-    CFL          = parser("-cfl").asDouble();
-    nslices      = parser("-nslices").asInt();
-    dumpinterval = parser("-dumpinterval").asDouble();
-    saveinterval = parser("-saveinterval").asInt();
-    parser.unset_strict_mode();
-
-    // parse optional aruments
-    verbosity = parser("-verb").asInt(0);
-    restart   = parser("-restart").asBool(false);
-    nsteps    = parser("-nsteps").asInt(0);
-
-    // MPI
-    npex = parser("-npex").asInt(1);
-    npey = parser("-npey").asInt(1);
-    npez = parser("-npez").asInt(1);
-
-    // assign dependent stuff
-    tnextdump = dumpinterval;
-    mygrid    = new GridMPI(npex, npey, npez);
-    assert(mygrid != NULL);
-
-    // setup initial condition
-    if (restart)
-    {
-        if(_restart())
-        {
-            printf("Restarting at step %d, physical time %f\n", step, t);
-            _dump("restart_ic");
-            tnextdump = (fcount+1)*dumpinterval;
-        }
-        else
-        {
-            printf("Loading restart file was not successful... Abort\n");
-            exit(1);
-        }
-    }
-    else
-    {
-        _ic();
-        _dump();
-    }
-
-    _allocGPU();
-    assert(myGPU != NULL);
-}
-
-
 void Sim_SteadyStateMPI::run()
 {
-    const double h = mygrid->getH();
-    float sos;
-    double dt;
+    _setup();
+
+    double dt, dt_max;
+    LSRK3_IntegratorMPI * const stepper = new LSRK3_IntegratorMPI(mygrid, myGPU, CFL, verbosity);
 
     while (t < tend)
     {
-        // 1.) Compute max SOS -> dt
-        const double tsos = myGPU->max_sos(sos);
-        /* const double tsos = _maxSOS<MaxSpeedOfSound_CPP>(sos); */
-        assert(sos > 0);
-        if (verbosity) printf("sos = %f (took %f sec)\n", sos, tsos);
-
-        dt = CFL*h/sos;
-        dt = (tend-t) < dt ? (tend-t) : dt;
-        dt = (tnextdump-t) < dt ? (tnextdump-t) : dt; // accurate time for file dump
-
-        MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, mygrid->getCartComm());
-
-        // 2.) Compute RHS and update using LSRK3
-        double trk1, trk2, trk3;
-        {// stage 1
-            myGPU->load_ghosts();
-            trk1 = myGPU->process_all(0, 1./4, dt/h);
-            if (verbosity) printf("RK stage 1 takes %f sec\n", trk1);
-        }
-        {// stage 2
-            myGPU->load_ghosts();
-            trk2 = myGPU->process_all(-17./32, 8./9, dt/h);
-            if (verbosity) printf("RK stage 2 takes %f sec\n", trk2);
-        }
-        {// stage 3
-            myGPU->load_ghosts();
-            trk3 = myGPU->process_all(-32./27, 3./4, dt/h);
-            if (verbosity) printf("RK stage 3 takes %f sec\n", trk3);
-        }
-        if (verbosity) printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
+        dt_max = (tend-t) < (tnextdump-t) ? (tend-t) : (tnextdump-t);
+        dt = (*stepper)(dt_max);
 
         t += dt;
         ++step;
@@ -228,4 +199,5 @@ void Sim_SteadyStateMPI::run()
         if (step == nsteps) break;
     }
     _dump();
+    delete stepper;
 }
