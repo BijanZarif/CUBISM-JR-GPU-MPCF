@@ -171,7 +171,7 @@ void Sim_SteadyStateMPI::run()
     _setup();
 
     double dt, dt_max;
-    LSRK3_IntegratorMPI * const stepper = new LSRK3_IntegratorMPI(mygrid, myGPU, CFL, verbosity);
+    LSRK3_IntegratorMPI * const stepper = new LSRK3_IntegratorMPI(mygrid, myGPU, CFL, parser);
 
     while (t < tend)
     {

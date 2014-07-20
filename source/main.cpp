@@ -14,15 +14,6 @@
 
 // Helper
 
-/* template <typename Ksos> */
-/* static double _maxSOS(const RealPtrVec_t& src, float& sos) */
-/* { */
-/*     Ksos kernel; */
-/*     Timer tsos; */
-/*     tsos.start(); */
-/*     sos = kernel.compute(src); */
-/*     return tsos.stop(); */
-/* } */
 
 
 /* static void _ic123(GridMPI& grid, const uint_t dims[3]) */

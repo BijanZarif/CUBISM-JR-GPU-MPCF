@@ -4,17 +4,33 @@
  * Created by Fabian Wermelinger on 7/20/14.
  * Copyright 2014 ETH Zurich. All rights reserved.
  * */
+#include "LSRK3_IntegratorMPI.h"
+#include "Timer.h"
+#include "MaxSpeedOfSound.h"
+
 #include <cassert>
 #include <stdio.h>
 #include <mpi.h>
-#include "LSRK3_Integrator.h"
 
-#include "MaxSpeedOfSound.h"
+
+template <typename KSOS>
+double _maxSOS(const GridMPI * const grid, float& sos)
+{
+    KSOS kernel;
+    Timer tsos;
+    tsos.start();
+    sos = kernel.compute(grid->pdata());
+    return tsos.stop();
+}
+
 
 double LSRK3_IntegratorMPI::operator()(const double dt_max)
 {
-    const double tsos = GPU->max_sos(sos);
-    /* const double tsos = _maxSOS<MaxSpeedOfSound_CPP>(sos); */
+    double tsos;
+    if (SOSkernel == "cuda")
+        tsos = GPU->max_sos(sos);
+    else if (SOSkernel == "cpp")
+        tsos = _maxSOS<MaxSpeedOfSound_CPP>(grid, sos);
     assert(sos > 0);
     if (verbosity) printf("sos = %f (took %f sec)\n", sos, tsos);
 
