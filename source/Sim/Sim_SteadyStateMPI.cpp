@@ -184,8 +184,10 @@ void Sim_SteadyStateMPI::run()
     _setup();
 
     if (dryrun)
+    {
         if (isroot) printf("Dry Run...\n");
-        else ;
+        return;
+    }
     else
     {
         double dt, dt_max;
@@ -218,5 +220,6 @@ void Sim_SteadyStateMPI::run()
         }
         _dump();
         delete stepper;
+        return;
     }
 }

@@ -90,13 +90,15 @@ endif
 # CUFLAGS += --maxrregcount 50
 
 ##################
-VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU
+VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU ../source/Sim
 .DEFAULT_GOAL := mpcf-cluster
 
-# CPP
-OBJECTS  = main.o
-# OBJECTS += NodeBlock.o GPUlab.o WaveletCompressor.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CUDA.o
-OBJECTS += Types.o NodeBlock.o GPUlab.o LSRK3_IntegratorMPI.o MaxSpeedOfSound.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CUDA.o Sim_SteadyStateMPI.o Sim_SodMPI.o Sim_2DSBIMPI.o Sim_StaticIC.o Sim_SICCloudMPI.o
+# core
+OBJECTS = main.o Types.o NodeBlock.o GPUlab.o LSRK3_IntegratorMPI.o
+# kernels
+OBJECTS += MaxSpeedOfSound.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CUDA.o
+# Simulations
+OBJECTS += Sim_SteadyStateMPI.o Sim_SodMPI.o Sim_2DSBIMPI.o Sim_StaticIC.o Sim_SICCloudMPI.o
 # CUDA
 OBJECTS += cudaHostAllocator.o GPUhousehold.o GPUkernels.o
 
