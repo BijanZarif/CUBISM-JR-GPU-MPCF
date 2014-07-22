@@ -38,6 +38,7 @@ void Sim_SteadyStateMPI::_setup()
     verbosity = parser("-verb").asInt(0);
     restart   = parser("-restart").asBool(false);
     nsteps    = parser("-nsteps").asInt(0);
+    dryrun    = parser("-dryrun").asBool(false);
 
     // MPI
     npex = parser("-npex").asInt(1);
@@ -54,14 +55,14 @@ void Sim_SteadyStateMPI::_setup()
     {
         if(_restart())
         {
-            printf("Restarting at step %d, physical time %f\n", step, t);
+            if (isroot) printf("Restarting at step %d, physical time %f\n", step, t);
             _dump("restart_ic");
             tnextdump = (fcount+1)*dumpinterval;
         }
         else
         {
             printf("Loading restart file was not successful... Abort\n");
-            exit(1);
+            abort();
         }
     }
     else
@@ -70,23 +71,31 @@ void Sim_SteadyStateMPI::_setup()
         _dump();
     }
 
-    _allocGPU();
-    assert(myGPU != NULL);
+    if (!dryrun)
+    {
+        _allocGPU();
+        assert(myGPU != NULL);
+    }
+    else
+        if (isroot) printf("No GPU allocated...\n");
 }
 
 
 void Sim_SteadyStateMPI::_allocGPU()
 {
-    printf("Allocating GPUlabSteadyState...\n");
+    if (isroot) printf("Allocating GPUlabSteadyState...\n");
     myGPU = new GPUlabSteadyState(*mygrid, nslices, verbosity);
 }
 
 
 void Sim_SteadyStateMPI::_ic()
 {
-    printf("=====================================================================\n");
-    printf("                            Steady State                             \n");
-    printf("=====================================================================\n");
+    if (isroot)
+    {
+        printf("=====================================================================\n");
+        printf("                            Steady State                             \n");
+        printf("=====================================================================\n");
+    }
     // default initial condition
     const double r  = parser("-rho").asDouble(1.0);
     const double u  = parser("-u").asDouble(0.0);
@@ -127,7 +136,7 @@ void Sim_SteadyStateMPI::_dump(const string basename)
     const string dump_path = parser("-fpath").asString(".");
 
     sprintf(fname, "%s_%04d", basename.c_str(), fcount++);
-    printf("Dumping file %s at step %d, time %f\n", fname, step, t);
+    if (isroot) printf("Dumping file %s at step %d, time %f\n", fname, step, t);
     DumpHDF5_MPI<GridMPI, myTensorialStreamer>(*mygrid, step, fname, dump_path);
 }
 
@@ -170,34 +179,40 @@ void Sim_SteadyStateMPI::run()
 {
     _setup();
 
-    double dt, dt_max;
-    LSRK3_IntegratorMPI * const stepper = new LSRK3_IntegratorMPI(mygrid, myGPU, CFL, parser);
-
-    while (t < tend)
+    if (dryrun)
+        if (isroot) printf("Dry Run...\n");
+        else ;
+    else
     {
-        dt_max = (tend-t) < (tnextdump-t) ? (tend-t) : (tnextdump-t);
-        dt = (*stepper)(dt_max);
+        double dt, dt_max;
+        LSRK3_IntegratorMPI * const stepper = new LSRK3_IntegratorMPI(mygrid, myGPU, CFL, parser);
 
-        t += dt;
-        ++step;
-
-        printf("step id is %d, physical time %f (dt = %f)\n", step, t, dt);
-
-        if ((float)t == (float)tnextdump)
+        while (t < tend)
         {
-            tnextdump += dumpinterval;
-            _dump();
-        }
-        /* if (step % 10 == 0) _dump(); */
+            dt_max = (tend-t) < (tnextdump-t) ? (tend-t) : (tnextdump-t);
+            dt = (*stepper)(dt_max);
 
-        if (step % saveinterval == 0)
-        {
-            printf("Saving time step...\n");
-            _save();
-        }
+            t += dt;
+            ++step;
 
-        if (step == nsteps) break;
+            if (isroot) printf("step id is %d, physical time %f (dt = %f)\n", step, t, dt);
+
+            if ((float)t == (float)tnextdump)
+            {
+                tnextdump += dumpinterval;
+                _dump();
+            }
+            /* if (step % 10 == 0) _dump(); */
+
+            if (step % saveinterval == 0)
+            {
+                if (isroot) printf("Saving time step...\n");
+                _save();
+            }
+
+            if (step == nsteps) break;
+        }
+        _dump();
+        delete stepper;
     }
-    _dump();
-    delete stepper;
 }

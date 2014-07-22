@@ -86,6 +86,7 @@ class NodeBlock
         inline double block_extent() const { return bextent; }
         inline double h_gridpoint() const { return h; }
         void get_pos(const unsigned int ix, const unsigned int iy, const unsigned int iz, double pos[3]) const;
+        void get_origin(double O[3]) const;
 
         inline const std::vector<Real *>& pdata() const { return data; }
         inline const std::vector<Real *>& ptmp()  const { return tmp; }

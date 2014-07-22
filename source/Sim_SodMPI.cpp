@@ -12,15 +12,18 @@ using namespace std;
 
 void Sim_SodMPI::_allocGPU()
 {
-    printf("Allocating GPUlabSod...\n");
+    if (isroot) printf("Allocating GPUlabSod...\n");
     myGPU = new GPUlabSod(*mygrid, nslices, verbosity);
 }
 
 void Sim_SodMPI::_ic()
 {
-    printf("=====================================================================\n");
-    printf("                           Sod Shock Tube                            \n");
-    printf("=====================================================================\n");
+    if (isroot)
+    {
+        printf("=====================================================================\n");
+        printf("                           Sod Shock Tube                            \n");
+        printf("=====================================================================\n");
+    }
     const double x0   = parser("-x0").asDouble(0.5);
     const double rho1 = parser("-rho1").asDouble(1.0);
     const double rho2 = parser("-rho2").asDouble(0.125);

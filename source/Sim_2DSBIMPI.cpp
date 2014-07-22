@@ -57,8 +57,8 @@ Sim_2DSBIMPI::Sim_2DSBIMPI(const int argc, const char ** argv, const int isroot)
     }
     else
     {
-        fprintf(stderr, "ERROR: -config %s is not possible...\n", conf.c_str());
-        exit(1);
+        if (isroot) fprintf(stderr, "ERROR: -config %s is not possible...\n", conf.c_str());
+        abort();
     }
 }
 
@@ -67,17 +67,17 @@ void Sim_2DSBIMPI::_allocGPU()
 {
     if (dims[1] == Coord::X)
     {
-        printf("Allocating GPUlab2DSBI_xreflect...\n");
+        if (isroot) printf("Allocating GPUlab2DSBI_xreflect...\n");
         myGPU = new GPUlab2DSBI_xreflect(*mygrid, nslices, verbosity);
     }
     else if (dims[1] == Coord::Y)
     {
-        printf("Allocating GPUlab2DSBI_yreflect...\n");
+        if (isroot) printf("Allocating GPUlab2DSBI_yreflect...\n");
         myGPU = new GPUlab2DSBI_yreflect(*mygrid, nslices, verbosity);
     }
     else if (dims[1] == Coord::Z)
     {
-        printf("Allocating GPUlab2DSBI_zreflect...\n");
+        if (isroot) printf("Allocating GPUlab2DSBI_zreflect...\n");
         myGPU = new GPUlab2DSBI_zreflect(*mygrid, nslices, verbosity);
     }
 }
@@ -85,9 +85,12 @@ void Sim_2DSBIMPI::_allocGPU()
 
 void Sim_2DSBIMPI::_ic()
 {
-    printf("=====================================================================\n");
-    printf("                           2D Shock Bubble                           \n");
-    printf("=====================================================================\n");
+    if (isroot)
+    {
+        printf("=====================================================================\n");
+        printf("                           2D Shock Bubble                           \n");
+        printf("=====================================================================\n");
+    }
     const double x0    = parser("-x0").asDouble(0.1);
     const double mach  = parser("-mach").asDouble(1.22);
     const double rho2  = parser("-rho").asDouble(1);
@@ -129,7 +132,7 @@ void Sim_2DSBIMPI::_ic()
     if (!bubbleFile.good())
     {
         fprintf(stderr, "Can not load bubble file './%s'. ABORT\n", fname);
-        exit(1);
+        abort();
     }
     uint_t nb;
     bubbleFile >> nb;
@@ -140,7 +143,7 @@ void Sim_2DSBIMPI::_ic()
         if (!bubbleFile.good())
         {
             fprintf(stderr, "Error reading './%s'. ABORT\n", fname);
-            exit(1);
+            abort();
         }
         posb[i].resize(3);
         bubbleFile >> posb[i][0];
@@ -168,13 +171,12 @@ void Sim_2DSBIMPI::_ic()
                 const Real shock = SimTools::heaviside(p[dims[0]] - x0);
 
                 // process all bubbles
-                Real bubble;
+                Real bubble = 0;;
                 for (int i = 0; i < nb; ++i)
                 {
                     const Real r = sqrt( pow(p[dims[0]] - posb[i][dims[0]], 2) + pow(p[dims[1]] - posb[i][dims[1]], 2) );
                     bubble = SimTools::heaviside_smooth(r - Rb[i]);
-                    if (bubble > 0)
-                        break;
+                    if (bubble > 0) break;
                 }
 
                 grid(ix, iy, iz, var::R) = shock*rho1 + (1 - shock)*(rhob*bubble + rho2*(1 - bubble));

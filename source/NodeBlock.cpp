@@ -68,3 +68,10 @@ void NodeBlock::get_pos(const unsigned int ix, const unsigned int iy, const unsi
     pos[1] = origin[1] + h * (iy+0.5);
     pos[2] = origin[2] + h * (iz+0.5);
 }
+
+void NodeBlock::get_origin(double O[3]) const
+{
+    O[0] = origin[0];
+    O[1] = origin[1];
+    O[2] = origin[2];
+}
