@@ -14,7 +14,7 @@
 
 
 template <typename KSOS>
-double _maxSOS(const GridMPI * const grid, float& sos)
+static double _maxSOS(const GridMPI * const grid, float& sos)
 {
     KSOS kernel;
     Timer tsos;

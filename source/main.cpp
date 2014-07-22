@@ -8,36 +8,13 @@
 #include "Sim_SteadyStateMPI.h"
 #include "Sim_SodMPI.h"
 #include "Sim_2DSBIMPI.h"
+#include "Sim_StaticIC.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <assert.h>
-
-// Helper
-
-
-
-/* static void _ic123(GridMPI& grid, const uint_t dims[3]) */
-/* { */
-/*     // 1 2 3 4 5 6 7 8 9 ......... */
-/*     typedef GridMPI::PRIM var; */
-/*     uint_t cnt = 0; */
-/*     uint_t gridDim[3] = {GridMPI::sizeX, GridMPI::sizeY, GridMPI::sizeZ}; */
-/*     int idx[3]; */
-/* #pragma omp paralell for */
-/*     for (idx[dims[2]]=0; idx[dims[2]]<gridDim[dims[2]]; ++idx[dims[2]]) */
-/*         for (idx[dims[1]]=0; idx[dims[1]]<gridDim[dims[1]]; ++idx[dims[1]]) */
-/*             for (idx[dims[0]]=0; idx[dims[0]]<gridDim[dims[0]]; ++idx[dims[0]]) */
-/*             { */
-/*                 grid(idx[0], idx[1], idx[2], var::R) = cnt; */
-/*                 grid(idx[0], idx[1], idx[2], var::U) = cnt; */
-/*                 grid(idx[0], idx[1], idx[2], var::V) = cnt; */
-/*                 grid(idx[0], idx[1], idx[2], var::W) = cnt; */
-/*                 grid(idx[0], idx[1], idx[2], var::E) = cnt; */
-/*                 grid(idx[0], idx[1], idx[2], var::G) = cnt; */
-/*                 grid(idx[0], idx[1], idx[2], var::P) = cnt++; */
-/*             } */
-
-/* } */
+#include <string>
+using namespace std;
 
 
 int main(int argc, const char *argv[])
@@ -53,13 +30,25 @@ int main(int argc, const char *argv[])
     const bool isroot = world_rank == 0;
 
     ArgumentParser parser(argc, argv);
+
+    parser.set_strict_mode();
+    const string select = parser("-sim").asString("SteadyStateMPI");
+    parser.unset_strict_mode();
+
     Simulation *mysim;
-    if (parser("-sim").asString("SteadyStateMPI") == "SteadyStateMPI")
+    if (select == "SteadyStateMPI")
         mysim = new Sim_SteadyStateMPI(argc, argv, isroot);
-    else if (parser("-sim").asString("SteadyStateMPI") == "SodMPI")
+    else if (select == "SodMPI")
         mysim = new Sim_SodMPI(argc, argv, isroot);
-    else if (parser("-sim").asString("SteadyStateMPI") == "2DSBIMPI")
+    else if (select == "2DSBIMPI")
         mysim = new Sim_2DSBIMPI(argc, argv, isroot);
+    else if (select == "StaticIC")
+        mysim = new Sim_StaticIC(argc, argv, isroot);
+    else
+    {
+        fprintf(stderr, "Error: Unknown simulation case %s...\n", select.c_str());
+        exit(1);
+    }
 
     // setup & run
     mysim->run();
