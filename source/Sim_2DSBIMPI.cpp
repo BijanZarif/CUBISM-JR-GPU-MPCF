@@ -179,8 +179,6 @@ void Sim_2DSBIMPI::_ic()
 
                 grid(ix, iy, iz, var::R) = shock*rho1 + (1 - shock)*(rhob*bubble + rho2*(1 - bubble));
 
-                // even if specified, bubbles have same IC velocity as
-                // bulk flow.
                 grid(ix, iy, iz, momentum[dims[0]]) = (shock*u1 + (1-shock)*u2) * grid(ix, iy, iz, var::R);
                 grid(ix, iy, iz, momentum[dims[1]]) = 0;
                 grid(ix, iy, iz, momentum[dims[2]]) = 0;
@@ -206,7 +204,7 @@ void Sim_2DSBIMPI::_ic()
                     rev[dims[1]] = gridDim[dims[1]]-1 - idx[dims[1]];
                     rev[dims[2]] = gridDim[dims[2]]-1 - idx[dims[2]];
                     const Real tmp0 = grid(idx[0],idx[1],idx[2],var::R);
-                    const Real tmp1 = -grid(idx[0],idx[1],idx[2],var::U); // 3x minus is ok if the other momenta are zero
+                    const Real tmp1 = -grid(idx[0],idx[1],idx[2],var::U); // 3x minus is ok if the other momenta are zero (which is what they are)
                     const Real tmp2 = -grid(idx[0],idx[1],idx[2],var::V);
                     const Real tmp3 = -grid(idx[0],idx[1],idx[2],var::W);
                     const Real tmp4 = grid(idx[0],idx[1],idx[2],var::E);
