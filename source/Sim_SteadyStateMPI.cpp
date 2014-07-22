@@ -25,20 +25,24 @@ Sim_SteadyStateMPI::Sim_SteadyStateMPI(const int argc, const char ** argv, const
 
 void Sim_SteadyStateMPI::_setup()
 {
-    // parse mandatory arguments
-    parser.set_strict_mode();
-    tend         = parser("-tend").asDouble();
-    CFL          = parser("-cfl").asDouble();
-    nslices      = parser("-nslices").asInt();
-    dumpinterval = parser("-dumpinterval").asDouble();
-    saveinterval = parser("-saveinterval").asInt();
-    parser.unset_strict_mode();
+    dryrun = parser("-dryrun").asBool(false);
+
+    if (!dryrun)
+    {
+        // parse mandatory arguments
+        parser.set_strict_mode();
+        tend         = parser("-tend").asDouble();
+        CFL          = parser("-cfl").asDouble();
+        nslices      = parser("-nslices").asInt();
+        dumpinterval = parser("-dumpinterval").asDouble();
+        saveinterval = parser("-saveinterval").asInt();
+        parser.unset_strict_mode();
+    }
 
     // parse optional aruments
     verbosity = parser("-verb").asInt(0);
     restart   = parser("-restart").asBool(false);
     nsteps    = parser("-nsteps").asInt(0);
-    dryrun    = parser("-dryrun").asBool(false);
 
     // MPI
     npex = parser("-npex").asInt(1);

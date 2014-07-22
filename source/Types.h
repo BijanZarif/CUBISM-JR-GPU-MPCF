@@ -85,7 +85,7 @@ class Simulation
 class SimTools
 {
     public:
-        static Real EPSILON;
+        static double EPSILON;
 
         static Real heaviside(const Real phi)
         {

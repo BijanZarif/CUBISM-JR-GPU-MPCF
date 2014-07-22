@@ -29,6 +29,13 @@ int main(int argc, const char *argv[])
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
     const bool isroot = world_rank == 0;
 
+    if (isroot)
+    {
+        for (int i = 0; i < argc; ++i)
+            printf("%s ", argv[i]);
+        printf("\n");
+    }
+
     ArgumentParser parser(argc, argv);
 
     parser.set_strict_mode();

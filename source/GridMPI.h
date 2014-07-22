@@ -25,8 +25,6 @@ using namespace std;
 
 class GridMPI : public NodeBlock
 {
-    size_t timestamp;
-
     protected:
 
     int myrank, mypeindex[3], pesize[3];
@@ -34,10 +32,9 @@ class GridMPI : public NodeBlock
     int periodic[3];
     int blocksize[3];
 
-    const double gextent;
+    double gextent[3];
 
     MPI_Comm cart_world;
-
 
     void _get_nbr_ranks()
     {
@@ -66,7 +63,7 @@ class GridMPI : public NodeBlock
     public:
 
     GridMPI(const int npeX, const int npeY, const int npeZ, const double maxextent = 1):
-        NodeBlock(), gextent(maxextent), timestamp(0)
+        NodeBlock()
     {
         NodeBlock::clear();
 
@@ -83,7 +80,6 @@ class GridMPI : public NodeBlock
         pesize[2] = npeZ;
 
         h = maxextent / (std::max(pesize[0]*blocksize[0], std::max(pesize[1]*blocksize[1], pesize[2]*blocksize[2])));
-        bextent = h * (std::max(blocksize[0], std::max(blocksize[1], blocksize[2])));
 
         int world_size;
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
@@ -99,6 +95,14 @@ class GridMPI : public NodeBlock
         origin[0] += h * blocksize[0] * mypeindex[0];
         origin[1] += h * blocksize[1] * mypeindex[1];
         origin[2] += h * blocksize[2] * mypeindex[2];
+
+        extent[0] = h * blocksize[0];
+        extent[1] = h * blocksize[1];
+        extent[2] = h * blocksize[2];
+
+        gextent[0] = extent[0] * pesize[0];
+        gextent[1] = extent[1] * pesize[1];
+        gextent[2] = extent[2] * pesize[2];
     }
 
     ~GridMPI() { }
@@ -122,11 +126,6 @@ class GridMPI : public NodeBlock
             nbr[i] = this->nbrrank[i];
     }
 
-    inline size_t getTimeStamp() const
-    {
-        return timestamp;
-    }
-
     inline MPI_Comm getCartComm() const
     {
         return cart_world;
@@ -135,5 +134,12 @@ class GridMPI : public NodeBlock
     inline double getH() const
     {
         return h_gridpoint();
+    }
+
+    inline void get_gextent(double gE[3]) const
+    {
+        gE[0] = gextent[0];
+        gE[1] = gextent[1];
+        gE[2] = gextent[2];
     }
 };

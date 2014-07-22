@@ -40,7 +40,7 @@ class NodeBlock
 
         // spatial measures
         double origin[3];
-        double bextent;
+        double extent[3];
         double h;
 
         // Fluid data and tmp storage
@@ -63,13 +63,16 @@ class NodeBlock
 
     public:
 
-        NodeBlock(const double e_ = 1.0)
+        NodeBlock(const double maxextent = 1.0)
             :
                 //origin{0.0, 0.0, 0.0}, // nvcc does not like this
-                bextent(e_), data(NVAR, NULL), tmp(NVAR, NULL)
+                data(NVAR, NULL), tmp(NVAR, NULL)
         {
-            h = bextent / (std::max(_BLOCKSIZEX_, std::max(_BLOCKSIZEY_, _BLOCKSIZEZ_)));
+            h = maxextent / (std::max(_BLOCKSIZEX_, std::max(_BLOCKSIZEY_, _BLOCKSIZEZ_)));
             origin[0] = origin[1] = origin[2] = 0.0;
+            extent[0] = h * _BLOCKSIZEX_;
+            extent[1] = h * _BLOCKSIZEY_;
+            extent[2] = h * _BLOCKSIZEZ_;
             _alloc();
         }
 
@@ -83,10 +86,26 @@ class NodeBlock
             clear_tmp();
         }
 
-        inline double block_extent() const { return bextent; }
         inline double h_gridpoint() const { return h; }
-        void get_pos(const unsigned int ix, const unsigned int iy, const unsigned int iz, double pos[3]) const;
-        void get_origin(double O[3]) const;
+        inline void get_pos(const unsigned int ix, const unsigned int iy, const unsigned int iz, double pos[3]) const
+        {
+            // local position, relative to origin, cell center
+            pos[0] = origin[0] + h * (ix+0.5);
+            pos[1] = origin[1] + h * (iy+0.5);
+            pos[2] = origin[2] + h * (iz+0.5);
+        }
+        inline void get_origin(double O[3]) const
+        {
+            O[0] = origin[0];
+            O[1] = origin[1];
+            O[2] = origin[2];
+        }
+        inline void get_extent(double E[3]) const
+        {
+            E[0] = extent[0];
+            E[1] = extent[1];
+            E[2] = extent[2];
+        }
 
         inline const std::vector<Real *>& pdata() const { return data; }
         inline const std::vector<Real *>& ptmp()  const { return tmp; }

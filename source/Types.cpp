@@ -6,4 +6,4 @@
  * */
 #include "Types.h"
 
-Real SimTools::EPSILON;
+double SimTools::EPSILON;
