@@ -8,6 +8,7 @@
 
 #include "Sim_SteadyStateMPI.h"
 #include <fstream>
+#include <mpi.h>
 
 namespace CloudData
 {
@@ -286,8 +287,11 @@ inline double eval_shifted(const vector<Tshape>& v_shapes, const Real pos[3])
 
 class Sim_SICCloudMPI : public Sim_SteadyStateMPI
 {
-    void _set_cloud();
-    void _ic_quad();
+    const MPI_Comm cart_world;
+
+    void _initialize_cloud();
+    void _set_cloud(Seed<shape> **myseed);
+    void _ic_quad(const Seed<shape> * const myseed);
 
     protected:
         virtual void _allocGPU();
