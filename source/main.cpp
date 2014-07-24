@@ -5,6 +5,7 @@
  * Copyright 2014 ETH Zurich. All rights reserved.
  * */
 #include "ArgumentParser.h"
+#include "Timer.h"
 #include "Sim_SteadyStateMPI.h"
 #include "Sim_SodMPI.h"
 #include "Sim_2DSBIMPI.h"
@@ -53,15 +54,25 @@ int main(int argc, const char *argv[])
         mysim = new Sim_StaticIC(argc, argv, isroot);
     else
     {
-        fprintf(stderr, "Error: Unknown simulation case %s...\n", select.c_str());
+        if (isroot) fprintf(stderr, "Error: Unknown simulation case %s...\n", select.c_str());
         exit(1);
     }
 
-    // setup & run
+    // run simulation
+    Timer tsim;
+    tsim.start();
+
     mysim->run();
 
-    // good night
+    double walltime = tsim.stop();
+
     delete mysim;
+
+    MPI_Allreduce(MPI_IN_PLACE, &walltime, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+    if (isroot) printf("Walltime: %f\n", walltime);
+
+    // good night
+    MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
 
     return 0;

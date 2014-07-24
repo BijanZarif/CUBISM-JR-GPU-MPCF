@@ -37,7 +37,7 @@ void Sim_SodMPI::_ic()
     const double pc2  = parser("-pc2").asDouble(0.0);
 
     const bool reverse = parser("-reverse").asBool(false);
-    const string dir   = parser("-direction").asString("x");
+    const string dir   = parser("-config").asString("x");
 
     uint_t dims[3] = {Coord::X, Coord::Y, Coord::Z};
     if (dir == "y")
