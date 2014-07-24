@@ -61,7 +61,7 @@ void Sim_SteadyStateMPI::_setup()
         {
             if (isroot) printf("Restarting at step %d, physical time %f\n", step, t);
             _dump("restart_ic");
-            tnextdump = (fcount+1)*dumpinterval;
+            tnextdump = fcount*dumpinterval;
         }
         else
         {
