@@ -48,15 +48,15 @@ ifneq "$(findstring daint,$(shell hostname))" ""
 	mpi-lib = $(CRAY_MPICH2_DIR)/lib/
 	fftw-inc = $(FFTW_INC)#/users/petrosk/fftw-2.1.5_gcc/include/
 	fftw-lib = $(FFTW_DIR)#/users/petrosk/fftw-2.1.5_gcc/lib/
-	CUFLAGS += -arch=compute_35
 endif
 
 ifneq "$(findstring localhost.localdomain,$(shell hostname))" "" #Cyrus
 	mpi-inc = /usr/include/openmpi-x86_64
 	mpi-lib = /usr/lib64/openmpi/lib
-	CUFLAGS += -arch=compute_35
 	LIBS += -L/usr/local/cuda-6.0/lib64 -lcudart
 endif
+
+CUFLAGS += -arch=compute_35 -code=compute_35,sm_35
 
 #CPPFLAGS += -D_ALIGNBYTES_=$(align) -D_BLOCKSIZE_=$(bs) -D_BLOCKSIZEX_=$(bs) -D_BLOCKSIZEY_=$(bs) -D_BLOCKSIZEZ_=$(bs) -DWENOEPS=$(weps) -DNTHREADS=$(nthreads) $(extra)
 CPPFLAGS +=  -I$(mpi-inc)

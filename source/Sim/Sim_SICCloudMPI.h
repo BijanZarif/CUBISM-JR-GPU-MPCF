@@ -8,15 +8,20 @@
 
 #include "Sim_SteadyStateMPI.h"
 #include <fstream>
+#include <sstream>
 #include <mpi.h>
 
-namespace CloudData
+namespace SICCloudData
 {
     extern double seed_s[3], seed_e[3];
     extern double min_rad, max_rad;
     extern int n_shapes, n_small, small_count;
     extern int n_sensors;
-};
+    extern Real nx, ny, nz, Sx, Sy, Sz;
+    extern Real pressureRatio, rho0, c0, u0, p0, rhoB, uB, pB;
+    extern Real rho1, u1, p1, mach;
+    extern Real g1, g2, pc1, pc2;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // This stuff is taken from CUBISM-MPCF Test_Cloud.h and adapted to this code
@@ -31,14 +36,14 @@ class shape
     public:
         shape()
         {
-            const Real x_c = (Real)drand48()*(CloudData::seed_e[0]-CloudData::seed_s[0])+CloudData::seed_s[0];
-            const Real y_c = (Real)drand48()*(CloudData::seed_e[1]-CloudData::seed_s[1])+CloudData::seed_s[1];
+            const Real x_c = (Real)drand48()*(SICCloudData::seed_e[0]-SICCloudData::seed_s[0])+SICCloudData::seed_s[0];
+            const Real y_c = (Real)drand48()*(SICCloudData::seed_e[1]-SICCloudData::seed_s[1])+SICCloudData::seed_s[1];
 
-            const Real thickness = CloudData::seed_e[2]-CloudData::seed_s[2];
-            const Real z_c = (Real)drand48() * thickness + CloudData::seed_s[2];
+            const Real thickness = SICCloudData::seed_e[2]-SICCloudData::seed_s[2];
+            const Real z_c = (Real)drand48() * thickness + SICCloudData::seed_s[2];
             const Real _center[3] = {x_c, y_c, z_c};
 
-            const Real _radius = (Real)drand48()*(CloudData::max_rad-CloudData::min_rad)+CloudData::min_rad;
+            const Real _radius = (Real)drand48()*(SICCloudData::max_rad-SICCloudData::min_rad)+SICCloudData::min_rad;
 
             radius = _radius;
 
@@ -157,9 +162,10 @@ class shape
             {
                 int idx;
                 Real c[3], rad;
-                f_read_cloud >> idx >> c[0] >> c[1] >> c[2] >> rad;
+                istringstream line(line_content);
+                line >> idx >> c[0] >> c[1] >> c[2] >> rad;
 
-                cout << "shape " << idx << " " <<  c[0] << " " << c[1] << " " << c[2] << " " << rad << endl;
+                /* cout << "shape " << idx << " " <<  c[0] << " " << c[1] << " " << c[2] << " " << rad << endl; */
 
                 shape cur_shape;
                 cur_shape.set(c,rad);
@@ -287,8 +293,6 @@ inline double eval_shifted(const vector<Tshape>& v_shapes, const Real pos[3])
 
 class Sim_SICCloudMPI : public Sim_SteadyStateMPI
 {
-    const MPI_Comm cart_world;
-
     void _initialize_cloud();
     void _set_cloud(Seed<shape> **myseed);
     void _ic_quad(const Seed<shape> * const myseed);

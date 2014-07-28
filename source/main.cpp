@@ -7,9 +7,10 @@
 #include "ArgumentParser.h"
 #include "Timer.h"
 #include "Sim_SteadyStateMPI.h"
+#include "Sim_StaticIC.h"
 #include "Sim_SodMPI.h"
 #include "Sim_2DSBIMPI.h"
-#include "Sim_StaticIC.h"
+#include "Sim_SICCloudMPI.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,12 +47,14 @@ int main(int argc, const char *argv[])
     Simulation *mysim;
     if (select == "SteadyStateMPI")
         mysim = new Sim_SteadyStateMPI(argc, argv, isroot);
+    else if (select == "StaticIC")
+        mysim = new Sim_StaticIC(argc, argv, isroot);
     else if (select == "SodMPI")
         mysim = new Sim_SodMPI(argc, argv, isroot);
     else if (select == "2DSBIMPI")
         mysim = new Sim_2DSBIMPI(argc, argv, isroot);
-    else if (select == "StaticIC")
-        mysim = new Sim_StaticIC(argc, argv, isroot);
+    else if (select == "SICCloudMPI")
+        mysim = new Sim_SICCloudMPI(argc, argv, isroot);
     else
     {
         if (isroot) fprintf(stderr, "Error: Unknown simulation case %s...\n", select.c_str());
