@@ -56,7 +56,7 @@ ifneq "$(findstring localhost.localdomain,$(shell hostname))" "" #Cyrus
 	LIBS += -L/usr/local/cuda-6.0/lib64 -lcudart
 endif
 
-CUFLAGS += -arch=compute_35 -code=compute_35,sm_35
+CUFLAGS += -arch=compute_35 -code=compute_35,sm_35 -Xptxas -v
 
 #CPPFLAGS += -D_ALIGNBYTES_=$(align) -D_BLOCKSIZE_=$(bs) -D_BLOCKSIZEX_=$(bs) -D_BLOCKSIZEY_=$(bs) -D_BLOCKSIZEZ_=$(bs) -DWENOEPS=$(weps) -DNTHREADS=$(nthreads) $(extra)
 CPPFLAGS +=  -I$(mpi-inc)
@@ -135,6 +135,9 @@ mpcf-cluster: $(OBJECTS)
 
 %.o: %.cu
 	$(NVCC) $(CUFLAGS) -c $^ -o $@
+
+GPUkernels: ../source/GPU/GPUkernels.cu
+	$(NVCC) $(CUFLAGS) -c ../source/GPU/GPUkernels.cu -o GPUkernels.o
 
 show:
 	@echo "CC       = $(CC)"

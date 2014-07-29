@@ -1047,8 +1047,10 @@ inline void _fetch_flux(const uint_t ix, const uint_t iy, const uint_t iz,
         const Real * const xflux, const Real * const yflux, const Real * const zflux,
         Real& fxp, Real& fxm, Real& fyp, Real& fym, Real& fzp, Real& fzm)
 {
-    fxp = xflux[ID3(ix+1, iy, iz, NXP1, NY)];
-    fxm = xflux[ID3(ix,   iy, iz, NXP1, NY)];
+    /* fxp = xflux[ID3(ix+1, iy, iz, NXP1, NY)]; */
+    /* fxm = xflux[ID3(ix,   iy, iz, NXP1, NY)]; */
+    fxp = xflux[ID3(iy, ix+1, iz, NY, NXP1)];
+    fxm = xflux[ID3(iy, ix,   iz, NY, NXP1)];
 
     fyp = yflux[ID3(ix, iy+1, iz, NX, NYP1)];
     fym = yflux[ID3(ix, iy,   iz, NX, NYP1)];

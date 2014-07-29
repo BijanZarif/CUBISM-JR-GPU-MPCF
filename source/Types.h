@@ -39,7 +39,7 @@ enum Coord {X=0, Y, Z};
  *
  * The layout is chosen such that a warp access is coalesced
  * */
-#define GHOSTMAPX(ix,iy,iz) ((ix) + 3 * ((iy) + NodeBlock::sizeY * (iz)))
+#define GHOSTMAPX(ix,iy,iz) ((iy) + NodeBlock::sizeY * ((ix) + 3 * (iz)))
 #define GHOSTMAPY(ix,iy,iz) ((ix) + NodeBlock::sizeX * ((iy) + 3 * (iz)))
 
 typedef uint_t (*index_map)(const int, const int, const int);
