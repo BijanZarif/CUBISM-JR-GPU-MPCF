@@ -23,6 +23,12 @@
 #error Minimum _BLOCKSIZEZ_ is 1
 #endif
 
+#if NX % _TILE_DIM_ != 0
+#error _BLOCKSIZEX_ should be an integer multiple of _TILE_DIM_
+#endif
+#if NY % _TILE_DIM_ != 0
+#error _BLOCKSIZEY_ should be an integer multiple of _TILE_DIM_
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 //                             DEVICE FUNCTIONS                              //
@@ -32,11 +38,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 //                                  KERNELS                                  //
 ///////////////////////////////////////////////////////////////////////////////
-#define TILE_DIM 32
-#define BLOCK_ROWS 8
-/* #define ARBITRARY_SLICE_DIM */
-
-#ifndef ARBITRARY_SLICE_DIM // slice dimensions should be integer multiples of TILE_DIM
 __global__
 void _xextraterm_hllc(const uint_t nslices,
         const Real * const Gm, const Real * const Gp,
@@ -44,30 +45,30 @@ void _xextraterm_hllc(const uint_t nslices,
         const Real * const vel,
         Real * const sumG, Real * const sumP, Real * const divU)
 {
-    const uint_t ix = blockIdx.x * TILE_DIM + threadIdx.x;
-    const uint_t iy = blockIdx.y * TILE_DIM + threadIdx.y;
+    const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x;
+    const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y;
 
-    // limiting resource, but runs fastest with using 3 buffers
-    __shared__ Real smem1[TILE_DIM][TILE_DIM+1];
-    __shared__ Real smem2[TILE_DIM][TILE_DIM+1];
-    __shared__ Real smem3[TILE_DIM][TILE_DIM+1];
+    // limiting resource, but runs faster by using 3 buffers
+    __shared__ Real smem1[_TILE_DIM_][_TILE_DIM_+1];
+    __shared__ Real smem2[_TILE_DIM_][_TILE_DIM_+1];
+    __shared__ Real smem3[_TILE_DIM_][_TILE_DIM_+1];
 
     if (ix < NX && iy < NY)
     {
         // transpose
-        const uint_t iyT = blockIdx.y * TILE_DIM + threadIdx.x;
-        const uint_t ixT = blockIdx.x * TILE_DIM + threadIdx.y;
+        const uint_t iyT = blockIdx.y * _TILE_DIM_ + threadIdx.x;
+        const uint_t ixT = blockIdx.x * _TILE_DIM_ + threadIdx.y;
 
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
-            for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS)
+            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
             {
                 smem1[threadIdx.x][threadIdx.y+i] = Gp[ID3(iyT,ixT+i,iz,NY,NXP1)] + Gm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)];
                 smem2[threadIdx.x][threadIdx.y+i] = Pp[ID3(iyT,ixT+i,iz,NY,NXP1)] + Pm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)];
                 smem3[threadIdx.x][threadIdx.y+i] = vel[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)] - vel[ID3(iyT,ixT+i,iz,NY,NXP1)];
             }
             __syncthreads();
-            for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS)
+            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
             {
                 sumG[ID3(ix,iy+i,iz,NX,NY)] = smem1[threadIdx.y+i][threadIdx.x];
                 sumP[ID3(ix,iy+i,iz,NX,NY)] = smem2[threadIdx.y+i][threadIdx.x];
@@ -77,108 +78,56 @@ void _xextraterm_hllc(const uint_t nslices,
         }
     }
 }
-/* __global__ */
-/* void _xextraterm_hllc(const uint_t nslices, */
-/*         const Real * const Gm, const Real * const Gp, */
-/*         const Real * const Pm, const Real * const Pp, */
-/*         const Real * const vel, */
-/*         Real * const sumG, Real * const sumP, Real * const divU) */
-/* { */
-/*     const uint_t ix = blockIdx.x * TILE_DIM + threadIdx.x; */
-/*     const uint_t iy = blockIdx.y * TILE_DIM + threadIdx.y; */
 
-/*     __shared__ Real smem[TILE_DIM][TILE_DIM+1]; */
 
-/*     if (ix < NX && iy < NY) */
-/*     { */
-/*         // transpose */
-/*         const uint_t iyT = blockIdx.y * TILE_DIM + threadIdx.x; */
-/*         const uint_t ixT = blockIdx.x * TILE_DIM + threadIdx.y; */
-
-/*         for (uint_t iz = 0; iz < nslices; ++iz) */
-/*         { */
-/*             // G */
-/*             for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) */
-/*                 smem[threadIdx.x][threadIdx.y+i] = Gp[ID3(iyT,ixT+i,iz,NY,NXP1)] + Gm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)]; */
-/*             __syncthreads(); */
-/*             for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) */
-/*                 sumG[ID3(ix,iy+i,iz,NX,NY)] = smem[threadIdx.y+i][threadIdx.x]; */
-/*             __syncthreads(); */
-
-/*             // P */
-/*             for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) */
-/*                 smem[threadIdx.x][threadIdx.y+i] = Pp[ID3(iyT,ixT+i,iz,NY,NXP1)] + Pm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)]; */
-/*             __syncthreads(); */
-/*             for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) */
-/*                 sumP[ID3(ix,iy+i,iz,NX,NY)] = smem[threadIdx.y+i][threadIdx.x]; */
-/*             __syncthreads(); */
-
-/*             // velocity at cell faces */
-/*             for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) */
-/*                 smem[threadIdx.x][threadIdx.y+i] = vel[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)] - vel[ID3(iyT,ixT+i,iz,NY,NXP1)]; */
-/*             __syncthreads(); */
-/*             for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) */
-/*                 divU[ID3(ix,iy+i,iz,NX,NY)] = smem[threadIdx.y+i][threadIdx.x]; */
-/*             __syncthreads(); */
-/*         } */
-/*     } */
-/* } */
-#else
-
-// BUGGY !!!!!!!!!!!!!!! + likely to yield less performance as if slice
-// dimensions would be ineger multiples of TILE_DIM.
 __global__
-void _xextraterm_hllc(const uint_t nslices,
+void _yextraterm_hllc(const uint_t nslices,
         const Real * const Gm, const Real * const Gp,
         const Real * const Pm, const Real * const Pp,
         const Real * const vel,
         Real * const sumG, Real * const sumP, Real * const divU)
 {
-    /* *
-     * Computes x-contribution for the right hand side of the advection
-     * equations.  Maps two values on cell faces to one value at the cell
-     * center.  NOTE: The assignment here is "="
-     * */
-    uint_t ix = blockIdx.x * TILE_DIM + threadIdx.x;
-    uint_t iy = blockIdx.y * TILE_DIM + threadIdx.y;
-
-    __shared__ Real smem[TILE_DIM*(TILE_DIM+1)];
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (ix < NX && iy < NY)
     {
-        // compute this blocks actual stride for shared memory access.  This is
-        // required for arbitray dimensions. Stride for fastest moving index
-        // must be stride+1 to avoid bank conflicts.
-        const uint_t NXsmem = (NX < TILE_DIM*(blockIdx.x+1)) ? (NX - blockIdx.x*TILE_DIM + 1) : (TILE_DIM+1);
-        const uint_t NYsmem = (NY < TILE_DIM*(blockIdx.y+1)) ? (NY - blockIdx.y*TILE_DIM) : TILE_DIM;
-
-        // transpose
-        const uint_t iyT = blockIdx.y * TILE_DIM + threadIdx.x;
-        const uint_t ixT = blockIdx.x * TILE_DIM + threadIdx.y;
-
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
-            // G
-            smem[threadIdx.x*NYsmem + threadIdx.y] = Gp[ID3(iyT,ixT,iz,NY,NXP1)] + Gm[ID3(iyT,(ixT+1),iz,NY,NXP1)];
-            __syncthreads();
-            sumG[ID3(ix,iy,iz,NX,NY)] = smem[threadIdx.y*NXsmem + threadIdx.x];
-            __syncthreads();
-
-            // P
-            smem[threadIdx.x*NYsmem + threadIdx.y] = Pp[ID3(iyT,ixT,iz,NY,NXP1)] + Pm[ID3(iyT,(ixT+1),iz,NY,NXP1)];
-            __syncthreads();
-            sumP[ID3(ix,iy,iz,NX,NY)] = smem[threadIdx.y*NXsmem + threadIdx.x];
-            __syncthreads();
-
-            // Velocity on cell faces
-            smem[threadIdx.x*NYsmem + threadIdx.y] = vel[ID3(iyT,(ixT+1),iz,NY,NXP1)] - vel[ID3(iyT,ixT,iz,NY,NXP1)];
-            __syncthreads();
-            divU[ID3(ix,iy,iz,NX,NY)] = smem[threadIdx.y*NXsmem + threadIdx.x];
-            __syncthreads();
+            const uint_t idx  = ID3(ix,iy,iz,NX,NY);
+            const uint_t idxm = ID3(ix,iy,iz,NX,NYP1);
+            const uint_t idxp = ID3(ix,(iy+1),iz,NX,NYP1);
+            sumG[idx] += Gp[idxm] + Gm[idxp];
+            sumP[idx] += Pp[idxm] + Pm[idxp];
+            divU[idx] += vel[idxp] - vel[idxm];
         }
     }
 }
-#endif
+
+
+__global__
+void _zextraterm_hllc(const uint_t nslices,
+        const Real * const Gm, const Real * const Gp,
+        const Real * const Pm, const Real * const Pp,
+        const Real * const vel,
+        Real * const sumG, Real * const sumP, Real * const divU)
+{
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (ix < NX && iy < NY)
+    {
+        for (uint_t iz = 0; iz < nslices; ++iz)
+        {
+            const uint_t idx  = ID3(ix,iy,iz,NX,NY);
+            const uint_t idxm = ID3(ix,iy,iz,NX,NY);
+            const uint_t idxp = ID3(ix,iy,iz+1,NX,NY);
+            sumG[idx] += Gp[idxm] + Gm[idxp];
+            sumP[idx] += Pp[idxm] + Pm[idxp];
+            divU[idx] += vel[idxp] - vel[idxm];
+        }
+    }
+}
 
 
 __global__
@@ -538,30 +487,6 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
 }
 
 
-__global__
-void _yextraterm_hllc(const uint_t nslices,
-        const Real * const Gm, const Real * const Gp,
-        const Real * const Pm, const Real * const Pp,
-        const Real * const vel,
-        Real * const sumG, Real * const sumP, Real * const divU)
-{
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (ix < NX && iy < NY)
-    {
-        for (uint_t iz = 0; iz < nslices; ++iz)
-        {
-            const uint_t idx  = ID3(ix, iy,   iz, NX, NY);
-            const uint_t idxm = ID3(ix, iy,   iz, NX, NYP1);
-            const uint_t idxp = ID3(ix, iy+1, iz, NX, NYP1);
-            sumG[idx] += Gp[idxm] + Gm[idxp];
-            sumP[idx] += Pp[idxm] + Pm[idxp];
-            divU[idx] += vel[idxp] - vel[idxm];
-        }
-    }
-}
-
 
 __global__
 void _yflux(const uint_t nslices, const uint_t global_iz,
@@ -911,29 +836,6 @@ void _yflux(const uint_t nslices, const uint_t global_iz,
 }
 
 
-__global__
-void _zextraterm_hllc(const uint_t nslices,
-        const Real * const Gm, const Real * const Gp,
-        const Real * const Pm, const Real * const Pp,
-        const Real * const vel,
-        Real * const sumG, Real * const sumP, Real * const divU)
-{
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (ix < NX && iy < NY)
-    {
-        for (uint_t iz = 0; iz < nslices; ++iz)
-        {
-            const uint_t idx  = ID3(ix, iy, iz,   NX, NY);
-            const uint_t idxm = ID3(ix, iy, iz,   NX, NY);
-            const uint_t idxp = ID3(ix, iy, iz+1, NX, NY);
-            sumG[idx] += Gp[idxm] + Gm[idxp];
-            sumP[idx] += Pp[idxm] + Pm[idxp];
-            divU[idx] += vel[idxp] - vel[idxm];
-        }
-    }
-}
 
 
 __global__
@@ -1350,11 +1252,8 @@ void GPU::xflux(const uint_t nslices, const uint_t global_iz)
     devPtrSet xghostR(d_xgr);
     devPtrSet xflux(d_xflux);
 
-    /* const dim3 blocks(_NTHREADS_, 1, 1); */
-    const dim3 blocks(1, _NTHREADS_, 1);
-
     {
-        /* const dim3 grid((NXP1 + _NTHREADS_ -1) / _NTHREADS_, NY, 1); */
+        const dim3 blocks(1, _NTHREADS_, 1);
         const dim3 grid(NXP1, (NY + _NTHREADS_ -1)/_NTHREADS_, 1);
         tCUDA_START(stream1)
             _xflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
@@ -1362,17 +1261,10 @@ void GPU::xflux(const uint_t nslices, const uint_t global_iz)
     }
 
     {
-        /* const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1); */
-        /* const dim3 grid(NX, (NY + _NTHREADS_ - 1)/_NTHREADS_, 1); */
-#ifndef ARBITRARY_SLICE_DIM
-        const dim3 tBlocks(TILE_DIM, BLOCK_ROWS, 1);
-#else
-        const dim3 tBlocks(TILE_DIM, TILE_DIM, 1);
-#endif
-        const dim3 tGrid((NX + TILE_DIM - 1)/TILE_DIM, (NY + TILE_DIM - 1)/TILE_DIM, 1);
+        const dim3 xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
+        const dim3 xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
         tCUDA_START(stream1)
-            /* _xextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
-            _xextraterm_hllc<<<tGrid, tBlocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            _xextraterm_hllc<<<xtraGrid, xtraBlocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
         tCUDA_STOP(stream1, "[_xextraterm Kernel]: ")
     }
 #endif

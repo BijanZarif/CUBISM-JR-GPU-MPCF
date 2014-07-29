@@ -9,8 +9,17 @@
 #include <vector>
 #include "Types.h"
 
+// flux kernels
 #ifndef _NTHREADS_
 #define _NTHREADS_ 64
+#endif
+
+// extra-term kernels (for x-direction only)
+#ifndef _TILE_DIM_
+#define _TILE_DIM_   32
+#endif
+#ifndef _BLOCK_ROWS_
+#define _BLOCK_ROWS_ 8
 #endif
 
 
