@@ -8,10 +8,10 @@
 
 #include "GPU.h" // includes Types.h
 
-#define NX NodeBlock::sizeX
-#define NY NodeBlock::sizeY
-#define NXP1 NodeBlock::sizeX+1
-#define NYP1 NodeBlock::sizeY+1
+#define NX _BLOCKSIZEX_
+#define NY _BLOCKSIZEY_
+#define NXP1 NX+1
+#define NYP1 NY+1
 
 struct devPtrSet // 7 fluid quantities
 {
