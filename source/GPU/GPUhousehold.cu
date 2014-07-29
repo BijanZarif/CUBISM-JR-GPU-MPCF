@@ -260,7 +260,7 @@ void GPU::upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, c
 #ifndef _MUTE_GPU_
     // TODO: use larger arrays for ghosts to minimize API overhead +
     // increase BW performance
-    GPU::profiler.push_startCUDA("GPU UPLOAD X/YGHOSTS", &stream1);
+    GPU::profiler.push_startCUDA("SEND GHOSTS", &stream1);
     for (int i = 0; i < VSIZE; ++i)
     {
         // x
@@ -278,7 +278,7 @@ void GPU::upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, c
 void GPU::h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices)
 {
 #ifndef _MUTE_GPU_
-    GPU::profiler.push_startCUDA("GPU UPLOAD 3DARRAY", &stream1);
+    GPU::profiler.push_startCUDA("SEND 3DARRAY", &stream1);
     for (int i = 0; i < VSIZE; ++i)
         _h2d_3DArray(d_GPUin[i], src[i], nslices);
     GPU::profiler.pop_stopCUDA();
@@ -292,7 +292,7 @@ void GPU::h2d_tmp(const RealPtrVec_t& src, const uint_t N)
 #ifndef _MUTE_GPU_
     cudaStreamWaitEvent(stream3, h2d_3Darray_completed, 0);
 
-    GPU::profiler.push_startCUDA("GPU UPLOAD TMP", &stream3);
+    GPU::profiler.push_startCUDA("SEND TMP", &stream3);
     for (int i = 0; i < VSIZE; ++i)
         cudaMemcpyAsync(d_tmp[i], src[i], N*sizeof(Real), cudaMemcpyHostToDevice, stream3);
     GPU::profiler.pop_stopCUDA();
@@ -307,7 +307,7 @@ void GPU::d2h_rhs(RealPtrVec_t& dst, const uint_t N)
     cudaStreamWaitEvent(stream2, divergence_completed, 0);
 
     // copy content of d_rhs to host, using the stream2 (after divergence)
-    GPU::profiler.push_startCUDA("GPU DOWNLOAD RHS", &stream2);
+    GPU::profiler.push_startCUDA("RECV RHS", &stream2);
     for (int i = 0; i < VSIZE; ++i)
         cudaMemcpyAsync(dst[i], d_rhs[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream2);
     GPU::profiler.pop_stopCUDA();
@@ -322,7 +322,7 @@ void GPU::d2h_tmp(RealPtrVec_t& dst, const uint_t N)
     cudaStreamWaitEvent(stream2, update_completed, 0);
 
     // copy content of d_tmp to host, using the stream2
-    GPU::profiler.push_startCUDA("GPU DOWNLOAD TMP", &stream2);
+    GPU::profiler.push_startCUDA("RECV TMP", &stream2);
     for (int i = 0; i < VSIZE; ++i)
         cudaMemcpyAsync(dst[i], d_tmp[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream2);
     GPU::profiler.pop_stopCUDA();
@@ -391,7 +391,7 @@ void GPU::tell_memUsage_GPU()
     const int status = cudaMemGetInfo(&free_byte, &total_byte);
     if (cudaSuccess != status)
     {
-        printf("Hoppla! Can not get memory stats from GPU...\n");
+        printf("Whoot! Can not get memory stats from GPU...\n");
         return;
     }
     const size_t used = total_byte - free_byte;

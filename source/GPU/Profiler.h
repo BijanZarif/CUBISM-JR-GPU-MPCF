@@ -237,6 +237,9 @@ public:
     // production code. Enable profiling of CUDA kernels with this flag.
     void push_startCUDA(std::string sAgentName, const void *stream=NULL)
     {
+        // add CUDA in front of any agent here
+        sAgentName = sAgentName + "|CUDA";
+
         if (m_mapStoppedAgents.size() > 0)
             _getAgent(m_mapStoppedAgents.top()).stop();
 
@@ -288,7 +291,7 @@ public:
             const ProfileSummaryItem& item = *it;
             const double avgTime = item.dAverageTime;
 
-            printf("[%15s]: \t%02.0f-%02.0f%%\t%03.3e (%03.3e) s\t%03.3f (%03.3f) s\t(%d samples)\n",
+            printf("[%20s]: \t%02.0f-%02.0f%%\t%03.3e (%03.3e) s\t%03.3f (%03.3f) s\t(%d samples)\n",
                    item.sName.data(), 100*item.dTime/dTotalTime, 100*(item.dTime- item.nSamples*1.3e-6)/dTotalTime2, avgTime,avgTime-1.30e-6,  item.dTime, item.dTime- item.nSamples*1.30e-6, item.nSamples);
             if (outFile) fprintf(outFile,"[%15s]: \t%02.2f%%\t%03.3f s\t(%d samples)\n",
 

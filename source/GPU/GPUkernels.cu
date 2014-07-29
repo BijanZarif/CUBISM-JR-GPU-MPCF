@@ -11,10 +11,6 @@
 #include "GPU.h" // includes Types.h & wrapper declarations
 #include "GPUonly.cuh"
 
-#ifdef _CUDA_TIMER_
-#include "CUDA_Timer.cuh"
-#endif
-
 #if _BLOCKSIZEX_ < 5
 #error Minimum _BLOCKSIZEX_ is 5
 #elif _BLOCKSIZEY_ < 5
@@ -1255,17 +1251,17 @@ void GPU::xflux(const uint_t nslices, const uint_t global_iz)
     {
         const dim3 blocks(1, _NTHREADS_, 1);
         const dim3 grid(NXP1, (NY + _NTHREADS_ -1)/_NTHREADS_, 1);
-        tCUDA_START(stream1)
-            _xflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-        tCUDA_STOP(stream1, "[_xflux Kernel]: ")
+        GPU::profiler.push_startCUDA("_XFLUX", &stream1);
+        _xflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        GPU::profiler.pop_stopCUDA();
     }
 
     {
         const dim3 xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
         const dim3 xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
-        tCUDA_START(stream1)
-            _xextraterm_hllc<<<xtraGrid, xtraBlocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-        tCUDA_STOP(stream1, "[_xextraterm Kernel]: ")
+        GPU::profiler.push_startCUDA("_XEXTRATERM", &stream1);
+        _xextraterm_hllc<<<xtraGrid, xtraBlocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+        GPU::profiler.pop_stopCUDA();
     }
 #endif
 }
@@ -1282,16 +1278,16 @@ void GPU::yflux(const uint_t nslices, const uint_t global_iz)
 
     {
         const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1);
-        tCUDA_START(stream1)
-            _yflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-        tCUDA_STOP(stream1, "[_yflux Kernel]: ")
+        GPU::profiler.push_startCUDA("_YFLUX", &stream1);
+        _yflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        GPU::profiler.pop_stopCUDA();
     }
 
     {
         const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-        tCUDA_START(stream1)
-            _yextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-        tCUDA_STOP(stream1, "[_yextraterm Kernel]: ")
+        GPU::profiler.push_startCUDA("_YEXTRATERM", &stream1);
+        _yextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+        GPU::profiler.pop_stopCUDA();
     }
 #endif
 }
@@ -1305,13 +1301,13 @@ void GPU::zflux(const uint_t nslices)
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
     const dim3 blocks(_NTHREADS_, 1, 1);
 
-    tCUDA_START(stream1)
-        _zflux<<<grid, blocks, 0, stream1>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-    tCUDA_STOP(stream1, "[_zflux Kernel]: ")
+    GPU::profiler.push_startCUDA("_ZFLUX", &stream1);
+    _zflux<<<grid, blocks, 0, stream1>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+    GPU::profiler.pop_stopCUDA();
 
-        tCUDA_START(stream1)
-        _zextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-    tCUDA_STOP(stream1, "[_zextraterm Kernel]: ")
+    GPU::profiler.push_startCUDA("_ZEXTRATERM", &stream1);
+    _zextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+    GPU::profiler.pop_stopCUDA();
 #endif
 }
 
@@ -1330,11 +1326,11 @@ void GPU::divergence(const Real a, const Real dtinvh, const uint_t nslices)
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
     const dim3 blocks(_NTHREADS_, 1, 1);
 
-    tCUDA_START(stream1)
-        _divergence<<<grid, blocks, 0, stream1>>>(nslices, xflux, yflux, zflux, rhs, a, dtinvh, tmp, d_sumG, d_sumP, d_divU);
-    tCUDA_STOP(stream1, "[_divergence Kernel]: ")
+    GPU::profiler.push_startCUDA("_DIVERGENCE", &stream1);
+    _divergence<<<grid, blocks, 0, stream1>>>(nslices, xflux, yflux, zflux, rhs, a, dtinvh, tmp, d_sumG, d_sumP, d_divU);
+    GPU::profiler.pop_stopCUDA();
 
-        cudaEventRecord(divergence_completed, stream1);
+    cudaEventRecord(divergence_completed, stream1);
 #endif
 }
 
@@ -1348,11 +1344,11 @@ void GPU::update(const Real b, const uint_t nslices)
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
     const dim3 blocks(_NTHREADS_, 1, 1);
 
-    tCUDA_START(stream1)
-        _update<<<grid, blocks, 0, stream1>>>(nslices, b, tmp, rhs);
-    tCUDA_STOP(stream1, "[_update Kernel]: ")
+    GPU::profiler.push_startCUDA("_UPDATE", &stream1);
+    _update<<<grid, blocks, 0, stream1>>>(nslices, b, tmp, rhs);
+    GPU::profiler.pop_stopCUDA();
 
-        cudaEventRecord(update_completed, stream1);
+    cudaEventRecord(update_completed, stream1);
 #endif
 }
 
@@ -1363,9 +1359,9 @@ void GPU::MaxSpeedOfSound(const uint_t nslices)
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
     const dim3 blocks(_NTHREADS_, 1, 1);
 
-    tCUDA_START(stream1)
-        _maxSOS<<<grid, blocks, 0, stream1>>>(nslices, d_maxSOS);
-    tCUDA_STOP(stream1, "[_maxSOS Kernel]: ")
+    GPU::profiler.push_startCUDA("_MAXSOS", &stream1);
+    _maxSOS<<<grid, blocks, 0, stream1>>>(nslices, d_maxSOS);
+    GPU::profiler.pop_stopCUDA();
 #endif
 }
 
@@ -1392,14 +1388,12 @@ void GPU::TestKernel()
         const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1);
         const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
 
-        tCUDA_START(0)
-            /* _xflux<<<xgrid, blocks>>>(nslices, 0, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-            /* _yflux<<<ygrid, blocks>>>(nslices, 0, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-            _zflux<<<zgrid, blocks>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-        tCUDA_STOP(0, "[Testing Kernel]: ")
+        GPU::profiler.push_startCUDA("_TEST_KERNEL");
+        /* _xflux<<<xgrid, blocks>>>(nslices, 0, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+        /* _yflux<<<ygrid, blocks>>>(nslices, 0, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+        _zflux<<<zgrid, blocks>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        GPU::profiler.pop_stopCUDA();
     }
-
-
 }
 
 
