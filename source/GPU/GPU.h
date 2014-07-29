@@ -8,6 +8,7 @@
 
 #include <vector>
 #include "Types.h"
+#include "Profiler.h"
 
 // flux kernels
 #ifndef _NTHREADS_
@@ -22,14 +23,12 @@
 #define _BLOCK_ROWS_ 8
 #endif
 
-
 #ifndef _PAGEABLE_HOST_MEM_
 #include "cudaHostAllocator.h"
 typedef std::vector<Real, cudaHostAllocator<Real> > cuda_vector_t;
 #else
 typedef std::vector<Real> cuda_vector_t;
 #endif
-
 
 #if defined(_CUDA_TIMER_)
 #define tCUDA_START(stream) { \
@@ -43,11 +42,11 @@ typedef std::vector<Real> cuda_vector_t;
 #define tCUDA_STOP(stream,msg)
 #endif
 
-
-// include these declarations in host code
 namespace GPU
 {
     enum streamID {S1, S2};
+
+    extern Profiler profiler;
 
     ///////////////////////////////////////////////////////////////////////////
     // General GPU household -> Memory management, Streams, H2D/D2H, stats

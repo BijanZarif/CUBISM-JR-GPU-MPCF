@@ -19,7 +19,7 @@ using namespace std;
 
 
 Sim_SteadyStateMPI::Sim_SteadyStateMPI(const int argc, const char ** argv, const int isroot_)
-    : isroot(isroot_), t(0.0), step(0), fcount(0), mygrid(NULL), myGPU(NULL), parser(argc, argv)
+    : isroot(isroot_), t(0.0), step(0), fcount(0), mygrid(NULL), myGPU(NULL), parser(argc, argv), profiler(GPUlab::get_profiler())
 { }
 
 
@@ -218,6 +218,9 @@ void Sim_SteadyStateMPI::run()
 
             if (step == nsteps) break;
         }
+
+        profiler.printSummary();
+
         _dump();
         delete stepper;
         return;

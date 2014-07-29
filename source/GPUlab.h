@@ -9,7 +9,7 @@
 #include "GPU.h"
 #include "GridMPI.h"
 #include "Types.h"
-#include "Timer.h"
+#include "Profiler.h"
 
 #include <mpi.h>
 #include <omp.h>
@@ -262,4 +262,5 @@ class GPUlab
         inline uint_t chunk_slices() const { return curr_slices; }
         inline uint_t chunk_start_iz() const { return curr_iz; }
         inline uint_t chunk_id() const { return curr_chunk_id; }
+        static inline Profiler& get_profiler() { return GPU::profiler; }
 };

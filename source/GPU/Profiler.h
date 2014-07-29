@@ -19,8 +19,6 @@
 #include <stdio.h>
 #include <stack>
 
-using namespace std;
-
 #include <sys/time.h>
 //#include <tbb/tick_count.h>
 //namespace tbb { class tick_count; }
@@ -157,13 +155,13 @@ public:
 
 struct ProfileSummaryItem
 {
-    string sName;
+    std::string sName;
     double dTime;
     double dAverageTime;
     int nMoney;
     int nSamples;
 
-    ProfileSummaryItem(string sName_, double dTime_, int nMoney_, int nSamples_):
+    ProfileSummaryItem(std::string sName_, double dTime_, int nMoney_, int nSamples_):
         sName(sName_), dTime(dTime_), nMoney(nMoney_),nSamples(nSamples_), dAverageTime(dTime_/nSamples_){}
 };
 
@@ -172,14 +170,14 @@ class Profiler
 {
 protected:
 
-    map<string, ProfileAgent*> m_mapAgents;
-    stack<string> m_mapStoppedAgents;
+    std::map<std::string, ProfileAgent*> m_mapAgents;
+    std::stack<std::string> m_mapStoppedAgents;
 
-    ProfileAgent& _getAgent(string sName, const int type=CPU, const void *stream=NULL)
+    ProfileAgent& _getAgent(std::string sName, const int type=CPU, const void *stream=NULL)
     {
         if (bVerboseProfiling) {printf("%s ", sName.data());}
 
-        map<string, ProfileAgent*>::const_iterator it = m_mapAgents.find(sName);
+        std::map<std::string, ProfileAgent*>::const_iterator it = m_mapAgents.find(sName);
 
         const bool bFound = it != m_mapAgents.end();
 
@@ -197,12 +195,12 @@ protected:
         return *agent;
     }
 
-    vector<ProfileSummaryItem> _createSummary(bool bSkipIrrelevantEntries=true) const
+    std::vector<ProfileSummaryItem> _createSummary(bool bSkipIrrelevantEntries=true) const
     {
-        vector<ProfileSummaryItem> result;
+        std::vector<ProfileSummaryItem> result;
         result.reserve(m_mapAgents.size());
 
-        for(map<string, ProfileAgent*>::const_iterator it = m_mapAgents.begin(); it != m_mapAgents.end(); it++)
+        for(std::map<std::string, ProfileAgent*>::const_iterator it = m_mapAgents.begin(); it != m_mapAgents.end(); it++)
         {
             const ProfileAgent& agent = *it->second;
             if (!bSkipIrrelevantEntries || agent.m_dAccumulatedTime>1e-3)
@@ -217,7 +215,7 @@ public:
 
     void clear()
     {
-        for(map<string, ProfileAgent*>::iterator it = m_mapAgents.begin(); it != m_mapAgents.end(); it++)
+        for(std::map<std::string, ProfileAgent*>::iterator it = m_mapAgents.begin(); it != m_mapAgents.end(); it++)
         {
             delete it->second;
 
@@ -237,7 +235,7 @@ public:
 #if !defined(_PROFILE_NONE_) && defined(_PROFILE_CUDA_)
     // Timing CUDA means cudaEventSynchronize calls, which we don't want in
     // production code. Enable profiling of CUDA kernels with this flag.
-    void push_startCUDA(string sAgentName, const void *stream=NULL)
+    void push_startCUDA(std::string sAgentName, const void *stream=NULL)
     {
         if (m_mapStoppedAgents.size() > 0)
             _getAgent(m_mapStoppedAgents.top()).stop();
@@ -248,12 +246,12 @@ public:
 
     inline void pop_stopCUDA() { pop_stop(); }
 #else
-    inline void push_startCUDA(string sAgentName, const void *stream=NULL) { }
+    inline void push_startCUDA(std::string sAgentName, const void *stream=NULL) { }
     inline void pop_stopCUDA() { }
 #endif
 
 #ifndef _PROFILE_NONE_
-    void push_start(string sAgentName)
+    void push_start(std::string sAgentName)
     {
         if (m_mapStoppedAgents.size() > 0)
             _getAgent(m_mapStoppedAgents.top()).stop();
@@ -264,7 +262,7 @@ public:
 
     void pop_stop()
     {
-        string sCurrentAgentName = m_mapStoppedAgents.top();
+        std::string sCurrentAgentName = m_mapStoppedAgents.top();
         _getAgent(sCurrentAgentName).stop();
         m_mapStoppedAgents.pop();
 
@@ -275,17 +273,17 @@ public:
 
     void printSummary(FILE *outFile=NULL) const
     {
-        vector<ProfileSummaryItem> v = _createSummary();
+        std::vector<ProfileSummaryItem> v = _createSummary();
 
         double dTotalTime = 0;
         double dTotalTime2 = 0;
-        for(vector<ProfileSummaryItem>::const_iterator it = v.begin(); it!= v.end(); it++)
+        for(std::vector<ProfileSummaryItem>::const_iterator it = v.begin(); it!= v.end(); it++)
             dTotalTime += it->dTime;
 
-        for(vector<ProfileSummaryItem>::const_iterator it = v.begin(); it!= v.end(); it++)
+        for(std::vector<ProfileSummaryItem>::const_iterator it = v.begin(); it!= v.end(); it++)
         dTotalTime2 += it->dTime - it->nSamples*1.30e-6;
 
-        for(vector<ProfileSummaryItem>::const_iterator it = v.begin(); it!= v.end(); it++)
+        for(std::vector<ProfileSummaryItem>::const_iterator it = v.begin(); it!= v.end(); it++)
         {
             const ProfileSummaryItem& item = *it;
             const double avgTime = item.dAverageTime;
@@ -306,12 +304,12 @@ public:
     void reset()
     {
         printf("reset\n");
-        for(map<string, ProfileAgent*>::const_iterator it = m_mapAgents.begin(); it != m_mapAgents.end(); it++)
+        for(std::map<std::string, ProfileAgent*>::const_iterator it = m_mapAgents.begin(); it != m_mapAgents.end(); it++)
             it->second->_reset();
     }
 
 #else
-    inline void push_start(string sAgentName) { }
+    inline void push_start(std::string sAgentName) { }
     inline void pop_stop() { }
     inline void printSummary(FILE *outFile=NULL) const { }
     inline void reset() { }

@@ -4,17 +4,12 @@
  * Created by Fabian Wermelinger on 6/24/14.
  * Copyright 2014 ETH Zurich. All rights reserved.
  * */
+#include "GPU.h" // includes Types.h
+
 #include <stdio.h>
 #include <vector>
 #include <algorithm>
 using namespace std;
-
-#include "GPU.h" // includes Types.h
-
-#ifdef _CUDA_TIMER_
-#include "CUDA_Timer.cuh"
-#endif
-
 
 enum { VSIZE = NodeBlock::NVAR };
 
@@ -63,6 +58,8 @@ cudaEvent_t d2h_tmp_completed;
 ///////////////////////////////////////////////////////////////////////////////
 // IMPLEMENTATION
 ///////////////////////////////////////////////////////////////////////////////
+Profiler GPU::profiler; // combined CPU/GPU profiler
+
 static void _h2d_3DArray(cudaArray_t dst, const Real * const src, const int nslices)
 {
     cudaMemcpy3DParms copyParams = {0};
@@ -263,17 +260,17 @@ void GPU::upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, c
 #ifndef _MUTE_GPU_
     // TODO: use larger arrays for ghosts to minimize API overhead +
     // increase BW performance
-    tCUDA_START(stream1)
-        for (int i = 0; i < VSIZE; ++i)
-        {
-            // x
-            cudaMemcpyAsync(d_xgl[i], xghost_l[i], Nxghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-            cudaMemcpyAsync(d_xgr[i], xghost_r[i], Nxghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-            // y
-            cudaMemcpyAsync(d_ygl[i], yghost_l[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-            cudaMemcpyAsync(d_ygr[i], yghost_r[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-        }
-    tCUDA_STOP(stream1, "[GPU UPLOAD X/YGHOSTS]: ")
+    GPU::profiler.push_startCUDA("GPU UPLOAD X/YGHOSTS", &stream1);
+    for (int i = 0; i < VSIZE; ++i)
+    {
+        // x
+        cudaMemcpyAsync(d_xgl[i], xghost_l[i], Nxghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
+        cudaMemcpyAsync(d_xgr[i], xghost_r[i], Nxghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
+        // y
+        cudaMemcpyAsync(d_ygl[i], yghost_l[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
+        cudaMemcpyAsync(d_ygr[i], yghost_r[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
+    }
+    GPU::profiler.pop_stopCUDA();
 #endif
 }
 
@@ -281,11 +278,11 @@ void GPU::upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, c
 void GPU::h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices)
 {
 #ifndef _MUTE_GPU_
-    tCUDA_START(stream1)
-        for (int i = 0; i < VSIZE; ++i)
-            _h2d_3DArray(d_GPUin[i], src[i], nslices);
-    tCUDA_STOP(stream1, "[GPU UPLOAD 3DArray]: ")
-        cudaEventRecord(h2d_3Darray_completed, stream1);
+    GPU::profiler.push_startCUDA("GPU UPLOAD 3DARRAY", &stream1);
+    for (int i = 0; i < VSIZE; ++i)
+        _h2d_3DArray(d_GPUin[i], src[i], nslices);
+    GPU::profiler.pop_stopCUDA();
+    cudaEventRecord(h2d_3Darray_completed, stream1);
 #endif
 }
 
@@ -295,11 +292,11 @@ void GPU::h2d_tmp(const RealPtrVec_t& src, const uint_t N)
 #ifndef _MUTE_GPU_
     cudaStreamWaitEvent(stream3, h2d_3Darray_completed, 0);
 
-    tCUDA_START(stream3)
-        for (int i = 0; i < VSIZE; ++i)
-            cudaMemcpyAsync(d_tmp[i], src[i], N*sizeof(Real), cudaMemcpyHostToDevice, stream3);
-    tCUDA_STOP(stream3, "[GPU UPLOAD TMP]: ")
-        cudaEventRecord(h2d_tmp_completed, stream3);
+    GPU::profiler.push_startCUDA("GPU UPLOAD TMP", &stream3);
+    for (int i = 0; i < VSIZE; ++i)
+        cudaMemcpyAsync(d_tmp[i], src[i], N*sizeof(Real), cudaMemcpyHostToDevice, stream3);
+    GPU::profiler.pop_stopCUDA();
+    cudaEventRecord(h2d_tmp_completed, stream3);
 #endif
 }
 
@@ -310,11 +307,11 @@ void GPU::d2h_rhs(RealPtrVec_t& dst, const uint_t N)
     cudaStreamWaitEvent(stream2, divergence_completed, 0);
 
     // copy content of d_rhs to host, using the stream2 (after divergence)
-    tCUDA_START(stream2)
-        for (int i = 0; i < VSIZE; ++i)
-            cudaMemcpyAsync(dst[i], d_rhs[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream2);
-    tCUDA_STOP(stream2, "[GPU DOWNLOAD RHS]: ")
-        cudaEventRecord(d2h_rhs_completed, stream2);
+    GPU::profiler.push_startCUDA("GPU DOWNLOAD RHS", &stream2);
+    for (int i = 0; i < VSIZE; ++i)
+        cudaMemcpyAsync(dst[i], d_rhs[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream2);
+    GPU::profiler.pop_stopCUDA();
+    cudaEventRecord(d2h_rhs_completed, stream2);
 #endif
 }
 
@@ -324,12 +321,12 @@ void GPU::d2h_tmp(RealPtrVec_t& dst, const uint_t N)
 #ifndef _MUTE_GPU_
     cudaStreamWaitEvent(stream2, update_completed, 0);
 
-    // copy content of d_tmp to host, using the stream1
-    tCUDA_START(stream1)
-        for (int i = 0; i < VSIZE; ++i)
-            cudaMemcpyAsync(dst[i], d_tmp[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream2);
-    tCUDA_STOP(stream1, "[GPU DOWNLOAD TMP]: ")
-        cudaEventRecord(d2h_tmp_completed, stream2);
+    // copy content of d_tmp to host, using the stream2
+    GPU::profiler.push_startCUDA("GPU DOWNLOAD TMP", &stream2);
+    for (int i = 0; i < VSIZE; ++i)
+        cudaMemcpyAsync(dst[i], d_tmp[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream2);
+    GPU::profiler.pop_stopCUDA();
+    cudaEventRecord(d2h_tmp_completed, stream2);
 #endif
 }
 

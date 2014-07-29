@@ -5,6 +5,7 @@
  * Copyright 2014 ETH Zurich. All rights reserved.
  * */
 #include "GPUlab.h"
+#include "Timer.h"
 #include "MaxSpeedOfSound_CUDA.h"
 #include "Convection_CUDA.h"
 #include "Update_CUDA.h"

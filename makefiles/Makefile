@@ -100,7 +100,7 @@ OBJECTS += MaxSpeedOfSound.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CUD
 # Simulations
 OBJECTS += Sim_SteadyStateMPI.o Sim_SodMPI.o Sim_2DSBIMPI.o Sim_StaticIC.o Sim_SICCloudMPI.o
 # CUDA
-OBJECTS += cudaHostAllocator.o GPUhousehold.o GPUkernels.o
+OBJECTS += cudaHostAllocator.o GPUhousehold.o GPUkernels.o Profiler.o
 
 ifeq "$(fftw)"  "1"
 	OBJECTS += PoissonSolverScalarFFTW_MPI.o

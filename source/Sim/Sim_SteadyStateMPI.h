@@ -10,6 +10,7 @@
 
 #include "ArgumentParser.h"
 #include "Types.h"
+#include "Profiler.h"
 #include "GridMPI.h"
 #include "GPUlab.h"
 #include "BoundaryConditions.h"
@@ -37,6 +38,7 @@ class Sim_SteadyStateMPI : public Simulation
 
         // helper
         ArgumentParser parser;
+        Profiler& profiler;
 
         virtual void _setup();
         virtual void _allocGPU();
