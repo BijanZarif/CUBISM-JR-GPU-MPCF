@@ -59,8 +59,8 @@ void _xextraterm_hllc(const uint_t nslices,
         {
             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
             {
-                smem1[threadIdx.x][threadIdx.y+i] = Gp[ID3(iyT,ixT+i,iz,NY,NXP1)] + Gm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)];
-                smem2[threadIdx.x][threadIdx.y+i] = Pp[ID3(iyT,ixT+i,iz,NY,NXP1)] + Pm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)];
+                smem1[threadIdx.x][threadIdx.y+i] = Gp[ID3(iyT,ixT+i,iz,NY,NXP1)]      + Gm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)];
+                smem2[threadIdx.x][threadIdx.y+i] = Pp[ID3(iyT,ixT+i,iz,NY,NXP1)]      + Pm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)];
                 smem3[threadIdx.x][threadIdx.y+i] = vel[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)] - vel[ID3(iyT,ixT+i,iz,NY,NXP1)];
             }
             __syncthreads();
@@ -93,9 +93,15 @@ void _yextraterm_hllc(const uint_t nslices,
             const uint_t idx  = ID3(ix,iy,iz,NX,NY);
             const uint_t idxm = ID3(ix,iy,iz,NX,NYP1);
             const uint_t idxp = ID3(ix,(iy+1),iz,NX,NYP1);
-            sumG[idx] += Gp[idxm] + Gm[idxp];
-            sumP[idx] += Pp[idxm] + Pm[idxp];
-            divU[idx] += vel[idxp] - vel[idxm];
+            Real tq = Gp[idxm];
+            Real tr = Pp[idxm];
+            Real ts = vel[idxp];
+            tq = tq + Gm[idxp];
+            tr = tr + Pm[idxp];
+            ts = ts - vel[idxm];
+            sumG[idx] += tq;
+            sumP[idx] += tr;
+            divU[idx] += ts;
         }
     }
 }
@@ -117,10 +123,16 @@ void _zextraterm_hllc(const uint_t nslices,
         {
             const uint_t idx  = ID3(ix,iy,iz,NX,NY);
             const uint_t idxm = ID3(ix,iy,iz,NX,NY);
-            const uint_t idxp = ID3(ix,iy,iz+1,NX,NY);
-            sumG[idx] += Gp[idxm] + Gm[idxp];
-            sumP[idx] += Pp[idxm] + Pm[idxp];
-            divU[idx] += vel[idxp] - vel[idxm];
+            const uint_t idxp = ID3(ix,iy,(iz+1),NX,NY);
+            Real tq = Gp[idxm];
+            Real tr = Pp[idxm];
+            Real ts = vel[idxp];
+            tq = tq + Gm[idxp];
+            tr = tr + Pm[idxp];
+            ts = ts - vel[idxm];
+            sumG[idx] += tq;
+            sumP[idx] += tr;
+            divU[idx] += ts;
         }
     }
 }
