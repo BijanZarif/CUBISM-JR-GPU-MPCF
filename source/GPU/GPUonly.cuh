@@ -100,37 +100,57 @@ __device__
 inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, const Real f)
 {
 #ifndef _WENO3_
-    const Real is0 = d*(d*(Real)(10./3.)- e*(Real)(31./3.) + f*(Real)(11./3.)) + e*(e*(Real)(25./3.) - f*(Real)(19./3.)) +    f*f*(Real)(4./3.);
-    const Real is1 = c*(c*(Real)(4./3.) - d*(Real)(13./3.) + e*(Real)(5./3.)) + d*(d*(Real)(13./3.)  - e*(Real)(13./3.)) +    e*e*(Real)(4./3.);
-    const Real is2 = b*(b*(Real)(4./3.) - c*(Real)(19./3.) + d*(Real)(11./3.)) + c*(c*(Real)(25./3.) - d*(Real)(31./3.)) +    d*d*(Real)(10./3.);
+
+    const Real inv6 = 1.0f/6.0f;
+    const Real inv3 = 1.0f/3.0f;
+    const Real q1 =  10.0f*inv3;
+    const Real q2 =  31.0f*inv3;
+    const Real q3 =  11.0f*inv3;
+    const Real q4 =  25.0f*inv3;
+    const Real q5 =  19.0f*inv3;
+    const Real q6 =   4.0f*inv3;
+    const Real q7 =  13.0f*inv3;
+    const Real q8 =   5.0f*inv3;
+
+    const Real sum0 =  inv3*f - 7.0f*inv6*e + 11.0f*inv6*d;
+    const Real sum1 = -inv6*e + 5.0f*inv6*d + inv3*c;
+    const Real sum2 =  inv3*d + 5.0f*inv6*c - inv6*b;
+
+    const Real is0 = d*(d*q1 - e*q2 + f*q3) + e*(e*q4 - f*q5) + f*f*q6;
+    const Real is1 = c*(c*q6 - d*q7 + e*q8) + d*(d*q7 - e*q7) + e*e*q6;
+    const Real is2 = b*(b*q6 - c*q5 + d*q3) + c*(c*q4 - d*q2) + d*d*q1;
 
     const Real is0plus = is0 + (Real)WENOEPS;
     const Real is1plus = is1 + (Real)WENOEPS;
     const Real is2plus = is2 + (Real)WENOEPS;
 
-    const Real alpha0 = (Real)(1)*(((Real)1)/(10.0*is0plus*is0plus));
-    const Real alpha1 = (Real)(6)*(((Real)1)/(10.0*is1plus*is1plus));
-    const Real alpha2 = (Real)(3)*(((Real)1)/(10.0*is2plus*is2plus));
-    const Real alphasum = alpha0+alpha1+alpha2;
+    const Real alpha0 = 1.0f / (10.0f*is0plus*is0plus);
+    const Real alpha1 = 6.0f / (10.0f*is1plus*is1plus);
+    const Real alpha2 = 3.0f / (10.0f*is2plus*is2plus);
+    const Real alphasumInv = 1.0f / (alpha0+alpha1+alpha2);
 
-    const Real omega0=alpha0 * (((Real)1)/alphasum);
-    const Real omega1=alpha1 * (((Real)1)/alphasum);
-    const Real omega2= 1-omega0-omega1;
+    const Real omega0 = alpha0 * alphasumInv;
+    const Real omega1 = alpha1 * alphasumInv;
+    const Real omega2 = 1.0f - omega0 - omega1;
 
-    return omega0*((Real)(1./3.)*f-(Real)(7./6.)*e+(Real)(11./6.)*d) + omega1*(-(Real)(1./6.)*e+(Real)(5./6.)*d+(Real)(1./3.)*c) + omega2*((Real)(1./3.)*d+(Real)(5./6.)*c-(Real)(1./6.)*b);
+    return omega0*sum0 + omega1*sum1 + omega2*sum2;
 
 #else
+
+    const Real sum0 = 1.5f*d - 0.5f*e;
+    const Real sum1 = 0.5f*(d + c);
 
     const Real is0 = (d-e)*(d-e);
     const Real is1 = (d-c)*(d-c);
 
-    const Real alpha0 = (1./3.)/((is0+WENOEPS)*(is0+WENOEPS));
-    const Real alpha1 = (2./3.)/((is1+WENOEPS)*(is1+WENOEPS));
+    const Real alpha0 = 1.0f / (3.0f * (is0+WENOEPS)*(is0+WENOEPS));
+    const Real alpha1 = 2.0f / (3.0f * (is1+WENOEPS)*(is1+WENOEPS));
 
-    const Real omega0 = alpha0/(alpha0+alpha1);
-    const Real omega1 = 1.-omega0;
+    const Real omega0 = alpha0 / (alpha0+alpha1);
+    const Real omega1 = 1.0f - omega0;
 
-    return omega0*(1.5*d-.5*e) + omega1*(.5*d+.5*c);
+    return omega0*sum0 + omega1*sum1;
+
 #endif
 }
 
@@ -139,37 +159,57 @@ __device__
 inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, const Real e)
 {
 #ifndef _WENO3_
-    const Real is0 = a*(a*(Real)(4./3.)  - b*(Real)(19./3.)  + c*(Real)(11./3.)) + b*(b*(Real)(25./3.)  - c*(Real)(31./3.)) + c*c*(Real)(10./3.);
-    const Real is1 = b*(b*(Real)(4./3.)  - c*(Real)(13./3.)  + d*(Real)(5./3.))  + c*(c*(Real)(13./3.)  - d*(Real)(13./3.)) + d*d*(Real)(4./3.);
-    const Real is2 = c*(c*(Real)(10./3.) - d*(Real)(31./3.)  + e*(Real)(11./3.)) + d*(d*(Real)(25./3.)  - e*(Real)(19./3.)) + e*e*(Real)(4./3.);
+
+    const Real inv6 = 1.0f/6.0f;
+    const Real inv3 = 1.0f/3.0f;
+    const Real q1 =   4.0f*inv3;
+    const Real q2 =  19.0f*inv3;
+    const Real q3 =  11.0f*inv3;
+    const Real q4 =  25.0f*inv3;
+    const Real q5 =  31.0f*inv3;
+    const Real q6 =  10.0f*inv3;
+    const Real q7 =  13.0f*inv3;
+    const Real q8 =   5.0f*inv3;
+
+    const Real sum0 =  inv3*a - 7.0f*inv6*b + 11.0f*inv6*c;
+    const Real sum1 = -inv6*b + 5.0f*inv6*c + inv3*d;
+    const Real sum2 =  inv3*c + 5.0f*inv6*d - inv6*e;
+
+    const Real is0 = a*(a*q1 - b*q2 + c*q3) + b*(b*q4 - c*q5) + c*c*q6;
+    const Real is1 = b*(b*q1 - c*q7 + d*q8) + c*(c*q7 - d*q7) + d*d*q1;
+    const Real is2 = c*(c*q6 - d*q5 + e*q3) + d*(d*q4 - e*q2) + e*e*q1;
 
     const Real is0plus = is0 + (Real)WENOEPS;
     const Real is1plus = is1 + (Real)WENOEPS;
     const Real is2plus = is2 + (Real)WENOEPS;
 
-    const Real alpha0 = (Real)(1)*(((Real)1)/(10.0*is0plus*is0plus));
-    const Real alpha1 = (Real)(6)*(((Real)1)/(10.0*is1plus*is1plus));
-    const Real alpha2 = (Real)(3)*(((Real)1)/(10.0*is2plus*is2plus));
-    const Real alphasum = alpha0+alpha1+alpha2;
+    const Real alpha0 = 1.0f / (10.0f*is0plus*is0plus);
+    const Real alpha1 = 6.0f / (10.0f*is1plus*is1plus);
+    const Real alpha2 = 3.0f / (10.0f*is2plus*is2plus);
+    const Real alphasumInv = 1.0f / (alpha0+alpha1+alpha2);
 
-    const Real omega0=alpha0 * (((Real)1)/alphasum);
-    const Real omega1=alpha1 * (((Real)1)/alphasum);
-    const Real omega2= 1-omega0-omega1;
+    const Real omega0 = alpha0 * alphasumInv;
+    const Real omega1 = alpha1 * alphasumInv;
+    const Real omega2 = 1.0f - omega0 - omega1;
 
-    return omega0*((Real)(1.0/3.)*a-(Real)(7./6.)*b+(Real)(11./6.)*c) + omega1*(-(Real)(1./6.)*b+(Real)(5./6.)*c+(Real)(1./3.)*d) + omega2*((Real)(1./3.)*c+(Real)(5./6.)*d-(Real)(1./6.)*e);
+    return omega0*sum0 + omega1*sum1 + omega2*sum2;
 
 #else
+
+    const Real sum0 = 1.5f*c - 0.5f*b;
+    const Real sum1 = 0.5f*(c + d);
 
     const Real is0 = (c-b)*(c-b);
     const Real is1 = (d-c)*(d-c);
 
-    const Real alpha0 = 1./(3.*(is0+WENOEPS)*(is0+WENOEPS));
-    const Real alpha1 = 2./(3.*(is1+WENOEPS)*(is1+WENOEPS));
+    const Real alpha0 = 1.0f / (3.0f * (is0+WENOEPS)*(is0+WENOEPS));
+    const Real alpha1 = 2.0f / (3.0f * (is1+WENOEPS)*(is1+WENOEPS));
 
-    const Real omega0=alpha0/(alpha0+alpha1);
-    const Real omega1=1.-omega0;
+    const Real omega0 = alpha0 / (alpha0+alpha1);
+    const Real omega1 = 1.0f - omega0;
 
-    return omega0*(1.5*c-.5*b) + omega1*(.5*c+.5*d);
+    return omega0*sum0 + omega1*sum1;
+
 #endif
 }
 

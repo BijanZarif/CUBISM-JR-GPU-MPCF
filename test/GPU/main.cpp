@@ -17,14 +17,14 @@ int main(int argc, const char *argv[])
     const uint_t NX = NodeBlock::sizeX;
     const uint_t NY = NodeBlock::sizeY;
     const uint_t NZ = NodeBlock::sizeZ;
-    const uint_t CW = NZ;
+    const uint_t nslices = NZ;;
 
     // create life
-    GPU::alloc((void**)&dummy, NX, NY, NZ, CW);
+    GPU::alloc((void**)&dummy, nslices, true);
 
     // make some xyghosts
-    const uint_t Nxghosts = 3 * NY * CW;
-    const uint_t Nyghosts = NX * 3 * CW;
+    const uint_t Nxghosts = 3 * NY * nslices;
+    const uint_t Nyghosts = NX * 3 * nslices;
     cuda_vector_t xg_L(7*Nxghosts);
     cuda_vector_t xg_R(7*Nxghosts);
     cuda_vector_t yg_L(7*Nyghosts);
@@ -148,7 +148,7 @@ int main(int argc, const char *argv[])
     RealPtrVec_t in3D(7);
     for (int i = 0; i < 7; ++i)
         in3D[i] = &interior[i*Ninput];
-    GPU::h2d_3DArray(in3D, NX, NY, NZ+6);
+    GPU::h2d_3DArray(in3D, nslices);
     GPU::h2d_3DArray_wait();
 
     // run Forrest

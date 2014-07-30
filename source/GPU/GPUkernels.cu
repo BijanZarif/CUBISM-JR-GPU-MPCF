@@ -34,6 +34,9 @@
 ///////////////////////////////////////////////////////////////////////////////
 //                                  KERNELS                                  //
 ///////////////////////////////////////////////////////////////////////////////
+#define _NFLUXES_ 3
+#define _STENCIL_WIDTH_ 8 // 6 + _NFLUXES_ - 1
+
 __global__
 void _xextraterm_hllc(const uint_t nslices,
         const Real * const Gm, const Real * const Gp,
@@ -151,6 +154,242 @@ void _zextraterm_hllc(const uint_t nslices,
         }
     }
 }
+
+
+template <uint_t ix, uint_t haloStart, uint_t texStart, uint_t texEnd>
+__device__ void _load_halo_stencil_X(
+        const uint_t iy,
+        const uint_t iz,
+        const uint_t global_iz,
+        devPtrSet& ghost,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P)
+{
+    assert((ix == 0 && haloStart == 0 && texStart == 3 && texEnd == _STENCIL_WIDTH_) ||
+           (ix == NX-_STENCIL_WIDTH_+3 && haloStart == _STENCIL_WIDTH_-3 && texStart == 0 && texEnd == _STENCIL_WIDTH_-3));
+
+    // Read GMEM first, since latency is higher
+/* #pragma unroll 3 */
+    for (uint_t halo = haloStart; halo < haloStart+3; ++halo)
+    {
+        const uint_t gid = GHOSTMAPX(halo - haloStart, iy, iz-3+global_iz);
+        r[halo] = ghost.r[gid];
+        u[halo] = ghost.u[gid];
+        v[halo] = ghost.v[gid];
+        w[halo] = ghost.w[gid];
+        e[halo] = ghost.e[gid];
+        G[halo] = ghost.G[gid];
+        P[halo] = ghost.P[gid];
+    }
+
+    // Now textures
+    for (uint_t tex = texStart; tex < texEnd; ++tex)
+    {
+        const uint_t sid = ix + tex - texStart;
+        r[tex] = tex3D(texR, sid, iy, iz);
+        u[tex] = tex3D(texU, sid, iy, iz);
+        v[tex] = tex3D(texV, sid, iy, iz);
+        w[tex] = tex3D(texW, sid, iy, iz);
+        e[tex] = tex3D(texE, sid, iy, iz);
+        G[tex] = tex3D(texG, sid, iy, iz);
+        P[tex] = tex3D(texP, sid, iy, iz);
+    }
+}
+
+
+template <uint_t OFFSET>
+__device__ void _load_internal_stencil_X(
+        const uint_t ix,
+        const uint_t iy,
+        const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P)
+{
+    assert(OFFSET == 3 || OFFSET == _STENCIL_WIDTH_-3);
+
+/* #pragma unroll 8 */
+    for (uint_t i = 0; i < _STENCIL_WIDTH_; ++i)
+    {
+        const uint_t sid = ix + i - OFFSET;
+        r[i] = tex3D(texR, sid, iy, iz);
+        u[i] = tex3D(texU, sid, iy, iz);
+        v[i] = tex3D(texV, sid, iy, iz);
+        w[i] = tex3D(texW, sid, iy, iz);
+        e[i] = tex3D(texE, sid, iy, iz);
+        G[i] = tex3D(texG, sid, iy, iz);
+        P[i] = tex3D(texP, sid, iy, iz);
+    }
+}
+
+
+__device__
+void _print_stencil(const uint_t bx, const uint_t by, const uint_t tx, const uint_t ty, const Real * const s)
+{
+    if (bx == blockIdx.x && by == blockIdx.y && tx == threadIdx.x && ty == threadIdx.y)
+    {
+        printf("Block [%d,%d,%d], Thread [%d,%d,%d], Stencil:\n(",bx,by,blockIdx.z,tx,ty,threadIdx.z);
+        for (uint_t i = 0; i < _STENCIL_WIDTH_-1; ++i)
+            printf("%f, ", s[i]);
+        printf("%f)\n", s[_STENCIL_WIDTH_-1]);
+    }
+}
+
+
+__device__
+void _reconstruct(
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P)
+{
+    // Reconstruct 2*_NFLUXES_ values and store the reconstructed value pairs
+    // back into the input arrays
+
+// continue here
+
+
+
+            /* // rho */
+            /* const Real rp = _weno_pluss_clipped(r.im2, r.im1, r.i, r.ip1, r.ip2); */
+            /* const Real rm = _weno_minus_clipped(r.im3, r.im2, r.im1, r.i, r.ip1); */
+            /* assert(!isnan(rp)); assert(!isnan(rm)); */
+            /* // u (convert primitive variable u = (rho*u) / rho) */
+            /* u.im3 /= r.im3; */
+            /* u.im2 /= r.im2; */
+            /* u.im1 /= r.im1; */
+            /* u.i   /= r.i; */
+            /* u.ip1 /= r.ip1; */
+            /* u.ip2 /= r.ip2; */
+            /* const Real up = _weno_pluss_clipped(u.im2, u.im1, u.i, u.ip1, u.ip2); */
+            /* const Real um = _weno_minus_clipped(u.im3, u.im2, u.im1, u.i, u.ip1); */
+            /* assert(!isnan(up)); assert(!isnan(um)); */
+            /* // v (convert primitive variable v = (rho*v) / rho) */
+            /* v.im3 /= r.im3; */
+            /* v.im2 /= r.im2; */
+            /* v.im1 /= r.im1; */
+            /* v.i   /= r.i; */
+            /* v.ip1 /= r.ip1; */
+            /* v.ip2 /= r.ip2; */
+            /* const Real vp = _weno_pluss_clipped(v.im2, v.im1, v.i, v.ip1, v.ip2); */
+            /* const Real vm = _weno_minus_clipped(v.im3, v.im2, v.im1, v.i, v.ip1); */
+            /* assert(!isnan(vp)); assert(!isnan(vm)); */
+            /* // w (convert primitive variable w = (rho*w) / rho) */
+            /* w.im3 /= r.im3; */
+            /* w.im2 /= r.im2; */
+            /* w.im1 /= r.im1; */
+            /* w.i   /= r.i; */
+            /* w.ip1 /= r.ip1; */
+            /* w.ip2 /= r.ip2; */
+            /* const Real wp = _weno_pluss_clipped(w.im2, w.im1, w.i, w.ip1, w.ip2); */
+            /* const Real wm = _weno_minus_clipped(w.im3, w.im2, w.im1, w.i, w.ip1); */
+            /* assert(!isnan(wp)); assert(!isnan(wm)); */
+            /* // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G */
+            /* p.im3 = (e.im3 - 0.5f*r.im3*(u.im3*u.im3 + v.im3*v.im3 + w.im3*w.im3) - P.im3) / G.im3; */
+            /* p.im2 = (e.im2 - 0.5f*r.im2*(u.im2*u.im2 + v.im2*v.im2 + w.im2*w.im2) - P.im2) / G.im2; */
+            /* p.im1 = (e.im1 - 0.5f*r.im1*(u.im1*u.im1 + v.im1*v.im1 + w.im1*w.im1) - P.im1) / G.im1; */
+            /* p.i   = (e.i   - 0.5f*r.i*(u.i*u.i       + v.i*v.i     + w.i*w.i)     - P.i)   / G.i; */
+            /* p.ip1 = (e.ip1 - 0.5f*r.ip1*(u.ip1*u.ip1 + v.ip1*v.ip1 + w.ip1*w.ip1) - P.ip1) / G.ip1; */
+            /* p.ip2 = (e.ip2 - 0.5f*r.ip2*(u.ip2*u.ip2 + v.ip2*v.ip2 + w.ip2*w.ip2) - P.ip2) / G.ip2; */
+            /* const Real pp = _weno_pluss_clipped(p.im2, p.im1, p.i, p.ip1, p.ip2); */
+            /* const Real pm = _weno_minus_clipped(p.im3, p.im2, p.im1, p.i, p.ip1); */
+            /* assert(!isnan(pp)); assert(!isnan(pm)); */
+            /* // G */
+            /* const Real Gp = _weno_pluss_clipped(G.im2, G.im1, G.i, G.ip1, G.ip2); */
+            /* const Real Gm = _weno_minus_clipped(G.im3, G.im2, G.im1, G.i, G.ip1); */
+            /* assert(!isnan(Gp)); assert(!isnan(Gm)); */
+            /* // P */
+            /* const Real Pp = _weno_pluss_clipped(P.im2, P.im1, P.i, P.ip1, P.ip2); */
+            /* const Real Pm = _weno_minus_clipped(P.im3, P.im2, P.im1, P.i, P.ip1); */
+            /* assert(!isnan(Pp)); assert(!isnan(Pm)); */
+}
+
+
+__global__
+void _xflux_left(const uint_t nslices, const uint_t global_iz,
+        devPtrSet ghost, devPtrSet flux,
+        Real * const xtra_vel,
+        Real * const xtra_Gm, Real * const xtra_Gp,
+        Real * const xtra_Pm, Real * const xtra_Pp)
+{
+    // grid coordinates
+    const uint_t ix  = blockIdx.x * _NFLUXES_  + threadIdx.x;// actually, threadIdx.x = 0 for all blocks
+    const uint_t iy  = blockIdx.y * blockDim.y + threadIdx.y;
+    /* // thread coordinate (local) */
+    /* const uint_t tid = threadIdx.y; */
+
+    /* // stencils: the kernel computes three simultaneous outputs. Thus, the */
+    /* // stencil width is 6 + 3 - 1. If 64 threads are used per block, the use of */
+    /* // shared memory in this kernel will be 14KB (including all 7 flow */
+    /* // quantities). */
+    /* __shared__ Real r[_NTHREADS_][_STENCIL_WIDTH_]; */
+    /* __shared__ Real u[_NTHREADS_][_STENCIL_WIDTH_]; */
+    /* __shared__ Real v[_NTHREADS_][_STENCIL_WIDTH_]; */
+    /* __shared__ Real w[_NTHREADS_][_STENCIL_WIDTH_]; */
+    /* __shared__ Real e[_NTHREADS_][_STENCIL_WIDTH_]; */
+    /* __shared__ Real G[_NTHREADS_][_STENCIL_WIDTH_]; */
+    /* __shared__ Real P[_NTHREADS_][_STENCIL_WIDTH_]; */
+
+    assert(NX >= 8);
+
+    if (ix < NXP1 && iy < NY)
+    {
+        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
+        {
+            /* *
+             * The general task order is (for each chunk slice along NZ):
+             * 1.) Load ghosts from GMEM or tex3D into stencil
+             * 2.) Reconstruct primitive values using WENO5/WENO3 (WENO3 = less
+             *     registers)
+             * 3.) Compute characteristic velocities
+             * 4.) Compute fluxes
+             * 5.) Compute RHS for advection of G and P
+             * */
+
+            // stencils (7 * _STENCIL_WIDTH_ registers)
+            Real r[_STENCIL_WIDTH_];
+            Real u[_STENCIL_WIDTH_];
+            Real v[_STENCIL_WIDTH_];
+            Real w[_STENCIL_WIDTH_];
+            Real e[_STENCIL_WIDTH_];
+            Real G[_STENCIL_WIDTH_];
+            Real P[_STENCIL_WIDTH_];
+
+            // 1.)
+            if (blockIdx.x == 0)
+                _load_halo_stencil_X<0,0,3,_STENCIL_WIDTH_>(iy, iz, global_iz, ghost, r, u, v, w, e, G, P);
+            else
+                _load_internal_stencil_X<3>(ix, iy, iz, r, u, v, w, e, G, P);
+
+            // 2.)
+            _reconstruct(r, u, v, w, e, G, P);
+
+
+            if (iz == 3)
+            {
+                _print_stencil(1,0,0,0,r);
+                _print_stencil(1,0,0,1,r);
+                _print_stencil(1,0,0,2,r);
+                _print_stencil(1,0,0,3,r);
+            }
+        }
+    }
+}
+
+
+
 
 
 __global__
@@ -1425,15 +1664,18 @@ void GPU::TestKernel()
     {
         const uint_t nslices = NodeBlock::sizeZ;
 
-        const dim3 blocks(_NTHREADS_, 1, 1);
-        const dim3 xgrid((NXP1 + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
+        const dim3 xblocks(1, _NTHREADS_, 1);
+        const dim3 yblocks(_NTHREADS_, 1, 1);
+        const dim3 zblocks(_NTHREADS_, 1, 1);
+        const dim3 xgrid((NXP1/2 + _NFLUXES_ - 1)/_NFLUXES_, (NY + _NTHREADS_ - 1) / _NTHREADS_,   1);
         const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1);
         const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
 
         GPU::profiler.push_startCUDA("_TEST_KERNEL");
+        _xflux_left<<<xgrid, xblocks>>>(nslices, 0, xghostL, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
         /* _xflux<<<xgrid, blocks>>>(nslices, 0, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
         /* _yflux<<<ygrid, blocks>>>(nslices, 0, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-        _zflux<<<zgrid, blocks>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        /* _zflux<<<zgrid, blocks>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
         GPU::profiler.pop_stopCUDA();
     }
 }
