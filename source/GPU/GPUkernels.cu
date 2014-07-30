@@ -55,6 +55,11 @@ void _xextraterm_hllc(const uint_t nslices,
         const uint_t iyT = blockIdx.y * _TILE_DIM_ + threadIdx.x;
         const uint_t ixT = blockIdx.x * _TILE_DIM_ + threadIdx.y;
 
+        // per thread:
+        // LOADS  = nslices * (6 * _TILE_DIM_/_BLOCK_ROWS_)
+        // STORES = nslices * (3 * _TILE_DIM_/_BLOCK_ROWS_)
+        // total words transferred per thread:
+        // WORDS  = nslices * (9 * _TILE_DIM_/_BLOCK_ROWS_)
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
@@ -88,6 +93,11 @@ void _yextraterm_hllc(const uint_t nslices,
 
     if (ix < NX && iy < NY)
     {
+        // per thread:
+        // LOADS  = nslices * 9
+        // STORES = nslices * 3
+        // total words transferred per thread:
+        // WORDS  = nslices * 12
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
             const uint_t idx  = ID3(ix,iy,iz,NX,NY);
@@ -119,6 +129,11 @@ void _zextraterm_hllc(const uint_t nslices,
 
     if (ix < NX && iy < NY)
     {
+        // per thread:
+        // LOADS  = nslices * 9
+        // STORES = nslices * 3
+        // total words transferred per thread:
+        // WORDS  = nslices * 12
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
             const uint_t idx  = ID3(ix,iy,iz,NX,NY);
@@ -1274,6 +1289,11 @@ void GPU::xflux(const uint_t nslices, const uint_t global_iz)
         GPU::profiler.push_startCUDA("_XEXTRATERM", &stream1);
         _xextraterm_hllc<<<xtraGrid, xtraBlocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
         GPU::profiler.pop_stopCUDA();
+
+        // 70.1% of Peak BW (w/ ECC) on K20c
+        const uint_t PTS_PER_SLICE = NX * NY;
+        const uint_t total_words = PTS_PER_SLICE * (nslices * 9);
+        /* printf("XEXTRA GB = %f\n", total_words*4./1024./1024./1024.); */
     }
 #endif
 }
@@ -1300,6 +1320,11 @@ void GPU::yflux(const uint_t nslices, const uint_t global_iz)
         GPU::profiler.push_startCUDA("_YEXTRATERM", &stream1);
         _yextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
         GPU::profiler.pop_stopCUDA();
+
+        // 78.6% of Peak BW (w/ ECC) on K20c
+        const uint_t PTS_PER_SLICE = NX * NY;
+        const uint_t total_words = PTS_PER_SLICE * (nslices * 12);
+        /* printf("YEXTRA GB = %f\n", total_words*4./1024./1024./1024.); */
     }
 #endif
 }
@@ -1320,6 +1345,11 @@ void GPU::zflux(const uint_t nslices)
     GPU::profiler.push_startCUDA("_ZEXTRATERM", &stream1);
     _zextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
     GPU::profiler.pop_stopCUDA();
+
+    // 76.7% of Peak BW (w/ ECC) on K20c
+    const uint_t PTS_PER_SLICE = NX * NY;
+    const uint_t total_words = PTS_PER_SLICE * (nslices * 12);
+    /* printf("ZEXTRA GB = %f\n", total_words*4./1024./1024./1024.); */
 #endif
 }
 
