@@ -156,38 +156,328 @@ void _zextraterm_hllc(const uint_t nslices,
 }
 
 
-template <uint_t ix, uint_t haloStart, uint_t texStart, uint_t texEnd>
-__device__ void _load_halo_stencil_X(
-        const uint_t iy,
-        const uint_t iz,
-        const uint_t global_iz,
-        devPtrSet& ghost,
+__device__
+inline void _load_internal_X(const uint_t ix, const uint_t iy, const uint_t iz,
         Real * const r,
         Real * const u,
         Real * const v,
         Real * const w,
         Real * const e,
         Real * const G,
-        Real * const P)
+        Real * const P,
+        const uint_t dummy1,
+        const devPtrSet * const dummy2)
+{
+    // texture only
+    r[0]  = tex3D(texR, ix-3, iy, iz);
+    r[1]  = tex3D(texR, ix-2, iy, iz);
+    r[2]  = tex3D(texR, ix-1, iy, iz);
+    r[3]  = tex3D(texR, ix,   iy, iz);
+    r[4]  = tex3D(texR, ix+1, iy, iz);
+    r[5]  = tex3D(texR, ix+2, iy, iz);
+
+    u[0]  = tex3D(texU, ix-3, iy, iz);
+    u[1]  = tex3D(texU, ix-2, iy, iz);
+    u[2]  = tex3D(texU, ix-1, iy, iz);
+    u[3]  = tex3D(texU, ix,   iy, iz);
+    u[4]  = tex3D(texU, ix+1, iy, iz);
+    u[5]  = tex3D(texU, ix+2, iy, iz);
+
+    v[0]  = tex3D(texV, ix-3, iy, iz);
+    v[1]  = tex3D(texV, ix-2, iy, iz);
+    v[2]  = tex3D(texV, ix-1, iy, iz);
+    v[3]  = tex3D(texV, ix,   iy, iz);
+    v[4]  = tex3D(texV, ix+1, iy, iz);
+    v[5]  = tex3D(texV, ix+2, iy, iz);
+
+    w[0]  = tex3D(texW, ix-3, iy, iz);
+    w[1]  = tex3D(texW, ix-2, iy, iz);
+    w[2]  = tex3D(texW, ix-1, iy, iz);
+    w[3]  = tex3D(texW, ix,   iy, iz);
+    w[4]  = tex3D(texW, ix+1, iy, iz);
+    w[5]  = tex3D(texW, ix+2, iy, iz);
+
+    e[0]  = tex3D(texE, ix-3, iy, iz);
+    e[1]  = tex3D(texE, ix-2, iy, iz);
+    e[2]  = tex3D(texE, ix-1, iy, iz);
+    e[3]  = tex3D(texE, ix,   iy, iz);
+    e[4]  = tex3D(texE, ix+1, iy, iz);
+    e[5]  = tex3D(texE, ix+2, iy, iz);
+
+    G[0]  = tex3D(texG, ix-3, iy, iz);
+    G[1]  = tex3D(texG, ix-2, iy, iz);
+    G[2]  = tex3D(texG, ix-1, iy, iz);
+    G[3]  = tex3D(texG, ix,   iy, iz);
+    G[4]  = tex3D(texG, ix+1, iy, iz);
+    G[5]  = tex3D(texG, ix+2, iy, iz);
+
+    P[0]  = tex3D(texP, ix-3, iy, iz);
+    P[1]  = tex3D(texP, ix-2, iy, iz);
+    P[2]  = tex3D(texP, ix-1, iy, iz);
+    P[3]  = tex3D(texP, ix,   iy, iz);
+    P[4]  = tex3D(texP, ix+1, iy, iz);
+    P[5]  = tex3D(texP, ix+2, iy, iz);
+}
+
+
+
+template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
+__device__ inline void _load_1X(const uint_t dummy, const uint_t iy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t global_iz,
+        const devPtrSet * const ghost)
+{
+    // GMEM
+    const uint_t id0 = GHOSTMAPX(ghostStart, iy, iz-3+global_iz);
+
+    r[haloStart] = ghost->r[id0];
+    u[haloStart] = ghost->u[id0];
+    v[haloStart] = ghost->v[id0];
+    w[haloStart] = ghost->w[id0];
+    e[haloStart] = ghost->e[id0];
+    G[haloStart] = ghost->G[id0];
+    P[haloStart] = ghost->P[id0];
+
+    // texture
+    r[texStart+0]  = tex3D(texR, ix0+0, iy, iz);
+    r[texStart+1]  = tex3D(texR, ix0+1, iy, iz);
+    r[texStart+2]  = tex3D(texR, ix0+2, iy, iz);
+    r[texStart+3]  = tex3D(texR, ix0+3, iy, iz);
+    r[texStart+4]  = tex3D(texR, ix0+4, iy, iz);
+
+    u[texStart+0]  = tex3D(texU, ix0+0, iy, iz);
+    u[texStart+1]  = tex3D(texU, ix0+1, iy, iz);
+    u[texStart+2]  = tex3D(texU, ix0+2, iy, iz);
+    u[texStart+3]  = tex3D(texU, ix0+3, iy, iz);
+    u[texStart+4]  = tex3D(texU, ix0+4, iy, iz);
+
+    v[texStart+0]  = tex3D(texV, ix0+0, iy, iz);
+    v[texStart+1]  = tex3D(texV, ix0+1, iy, iz);
+    v[texStart+2]  = tex3D(texV, ix0+2, iy, iz);
+    v[texStart+3]  = tex3D(texV, ix0+3, iy, iz);
+    v[texStart+4]  = tex3D(texV, ix0+4, iy, iz);
+
+    w[texStart+0]  = tex3D(texW, ix0+0, iy, iz);
+    w[texStart+1]  = tex3D(texW, ix0+1, iy, iz);
+    w[texStart+2]  = tex3D(texW, ix0+2, iy, iz);
+    w[texStart+3]  = tex3D(texW, ix0+3, iy, iz);
+    w[texStart+4]  = tex3D(texW, ix0+4, iy, iz);
+
+    e[texStart+0]  = tex3D(texE, ix0+0, iy, iz);
+    e[texStart+1]  = tex3D(texE, ix0+1, iy, iz);
+    e[texStart+2]  = tex3D(texE, ix0+2, iy, iz);
+    e[texStart+3]  = tex3D(texE, ix0+3, iy, iz);
+    e[texStart+4]  = tex3D(texE, ix0+4, iy, iz);
+
+    G[texStart+0]  = tex3D(texG, ix0+0, iy, iz);
+    G[texStart+1]  = tex3D(texG, ix0+1, iy, iz);
+    G[texStart+2]  = tex3D(texG, ix0+2, iy, iz);
+    G[texStart+3]  = tex3D(texG, ix0+3, iy, iz);
+    G[texStart+4]  = tex3D(texG, ix0+4, iy, iz);
+
+    P[texStart+0]  = tex3D(texP, ix0+0, iy, iz);
+    P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
+    P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
+    P[texStart+3]  = tex3D(texP, ix0+3, iy, iz);
+    P[texStart+4]  = tex3D(texP, ix0+4, iy, iz);
+}
+
+template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
+__device__ inline void _load_2X(const uint_t dummy, const uint_t iy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t global_iz,
+        const devPtrSet * const ghost)
+{
+    // GMEM
+    const uint_t id0 = GHOSTMAPX(ghostStart+0, iy, iz-3+global_iz);
+    const uint_t id1 = GHOSTMAPX(ghostStart+1, iy, iz-3+global_iz);
+
+    r[haloStart+0] = ghost->r[id0];
+    r[haloStart+1] = ghost->r[id1];
+
+    u[haloStart+0] = ghost->u[id0];
+    u[haloStart+1] = ghost->u[id1];
+
+    v[haloStart+0] = ghost->v[id0];
+    v[haloStart+1] = ghost->v[id1];
+
+    w[haloStart+0] = ghost->w[id0];
+    w[haloStart+1] = ghost->w[id1];
+
+    e[haloStart+0] = ghost->e[id0];
+    e[haloStart+1] = ghost->e[id1];
+
+    G[haloStart+0] = ghost->G[id0];
+    G[haloStart+1] = ghost->G[id1];
+
+    P[haloStart+0] = ghost->P[id0];
+    P[haloStart+1] = ghost->P[id1];
+
+    // texture
+    r[texStart+0]  = tex3D(texR, ix0+0, iy, iz);
+    r[texStart+1]  = tex3D(texR, ix0+1, iy, iz);
+    r[texStart+2]  = tex3D(texR, ix0+2, iy, iz);
+    r[texStart+3]  = tex3D(texR, ix0+3, iy, iz);
+
+    u[texStart+0]  = tex3D(texU, ix0+0, iy, iz);
+    u[texStart+1]  = tex3D(texU, ix0+1, iy, iz);
+    u[texStart+2]  = tex3D(texU, ix0+2, iy, iz);
+    u[texStart+3]  = tex3D(texU, ix0+3, iy, iz);
+
+    v[texStart+0]  = tex3D(texV, ix0+0, iy, iz);
+    v[texStart+1]  = tex3D(texV, ix0+1, iy, iz);
+    v[texStart+2]  = tex3D(texV, ix0+2, iy, iz);
+    v[texStart+3]  = tex3D(texV, ix0+3, iy, iz);
+
+    w[texStart+0]  = tex3D(texW, ix0+0, iy, iz);
+    w[texStart+1]  = tex3D(texW, ix0+1, iy, iz);
+    w[texStart+2]  = tex3D(texW, ix0+2, iy, iz);
+    w[texStart+3]  = tex3D(texW, ix0+3, iy, iz);
+
+    e[texStart+0]  = tex3D(texE, ix0+0, iy, iz);
+    e[texStart+1]  = tex3D(texE, ix0+1, iy, iz);
+    e[texStart+2]  = tex3D(texE, ix0+2, iy, iz);
+    e[texStart+3]  = tex3D(texE, ix0+3, iy, iz);
+
+    G[texStart+0]  = tex3D(texG, ix0+0, iy, iz);
+    G[texStart+1]  = tex3D(texG, ix0+1, iy, iz);
+    G[texStart+2]  = tex3D(texG, ix0+2, iy, iz);
+    G[texStart+3]  = tex3D(texG, ix0+3, iy, iz);
+
+    P[texStart+0]  = tex3D(texP, ix0+0, iy, iz);
+    P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
+    P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
+    P[texStart+3]  = tex3D(texP, ix0+3, iy, iz);
+}
+
+
+template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
+__device__ inline void _load_3X(const uint_t dummy, const uint_t iy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t global_iz,
+        const devPtrSet * const ghost)
+{
+    // GMEM
+    const uint_t id0 = GHOSTMAPX(ghostStart+0, iy, iz-3+global_iz);
+    const uint_t id1 = GHOSTMAPX(ghostStart+1, iy, iz-3+global_iz);
+    const uint_t id2 = GHOSTMAPX(ghostStart+2, iy, iz-3+global_iz);
+
+    r[haloStart+0] = ghost->r[id0];
+    r[haloStart+1] = ghost->r[id1];
+    r[haloStart+2] = ghost->r[id2];
+
+    u[haloStart+0] = ghost->u[id0];
+    u[haloStart+1] = ghost->u[id1];
+    u[haloStart+2] = ghost->u[id2];
+
+    v[haloStart+0] = ghost->v[id0];
+    v[haloStart+1] = ghost->v[id1];
+    v[haloStart+2] = ghost->v[id2];
+
+    w[haloStart+0] = ghost->w[id0];
+    w[haloStart+1] = ghost->w[id1];
+    w[haloStart+2] = ghost->w[id2];
+
+    e[haloStart+0] = ghost->e[id0];
+    e[haloStart+1] = ghost->e[id1];
+    e[haloStart+2] = ghost->e[id2];
+
+    G[haloStart+0] = ghost->G[id0];
+    G[haloStart+1] = ghost->G[id1];
+    G[haloStart+2] = ghost->G[id2];
+
+    P[haloStart+0] = ghost->P[id0];
+    P[haloStart+1] = ghost->P[id1];
+    P[haloStart+2] = ghost->P[id2];
+
+    // texture
+    r[texStart+0]  = tex3D(texR, ix0+0, iy, iz);
+    r[texStart+1]  = tex3D(texR, ix0+1, iy, iz);
+    r[texStart+2]  = tex3D(texR, ix0+2, iy, iz);
+
+    u[texStart+0]  = tex3D(texU, ix0+0, iy, iz);
+    u[texStart+1]  = tex3D(texU, ix0+1, iy, iz);
+    u[texStart+2]  = tex3D(texU, ix0+2, iy, iz);
+
+    v[texStart+0]  = tex3D(texV, ix0+0, iy, iz);
+    v[texStart+1]  = tex3D(texV, ix0+1, iy, iz);
+    v[texStart+2]  = tex3D(texV, ix0+2, iy, iz);
+
+    w[texStart+0]  = tex3D(texW, ix0+0, iy, iz);
+    w[texStart+1]  = tex3D(texW, ix0+1, iy, iz);
+    w[texStart+2]  = tex3D(texW, ix0+2, iy, iz);
+
+    e[texStart+0]  = tex3D(texE, ix0+0, iy, iz);
+    e[texStart+1]  = tex3D(texE, ix0+1, iy, iz);
+    e[texStart+2]  = tex3D(texE, ix0+2, iy, iz);
+
+    G[texStart+0]  = tex3D(texG, ix0+0, iy, iz);
+    G[texStart+1]  = tex3D(texG, ix0+1, iy, iz);
+    G[texStart+2]  = tex3D(texG, ix0+2, iy, iz);
+
+    P[texStart+0]  = tex3D(texP, ix0+0, iy, iz);
+    P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
+    P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
+}
+
+
+
+template <uint_t ix, uint_t haloStart, uint_t texStart, uint_t texEnd>
+__device__ inline void _load_halo_stencil_X(
+        const uint_t dummy,
+        const uint_t iy,
+        const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t global_iz,
+        const devPtrSet * const ghost)
 {
     assert((ix == 0 && haloStart == 0 && texStart == 3 && texEnd == _STENCIL_WIDTH_) ||
            (ix == NX-_STENCIL_WIDTH_+3 && haloStart == _STENCIL_WIDTH_-3 && texStart == 0 && texEnd == _STENCIL_WIDTH_-3));
 
     // Read GMEM first, since latency is higher
-/* #pragma unroll 3 */
+#pragma unroll 3
     for (uint_t halo = haloStart; halo < haloStart+3; ++halo)
     {
         const uint_t gid = GHOSTMAPX(halo - haloStart, iy, iz-3+global_iz);
-        r[halo] = ghost.r[gid];
-        u[halo] = ghost.u[gid];
-        v[halo] = ghost.v[gid];
-        w[halo] = ghost.w[gid];
-        e[halo] = ghost.e[gid];
-        G[halo] = ghost.G[gid];
-        P[halo] = ghost.P[gid];
+        r[halo] = ghost->r[gid];
+        u[halo] = ghost->u[gid];
+        v[halo] = ghost->v[gid];
+        w[halo] = ghost->w[gid];
+        e[halo] = ghost->e[gid];
+        G[halo] = ghost->G[gid];
+        P[halo] = ghost->P[gid];
+        assert(r[halo] >  0.0f);
+        assert(e[halo] >  0.0f);
+        assert(G[halo] >  0.0f);
+        assert(P[halo] >= 0.0f);
     }
 
     // Now textures
+#pragma unroll 5
     for (uint_t tex = texStart; tex < texEnd; ++tex)
     {
         const uint_t sid = ix + tex - texStart;
@@ -198,12 +488,16 @@ __device__ void _load_halo_stencil_X(
         e[tex] = tex3D(texE, sid, iy, iz);
         G[tex] = tex3D(texG, sid, iy, iz);
         P[tex] = tex3D(texP, sid, iy, iz);
+        assert(r[tex] >  0.0f);
+        assert(e[tex] >  0.0f);
+        assert(G[tex] >  0.0f);
+        assert(P[tex] >= 0.0f);
     }
 }
 
 
 template <uint_t OFFSET>
-__device__ void _load_internal_stencil_X(
+__device__ inline void _load_internal_stencil_X(
         const uint_t ix,
         const uint_t iy,
         const uint_t iz,
@@ -213,11 +507,13 @@ __device__ void _load_internal_stencil_X(
         Real * const w,
         Real * const e,
         Real * const G,
-        Real * const P)
+        Real * const P,
+        const uint_t dummy1,
+        const devPtrSet * const dummy2)
 {
     assert(OFFSET == 3 || OFFSET == _STENCIL_WIDTH_-3);
 
-/* #pragma unroll 8 */
+#pragma unroll 8
     for (uint_t i = 0; i < _STENCIL_WIDTH_; ++i)
     {
         const uint_t sid = ix + i - OFFSET;
@@ -228,6 +524,10 @@ __device__ void _load_internal_stencil_X(
         e[i] = tex3D(texE, sid, iy, iz);
         G[i] = tex3D(texG, sid, iy, iz);
         P[i] = tex3D(texP, sid, iy, iz);
+        assert(r[i] >  0.0f);
+        assert(e[i] >  0.0f);
+        assert(G[i] >  0.0f);
+        assert(P[i] >= 0.0f);
     }
 }
 
@@ -246,7 +546,7 @@ void _print_stencil(const uint_t bx, const uint_t by, const uint_t tx, const uin
 
 
 __device__
-void _reconstruct(
+inline void _reconstruct(
         Real * const r,
         Real * const u,
         Real * const v,
@@ -258,91 +558,280 @@ void _reconstruct(
     // Reconstruct 2*_NFLUXES_ values and store the reconstructed value pairs
     // back into the input arrays
 
-// continue here
+    // convert to primitive variables
+    for (uint_t i = 0; i < _STENCIL_WIDTH_; ++i)
+    {
+        e[i] = (e[i] - 0.5f*(u[i]*u[i] + v[i]*v[i] + w[i]*w[i])/r[i] - P[i]) / G[i];
+        u[i] = u[i]/r[i];
+        v[i] = v[i]/r[i];
+        w[i] = w[i]/r[i];
+    }
+
+    const Real rm0 = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]);
+    const Real rp0 = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]);
+    const Real rm1 = _weno_minus_clipped(r[1], r[2], r[3], r[4], r[5]);
+    const Real rp1 = _weno_pluss_clipped(r[2], r[3], r[4], r[5], r[6]);
+    const Real rm2 = _weno_minus_clipped(r[2], r[3], r[4], r[5], r[6]);
+    const Real rp2 = _weno_pluss_clipped(r[3], r[4], r[5], r[6], r[7]);
+
+    const Real Gm0 = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]);
+    const Real Gp0 = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]);
+    const Real Gm1 = _weno_minus_clipped(G[1], G[2], G[3], G[4], G[5]);
+    const Real Gp1 = _weno_pluss_clipped(G[2], G[3], G[4], G[5], G[6]);
+    const Real Gm2 = _weno_minus_clipped(G[2], G[3], G[4], G[5], G[6]);
+    const Real Gp2 = _weno_pluss_clipped(G[3], G[4], G[5], G[6], G[7]);
+
+    const Real Pm0 = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]);
+    const Real Pp0 = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]);
+    const Real Pm1 = _weno_minus_clipped(P[1], P[2], P[3], P[4], P[5]);
+    const Real Pp1 = _weno_pluss_clipped(P[2], P[3], P[4], P[5], P[6]);
+    const Real Pm2 = _weno_minus_clipped(P[2], P[3], P[4], P[5], P[6]);
+    const Real Pp2 = _weno_pluss_clipped(P[3], P[4], P[5], P[6], P[7]);
+
+    const Real em0 = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]);
+    const Real ep0 = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]);
+    const Real em1 = _weno_minus_clipped(e[1], e[2], e[3], e[4], e[5]);
+    const Real ep1 = _weno_pluss_clipped(e[2], e[3], e[4], e[5], e[6]);
+    const Real em2 = _weno_minus_clipped(e[2], e[3], e[4], e[5], e[6]);
+    const Real ep2 = _weno_pluss_clipped(e[3], e[4], e[5], e[6], e[7]);
+
+    const Real um0 = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]);
+    const Real up0 = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]);
+    const Real um1 = _weno_minus_clipped(u[1], u[2], u[3], u[4], u[5]);
+    const Real up1 = _weno_pluss_clipped(u[2], u[3], u[4], u[5], u[6]);
+    const Real um2 = _weno_minus_clipped(u[2], u[3], u[4], u[5], u[6]);
+    const Real up2 = _weno_pluss_clipped(u[3], u[4], u[5], u[6], u[7]);
+
+    const Real vm0 = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]);
+    const Real vp0 = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]);
+    const Real vm1 = _weno_minus_clipped(v[1], v[2], v[3], v[4], v[5]);
+    const Real vp1 = _weno_pluss_clipped(v[2], v[3], v[4], v[5], v[6]);
+    const Real vm2 = _weno_minus_clipped(v[2], v[3], v[4], v[5], v[6]);
+    const Real vp2 = _weno_pluss_clipped(v[3], v[4], v[5], v[6], v[7]);
+
+    const Real wm0 = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]);
+    const Real wp0 = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]);
+    const Real wm1 = _weno_minus_clipped(w[1], w[2], w[3], w[4], w[5]);
+    const Real wp1 = _weno_pluss_clipped(w[2], w[3], w[4], w[5], w[6]);
+    const Real wm2 = _weno_minus_clipped(w[2], w[3], w[4], w[5], w[6]);
+    const Real wp2 = _weno_pluss_clipped(w[3], w[4], w[5], w[6], w[7]);
+
+    r[0] = rm0; r[1] = rp0;
+    r[2] = rm1; r[3] = rp1;
+    r[4] = rm2; r[5] = rp2;
+
+    G[0] = Gm0; G[1] = Gp0;
+    G[2] = Gm1; G[3] = Gp1;
+    G[4] = Gm2; G[5] = Gp2;
+
+    P[0] = Pm0; P[1] = Pp0;
+    P[2] = Pm1; P[3] = Pp1;
+    P[4] = Pm2; P[5] = Pp2;
+
+    e[0] = em0; e[1] = ep0;
+    e[2] = em1; e[3] = ep1;
+    e[4] = em2; e[5] = ep2;
+
+    u[0] = um0; u[1] = up0;
+    u[2] = um1; u[3] = up1;
+    u[4] = um2; u[5] = up2;
+
+    v[0] = vm0; v[1] = vp0;
+    v[2] = vm1; v[3] = vp1;
+    v[4] = vm2; v[5] = vp2;
+
+    w[0] = wm0; w[1] = wp0;
+    w[2] = wm1; w[3] = wp1;
+    w[4] = wm2; w[5] = wp2;
+}
+
+
+typedef void (*ReadFunction)(const uint_t, const uint_t, const uint_t,
+        Real * const, Real * const, Real * const, Real * const, Real * const, Real * const, Real * const,
+        const uint_t, const devPtrSet * const);
 
 
 
-            /* // rho */
-            /* const Real rp = _weno_pluss_clipped(r.im2, r.im1, r.i, r.ip1, r.ip2); */
-            /* const Real rm = _weno_minus_clipped(r.im3, r.im2, r.im1, r.i, r.ip1); */
-            /* assert(!isnan(rp)); assert(!isnan(rm)); */
-            /* // u (convert primitive variable u = (rho*u) / rho) */
-            /* u.im3 /= r.im3; */
-            /* u.im2 /= r.im2; */
-            /* u.im1 /= r.im1; */
-            /* u.i   /= r.i; */
-            /* u.ip1 /= r.ip1; */
-            /* u.ip2 /= r.ip2; */
-            /* const Real up = _weno_pluss_clipped(u.im2, u.im1, u.i, u.ip1, u.ip2); */
-            /* const Real um = _weno_minus_clipped(u.im3, u.im2, u.im1, u.i, u.ip1); */
-            /* assert(!isnan(up)); assert(!isnan(um)); */
-            /* // v (convert primitive variable v = (rho*v) / rho) */
-            /* v.im3 /= r.im3; */
-            /* v.im2 /= r.im2; */
-            /* v.im1 /= r.im1; */
-            /* v.i   /= r.i; */
-            /* v.ip1 /= r.ip1; */
-            /* v.ip2 /= r.ip2; */
-            /* const Real vp = _weno_pluss_clipped(v.im2, v.im1, v.i, v.ip1, v.ip2); */
-            /* const Real vm = _weno_minus_clipped(v.im3, v.im2, v.im1, v.i, v.ip1); */
-            /* assert(!isnan(vp)); assert(!isnan(vm)); */
-            /* // w (convert primitive variable w = (rho*w) / rho) */
-            /* w.im3 /= r.im3; */
-            /* w.im2 /= r.im2; */
-            /* w.im1 /= r.im1; */
-            /* w.i   /= r.i; */
-            /* w.ip1 /= r.ip1; */
-            /* w.ip2 /= r.ip2; */
-            /* const Real wp = _weno_pluss_clipped(w.im2, w.im1, w.i, w.ip1, w.ip2); */
-            /* const Real wm = _weno_minus_clipped(w.im3, w.im2, w.im1, w.i, w.ip1); */
-            /* assert(!isnan(wp)); assert(!isnan(wm)); */
-            /* // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G */
-            /* p.im3 = (e.im3 - 0.5f*r.im3*(u.im3*u.im3 + v.im3*v.im3 + w.im3*w.im3) - P.im3) / G.im3; */
-            /* p.im2 = (e.im2 - 0.5f*r.im2*(u.im2*u.im2 + v.im2*v.im2 + w.im2*w.im2) - P.im2) / G.im2; */
-            /* p.im1 = (e.im1 - 0.5f*r.im1*(u.im1*u.im1 + v.im1*v.im1 + w.im1*w.im1) - P.im1) / G.im1; */
-            /* p.i   = (e.i   - 0.5f*r.i*(u.i*u.i       + v.i*v.i     + w.i*w.i)     - P.i)   / G.i; */
-            /* p.ip1 = (e.ip1 - 0.5f*r.ip1*(u.ip1*u.ip1 + v.ip1*v.ip1 + w.ip1*w.ip1) - P.ip1) / G.ip1; */
-            /* p.ip2 = (e.ip2 - 0.5f*r.ip2*(u.ip2*u.ip2 + v.ip2*v.ip2 + w.ip2*w.ip2) - P.ip2) / G.ip2; */
-            /* const Real pp = _weno_pluss_clipped(p.im2, p.im1, p.i, p.ip1, p.ip2); */
-            /* const Real pm = _weno_minus_clipped(p.im3, p.im2, p.im1, p.i, p.ip1); */
-            /* assert(!isnan(pp)); assert(!isnan(pm)); */
-            /* // G */
-            /* const Real Gp = _weno_pluss_clipped(G.im2, G.im1, G.i, G.ip1, G.ip2); */
-            /* const Real Gm = _weno_minus_clipped(G.im3, G.im2, G.im1, G.i, G.ip1); */
-            /* assert(!isnan(Gp)); assert(!isnan(Gm)); */
-            /* // P */
-            /* const Real Pp = _weno_pluss_clipped(P.im2, P.im1, P.i, P.ip1, P.ip2); */
-            /* const Real Pm = _weno_minus_clipped(P.im3, P.im2, P.im1, P.i, P.ip1); */
-            /* assert(!isnan(Pp)); assert(!isnan(Pm)); */
+
+#define _STENCIL_WIDTH_UNIT_ 6
+#define _TILE_ 8
+
+
+__device__
+inline void _get_stencil_z(const uint_t ix, const uint_t iy, const uint_t iz,
+        Real * __restrict__ stencil, const texture<float, 3, cudaReadModeElementType> tex)
+{
+    stencil[0] = tex3D(tex, ix, iy, iz-3);
+    stencil[1] = tex3D(tex, ix, iy, iz-2);
+    stencil[2] = tex3D(tex, ix, iy, iz-1);
+    stencil[3] = tex3D(tex, ix, iy, iz);
+    stencil[4] = tex3D(tex, ix, iy, iz+1);
+    stencil[5] = tex3D(tex, ix, iy, iz+2);
+    assert(!isnan(stencil[0]));
+    assert(!isnan(stencil[1]));
+    assert(!isnan(stencil[2]));
+    assert(!isnan(stencil[3]));
+    assert(!isnan(stencil[4]));
+    assert(!isnan(stencil[5]));
+}
+
+__device__
+inline void _compute_zflux(const uint_t ix, const uint_t iy, const uint_t iz,
+        Real * __restrict__ flux_out, Real * __restrict__ advection_out)
+{
+    Real r[6], e[6], u[6], v[6], w[6], G[6], P[6];
+    _get_stencil_z(ix, iy, iz, r, texR);
+    _get_stencil_z(ix, iy, iz, e, texE);
+    _get_stencil_z(ix, iy, iz, G, texG);
+    _get_stencil_z(ix, iy, iz, P, texP);
+    _get_stencil_z(ix, iy, iz, u, texU);
+    _get_stencil_z(ix, iy, iz, v, texV);
+    _get_stencil_z(ix, iy, iz, w, texW);
+
+    // reconstruct
+#pragma unroll 6
+    for (uint_t i = 0; i < 6; ++i) // convert to primitive variables
+    {
+        e[i] = (e[i] - 0.5f*(u[i]*u[i] + v[i]*v[i] + w[i]*w[i])/r[i] - P[i]) / G[i]; //pressure
+        u[i] = u[i]/r[i]; // U
+        v[i] = v[i]/r[i]; // V
+        w[i] = w[i]/r[i]; // W
+    }
+    const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]);
+    const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]);
+
+    const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]);
+    const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]);
+
+    const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]);
+    const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]);
+
+    const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]);
+    const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]);
+
+    const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]);
+    const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]);
+
+    const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]);
+    const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]);
+
+    const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]);
+    const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]);
+
+    // assign advection output (partial)
+    advection_out[0] = Gm;
+    advection_out[1] = Gp;
+    advection_out[2] = Pm;
+    advection_out[3] = Pp;
+
+    // characteristic velocity
+    Real sm, sp;
+    _char_vel_einfeldt(rm, rp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp);
+    const Real ss = _char_vel_star(rm, rp, wm, wp, pm, pp, sm, sp);
+    assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
+
+    advection_out[4] = _extraterm_hllc_vel(wm, wp, Gm, Gp, Pm, Pp, sm, sp, ss);
+
+    // compute fluxes
+    const Real fr = _hllc_rho(rm, rp, wm, wp, sm, sp, ss);
+    const Real fu = _hllc_vel(rm, rp, um, up, wm, wp, sm, sp, ss);
+    const Real fv = _hllc_vel(rm, rp, vm, vp, wm, wp, sm, sp, ss);
+    const Real fw = _hllc_pvel(rm, rp, wm, wp, pm, pp, sm, sp, ss);
+    const Real fe = _hllc_e(rm, rp, wm, wp, um, up, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss);
+    const Real fG = _hllc_rho(Gm, Gp, wm, wp, sm, sp, ss);
+    const Real fP = _hllc_rho(Pm, Pp, wm, wp, sm, sp, ss);
+    flux_out[0] = fr;
+    flux_out[1] = fu;
+    flux_out[2] = fv;
+    flux_out[3] = fw;
+    flux_out[4] = fe;
+    flux_out[5] = fG;
+    flux_out[6] = fP;
 }
 
 
 __global__
-void _xflux_left(const uint_t nslices, const uint_t global_iz,
-        devPtrSet ghost, devPtrSet flux,
+void _divF(const uint_t nslices, const uint_t global_iz,
+        const devPtrSet& xghostL, const devPtrSet& xghostR,
+        const devPtrSet& yghostL, const devPtrSet& yghostR,
+        devPtrSet& rhs)
+{
+    const uint_t ix = blockIdx.x * _TILE_ + threadIdx.x;
+    const uint_t iy = blockIdx.y * _TILE_ + threadIdx.y;
+
+    const uint_t tid = blockDim.x*threadIdx.y + threadIdx.x;
+
+    __shared__ Real s_stencil[_TILE_][_TILE_+6];
+    __shared__ Real s_flux[_TILE_][_TILE_+1];
+    __shared__ Real s_Gm[_TILE_][_TILE_+1];
+    __shared__ Real s_Gp[_TILE_][_TILE_+1];
+    __shared__ Real s_Pm[_TILE_][_TILE_+1];
+    __shared__ Real s_Pp[_TILE_][_TILE_+1];
+    __shared__ Real s_hllc_vel[_TILE_][_TILE_+1];
+
+    // assumes NX % _TILE_ = 0 and NY % _TILE_ = 0
+
+    Real _rhs=0.0f, _sumG=0.0f, _sumP=0.0f, _divU=0.0f;
+
+    /* *
+     * 1. Compute z-fluxes for first slice before enter loop
+     * */
+    Real _zflux_m[7]; // z-flux minus, 7 flow quantities
+    Real _zadvection_m[5]; // Gm, Gp, Pm, Pp, hllc_vel
+    _compute_zflux(ix, iy, 3, _zflux_m, _zadvection_m);
+
+    /* *
+     * 2. Loop over x-y-slices
+     * */
+    for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
+    {
+        // get s_stencil into shared mem
+
+        // __syncthreads()
+        // Real myStencil
+    }
+
+}
+
+
+__global__
+void _xflux_mod(const uint_t nslices, const uint_t global_iz,
+        devPtrSet ghostL, devPtrSet ghostR, devPtrSet flux,
         Real * const xtra_vel,
         Real * const xtra_Gm, Real * const xtra_Gp,
         Real * const xtra_Pm, Real * const xtra_Pp)
 {
-    // grid coordinates
-    const uint_t ix  = blockIdx.x * _NFLUXES_  + threadIdx.x;// actually, threadIdx.x = 0 for all blocks
-    const uint_t iy  = blockIdx.y * blockDim.y + threadIdx.y;
-    /* // thread coordinate (local) */
-    /* const uint_t tid = threadIdx.y; */
+    /* *
+     * Notes:
+     * ======
+     * 1.) NXP1 = NX + 1
+     * 2.) NX = NodeBlock::sizeX
+     * 3.) NY = NodeBlock::sizeY
+     * 4.) nslices = number of slices for currently processed chunk
+     * 5.) global_iz is the iz-coordinate in index space of the NodeBlock for
+     *     the first slice of the currently processed chunk.  It is needed if
+     *     all of the x-/yghosts are uploaded to the GPU prior to processing
+     *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
+     *     are uploaded per chunk.
+     * */
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
 
-    /* // stencils: the kernel computes three simultaneous outputs. Thus, the */
-    /* // stencil width is 6 + 3 - 1. If 64 threads are used per block, the use of */
-    /* // shared memory in this kernel will be 14KB (including all 7 flow */
-    /* // quantities). */
-    /* __shared__ Real r[_NTHREADS_][_STENCIL_WIDTH_]; */
-    /* __shared__ Real u[_NTHREADS_][_STENCIL_WIDTH_]; */
-    /* __shared__ Real v[_NTHREADS_][_STENCIL_WIDTH_]; */
-    /* __shared__ Real w[_NTHREADS_][_STENCIL_WIDTH_]; */
-    /* __shared__ Real e[_NTHREADS_][_STENCIL_WIDTH_]; */
-    /* __shared__ Real G[_NTHREADS_][_STENCIL_WIDTH_]; */
-    /* __shared__ Real P[_NTHREADS_][_STENCIL_WIDTH_]; */
-
-    assert(NX >= 8);
+    /* *
+     * The following code requires 1D thread blocks with dimension
+     * dim3(_NTHREADS_, 1, 1)
+     * on a 2D grid with dimension
+     * dim3((NXP1 + _NTHREADS_ - 1) / _NTHREADS_, NY, 1)
+     *
+     * The load of ghosts is organized into a switch block with 6 cases. Blocks
+     * affected by this are the first three on the left boundary and the last
+     * three on the right. Given the layout of thread blocks above, warps do
+     * not diverge because of the switch.
+     *
+     * NOTE: To minimize the switch cases to 6 (and simplify code) the
+     * following requires that NX >= 5
+     * */
+    assert(NXP1 > 5);
 
     if (ix < NXP1 && iy < NY)
     {
@@ -350,46 +839,128 @@ void _xflux_left(const uint_t nslices, const uint_t global_iz,
         {
             /* *
              * The general task order is (for each chunk slice along NZ):
-             * 1.) Load ghosts from GMEM or tex3D into stencil
-             * 2.) Reconstruct primitive values using WENO5/WENO3 (WENO3 = less
-             *     registers)
+             * 1.) Load ghosts from GMEM or tex3D into stencil (do this 7x, for each
+             *     quantity)
+             * 2.) Reconstruct primitive values using WENO5/WENO3
              * 3.) Compute characteristic velocities
              * 4.) Compute fluxes
              * 5.) Compute RHS for advection of G and P
              * */
 
-            // stencils (7 * _STENCIL_WIDTH_ registers)
-            Real r[_STENCIL_WIDTH_];
-            Real u[_STENCIL_WIDTH_];
-            Real v[_STENCIL_WIDTH_];
-            Real w[_STENCIL_WIDTH_];
-            Real e[_STENCIL_WIDTH_];
-            Real G[_STENCIL_WIDTH_];
-            Real P[_STENCIL_WIDTH_];
+            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
+            Real r[_STENCIL_WIDTH_UNIT_];
+            Real u[_STENCIL_WIDTH_UNIT_];
+            Real v[_STENCIL_WIDTH_UNIT_];
+            Real w[_STENCIL_WIDTH_UNIT_];
+            Real e[_STENCIL_WIDTH_UNIT_];
+            Real G[_STENCIL_WIDTH_UNIT_];
+            Real P[_STENCIL_WIDTH_UNIT_];
 
+/* #pragma unroll 6 */
+/*             for (int i = 0; i < _STENCIL_WIDTH_UNIT_; ++i) */
+/*             { */
+/*                 r[i] = 1.0f; */
+/*                 u[i] = 0.0f; */
+/*                 v[i] = 0.0f; */
+/*                 w[i] = 0.0f; */
+/*                 e[i] = 1.0f; */
+/*                 G[i] = 2.5f; */
+/*                 P[i] = 0.0f; */
+/*             } */
             // 1.)
-            if (blockIdx.x == 0)
-                _load_halo_stencil_X<0,0,3,_STENCIL_WIDTH_>(iy, iz, global_iz, ghost, r, u, v, w, e, G, P);
+            if (0 == ix)
+                _load_3X<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL);
+            else if (1 == ix)
+                _load_2X<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL);
+            else if (2 == ix)
+                _load_1X<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL);
+            else if (NXP1-3 == ix)
+                _load_1X<NXP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NXP1-2 == ix)
+                _load_2X<NXP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NXP1-1 == ix)
+                _load_3X<NXP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else
-                _load_internal_stencil_X<3>(ix, iy, iz, r, u, v, w, e, G, P);
+                _load_internal_X(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL);
 
             // 2.)
-            _reconstruct(r, u, v, w, e, G, P);
-
-
-            if (iz == 3)
+            // convert to primitive variables
+#pragma unroll 6
+            for (uint_t i = 0; i < _STENCIL_WIDTH_UNIT_; ++i)
             {
-                _print_stencil(1,0,0,0,r);
-                _print_stencil(1,0,0,1,r);
-                _print_stencil(1,0,0,2,r);
-                _print_stencil(1,0,0,3,r);
+                e[i] = (e[i] - 0.5f*(u[i]*u[i] + v[i]*v[i] + w[i]*w[i])/r[i] - P[i]) / G[i];
+                u[i] = u[i]/r[i];
+                v[i] = v[i]/r[i];
+                w[i] = w[i]/r[i];
             }
+
+            const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]);
+            const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]);
+            assert(!isnan(rp)); assert(!isnan(rm));
+
+            const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]);
+            const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]);
+            assert(!isnan(Gp)); assert(!isnan(Gm));
+
+            const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]);
+            const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]);
+            assert(!isnan(Pp)); assert(!isnan(Pm));
+
+            const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]);
+            const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]);
+            assert(!isnan(pp)); assert(!isnan(pm));
+
+            const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]);
+            const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]);
+            assert(!isnan(up)); assert(!isnan(um));
+
+            const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]);
+            const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]);
+            assert(!isnan(vp)); assert(!isnan(vm));
+
+            const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]);
+            const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]);
+            assert(!isnan(wp)); assert(!isnan(wm));
+
+            // 3.)
+            Real sm, sp;
+            _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp);
+            const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp);
+            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
+
+            // 4.)
+            const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss);
+            const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss);
+            const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss);
+            const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss);
+            const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss);
+            const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss);
+            const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss);
+            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+
+            const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss);
+
+            /* const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1); */
+            /* flux.r[idx] = fr + fu + fv + fw + fe + fG + fP + hllc_vel; */
+
+            const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
+            flux.r[idx] = fr;
+            flux.u[idx] = fu;
+            flux.v[idx] = fv;
+            flux.w[idx] = fw;
+            flux.e[idx] = fe;
+            flux.G[idx] = fG;
+            flux.P[idx] = fP;
+
+            // 5.)
+            xtra_vel[idx] = hllc_vel;
+            xtra_Gm[idx]  = Gm;
+            xtra_Gp[idx]  = Gp;
+            xtra_Pm[idx]  = Pm;
+            xtra_Pp[idx]  = Pp;
         }
     }
 }
-
-
-
 
 
 __global__
@@ -458,6 +1029,13 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             _read_stencil_X(e, texE, ghostL.e, ghostR.e, ix, iy, iz, global_iz);
             _read_stencil_X(G, texG, ghostL.G, ghostR.G, ix, iy, iz, global_iz);
             _read_stencil_X(P, texP, ghostL.P, ghostR.P, ix, iy, iz, global_iz);
+            /* r.im3 = r.im2 = r.im1 = r.i = r.ip1 = r.ip2 = 1.0f; */
+            /* u.im3 = u.im2 = u.im1 = u.i = u.ip1 = u.ip2 = 0.0f; */
+            /* v.im3 = v.im2 = v.im1 = v.i = v.ip1 = v.ip2 = 0.0f; */
+            /* w.im3 = w.im2 = w.im1 = w.i = w.ip1 = w.ip2 = 0.0f; */
+            /* e.im3 = e.im2 = e.im1 = e.i = e.ip1 = e.ip2 = 1.0f; */
+            /* G.im3 = G.im2 = G.im1 = G.i = G.ip1 = G.ip2 = 2.5f; */
+            /* P.im3 = P.im2 = P.im1 = P.i = P.ip1 = P.ip2 = 0.0f; */
 #else
             // less conditionals, additional tex3D fetches
             _load_stencil_tex3D_X(r, texR, ix, iy, iz);
@@ -600,6 +1178,11 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss);
             assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
 
+            const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss);
+
+            /* const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1); */
+            /* flux.r[idx] = fr + fu + fv + fw + fe + fG + fP + hllc_vel; */
+
             const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
             flux.r[idx] = fr;
             flux.u[idx] = fu;
@@ -610,7 +1193,7 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             flux.P[idx] = fP;
 
             // 5.)
-            xtra_vel[idx] = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss);
+            xtra_vel[idx] = hllc_vel;
             xtra_Gm[idx]  = Gm;
             xtra_Gp[idx]  = Gp;
             xtra_Pm[idx]  = Pm;
@@ -1661,21 +2244,39 @@ void GPU::TestKernel()
 
     devPtrSet zflux(d_zflux);
 
+    devPtrSet rhs(d_rhs);
+
     {
         const uint_t nslices = NodeBlock::sizeZ;
 
         const dim3 xblocks(1, _NTHREADS_, 1);
         const dim3 yblocks(_NTHREADS_, 1, 1);
         const dim3 zblocks(_NTHREADS_, 1, 1);
-        const dim3 xgrid((NXP1/2 + _NFLUXES_ - 1)/_NFLUXES_, (NY + _NTHREADS_ - 1) / _NTHREADS_,   1);
+        const dim3 xgrid_half((NXP1/2 + _NFLUXES_ - 1)/_NFLUXES_, (NY + _NTHREADS_ - 1) / _NTHREADS_,   1);
+        const dim3 xgrid(NXP1, (NY + _NTHREADS_ - 1) / _NTHREADS_,   1);
         const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1);
         const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
 
-        GPU::profiler.push_startCUDA("_TEST_KERNEL");
-        _xflux_left<<<xgrid, xblocks>>>(nslices, 0, xghostL, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-        /* _xflux<<<xgrid, blocks>>>(nslices, 0, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-        /* _yflux<<<ygrid, blocks>>>(nslices, 0, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-        /* _zflux<<<zgrid, blocks>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+        /* const dim3 Dblocks(_TILE_, _TILE_, 1); */
+        /* const dim3 Dgrid((NX + _TILE_ - 1)/_TILE_, (NY + _TILE_ - 1)/_TILE_, 1); */
+
+        /* GPU::profiler.push_startCUDA("_TEST_KERNEL1"); */
+        /* _divF<<<Dgrid, Dblocks>>>(nslices, 0, xghostL, xghostR, yghostL, yghostR, rhs); */
+        /* GPU::profiler.pop_stopCUDA(); */
+
+        /* GPU::profiler.push_startCUDA("_TEST_KERNEL1"); */
+        /* _xflux_left<<<xgrid_half, xblocks>>>(nslices, 0, xghostL, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+        /* GPU::profiler.pop_stopCUDA(); */
+
+        GPU::profiler.push_startCUDA("_TEST_KERNEL2");
+        _xflux_mod<<<xgrid, xblocks>>>(nslices, 0, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        GPU::profiler.pop_stopCUDA();
+
+        GPU::profiler.push_startCUDA("_TEST_KERNEL3");
+        /* _xflux_left<<<xgrid, xblocks>>>(nslices, 0, xghostL, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+        _xflux<<<xgrid, xblocks>>>(nslices, 0, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        _yflux<<<ygrid, yblocks>>>(nslices, 0, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        _zflux<<<zgrid, zblocks>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
         GPU::profiler.pop_stopCUDA();
     }
 }

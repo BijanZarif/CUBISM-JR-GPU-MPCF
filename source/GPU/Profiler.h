@@ -203,7 +203,7 @@ protected:
         for(std::map<std::string, ProfileAgent*>::const_iterator it = m_mapAgents.begin(); it != m_mapAgents.end(); it++)
         {
             const ProfileAgent& agent = *it->second;
-            if (!bSkipIrrelevantEntries || agent.m_dAccumulatedTime>1e-3)
+            if (!bSkipIrrelevantEntries || agent.m_dAccumulatedTime>1e-6)
                 result.push_back(ProfileSummaryItem(it->first, agent.m_dAccumulatedTime, agent.m_nMoney, agent.m_nMeasurements));
         }
 

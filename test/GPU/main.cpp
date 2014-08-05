@@ -9,7 +9,7 @@ using namespace std;
 // tests
 #include "TestGPUKernel.h"
 
-#define NEG_GHOSTS 1
+#define NEG_GHOSTS 0
 
 int main(int argc, const char *argv[])
 {
@@ -52,20 +52,20 @@ int main(int argc, const char *argv[])
                 xg_R[6*Nxghosts + ghostmap::X(ix,iy,iz)] = (Real)ghostmap::X(ix,iy,iz);
 #else
                 xg_L[0*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
-                xg_L[1*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
-                xg_L[2*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
-                xg_L[3*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
+                xg_L[1*Nxghosts + ghostmap::X(ix,iy,iz)] = 0.0;
+                xg_L[2*Nxghosts + ghostmap::X(ix,iy,iz)] = 0.0;
+                xg_L[3*Nxghosts + ghostmap::X(ix,iy,iz)] = 0.0;
                 xg_L[4*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
-                xg_L[5*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
-                xg_L[6*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
+                xg_L[5*Nxghosts + ghostmap::X(ix,iy,iz)] = 2.5;
+                xg_L[6*Nxghosts + ghostmap::X(ix,iy,iz)] = 0.0;
 
                 xg_R[0*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
-                xg_R[1*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
-                xg_R[2*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
-                xg_R[3*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
+                xg_R[1*Nxghosts + ghostmap::X(ix,iy,iz)] = 0.0;
+                xg_R[2*Nxghosts + ghostmap::X(ix,iy,iz)] = 0.0;
+                xg_R[3*Nxghosts + ghostmap::X(ix,iy,iz)] = 0.0;
                 xg_R[4*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
-                xg_R[5*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
-                xg_R[6*Nxghosts + ghostmap::X(ix,iy,iz)] = 1.0;
+                xg_R[5*Nxghosts + ghostmap::X(ix,iy,iz)] = 2.5;
+                xg_R[6*Nxghosts + ghostmap::X(ix,iy,iz)] = 0.0;
 #endif
             }
     for (int iz = 0; iz < NZ; ++iz)
@@ -91,20 +91,20 @@ int main(int argc, const char *argv[])
                 yg_R[6*Nxghosts + ghostmap::Y(ix,iy,iz)] = (Real)ghostmap::Y(ix,iy,iz);
 #else
                 yg_L[0*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
-                yg_L[1*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
-                yg_L[2*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
-                yg_L[3*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
+                yg_L[1*Nxghosts + ghostmap::Y(ix,iy,iz)] = 0.0;
+                yg_L[2*Nxghosts + ghostmap::Y(ix,iy,iz)] = 0.0;
+                yg_L[3*Nxghosts + ghostmap::Y(ix,iy,iz)] = 0.0;
                 yg_L[4*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
-                yg_L[5*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
-                yg_L[6*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
+                yg_L[5*Nxghosts + ghostmap::Y(ix,iy,iz)] = 2.5;
+                yg_L[6*Nxghosts + ghostmap::Y(ix,iy,iz)] = 0.0;
 
                 yg_R[0*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
-                yg_R[1*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
-                yg_R[2*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
-                yg_R[3*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
+                yg_R[1*Nxghosts + ghostmap::Y(ix,iy,iz)] = 0.0;
+                yg_R[2*Nxghosts + ghostmap::Y(ix,iy,iz)] = 0.0;
+                yg_R[3*Nxghosts + ghostmap::Y(ix,iy,iz)] = 0.0;
                 yg_R[4*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
-                yg_R[5*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
-                yg_R[6*Nxghosts + ghostmap::Y(ix,iy,iz)] = 1.0;
+                yg_R[5*Nxghosts + ghostmap::Y(ix,iy,iz)] = 2.5;
+                yg_R[6*Nxghosts + ghostmap::Y(ix,iy,iz)] = 0.0;
 #endif
             }
     RealPtrVec_t xghost_l(7), xghost_r(7), yghost_l(7), yghost_r(7);
@@ -136,25 +136,27 @@ int main(int argc, const char *argv[])
                 interior[6*Ninput + idx] = (Real)idx;
 #else
                 const uint_t idx = ID3(ix,iy,iz,NX,NY);
-                interior[0*Ninput + idx] = 2.0;
-                interior[1*Ninput + idx] = 2.0;
-                interior[2*Ninput + idx] = 2.0;
-                interior[3*Ninput + idx] = 2.0;
-                interior[4*Ninput + idx] = 2.0;
-                interior[5*Ninput + idx] = 2.0;
-                interior[6*Ninput + idx] = 2.0;
+                interior[0*Ninput + idx] = 1.0;
+                interior[1*Ninput + idx] = 0.0;
+                interior[2*Ninput + idx] = 0.0;
+                interior[3*Ninput + idx] = 0.0;
+                interior[4*Ninput + idx] = 1.0;
+                interior[5*Ninput + idx] = 2.5;
+                interior[6*Ninput + idx] = 0.0;
 #endif
             }
     RealPtrVec_t in3D(7);
     for (int i = 0; i < 7; ++i)
         in3D[i] = &interior[i*Ninput];
-    GPU::h2d_3DArray(in3D, nslices);
+    GPU::h2d_3DArray(in3D, nslices+6);
     GPU::h2d_3DArray_wait();
 
     // run Forrest
     TestGPUKernel kernel;
     kernel.run();
     GPU::syncGPU();
+
+    GPU::profiler.printSummary();
 
     // destroy life
     GPU::dealloc();

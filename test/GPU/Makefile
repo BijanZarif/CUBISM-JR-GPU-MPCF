@@ -57,6 +57,7 @@ ifneq "$(findstring localhost.localdomain,$(shell hostname))" "" #Cyrus
 	mpi-inc = /usr/include/openmpi-x86_64
 	mpi-lib = /usr/lib64/openmpi/lib
 	CUFLAGS += -arch=sm_35 -Xptxas -v
+	# CUFLAGS += -arch=sm_35 -Xptxas -v,-dlcm=cg -maxrregcount 90
 	LIBS += -L/usr/local/cuda-6.0/lib64 -lcudart
 endif
 
@@ -101,7 +102,7 @@ VPATH := ../../source/ ../../source/GPU
 OBJECTS  = main.o
 # OBJECTS +=
 # CUDA
-OBJECTS += cudaHostAllocator.o GPUhousehold.o GPUkernels.o
+OBJECTS += cudaHostAllocator.o GPUhousehold.o GPUkernels.o Profiler.o
 
 
 all: GPUTest

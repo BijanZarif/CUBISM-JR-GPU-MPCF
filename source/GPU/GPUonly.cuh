@@ -100,7 +100,7 @@ __device__
 inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, const Real f)
 {
 #ifndef _WENO3_
-
+    // 96 FLOP
     const Real inv6 = 1.0f/6.0f;
     const Real inv3 = 1.0f/3.0f;
     const Real q1 =  10.0f*inv3;
@@ -125,8 +125,8 @@ inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, 
     const Real is2plus = is2 + (Real)WENOEPS;
 
     const Real alpha0 = 1.0f / (10.0f*is0plus*is0plus);
-    const Real alpha1 = 6.0f / (10.0f*is1plus*is1plus);
-    const Real alpha2 = 3.0f / (10.0f*is2plus*is2plus);
+    const Real alpha1 = 6.0f * (1.0f / (10.0f*is1plus*is1plus));
+    const Real alpha2 = 3.0f * (1.0f / (10.0f*is2plus*is2plus));
     const Real alphasumInv = 1.0f / (alpha0+alpha1+alpha2);
 
     const Real omega0 = alpha0 * alphasumInv;
@@ -136,7 +136,7 @@ inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, 
     return omega0*sum0 + omega1*sum1 + omega2*sum2;
 
 #else
-
+    // 28 FLOP
     const Real sum0 = 1.5f*d - 0.5f*e;
     const Real sum1 = 0.5f*(d + c);
 
@@ -144,7 +144,7 @@ inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, 
     const Real is1 = (d-c)*(d-c);
 
     const Real alpha0 = 1.0f / (3.0f * (is0+WENOEPS)*(is0+WENOEPS));
-    const Real alpha1 = 2.0f / (3.0f * (is1+WENOEPS)*(is1+WENOEPS));
+    const Real alpha1 = 2.0f * (1.0f / (3.0f * (is1+WENOEPS)*(is1+WENOEPS)));
 
     const Real omega0 = alpha0 / (alpha0+alpha1);
     const Real omega1 = 1.0f - omega0;
@@ -159,7 +159,7 @@ __device__
 inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, const Real e)
 {
 #ifndef _WENO3_
-
+    // 96 FLOP
     const Real inv6 = 1.0f/6.0f;
     const Real inv3 = 1.0f/3.0f;
     const Real q1 =   4.0f*inv3;
@@ -184,8 +184,8 @@ inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, 
     const Real is2plus = is2 + (Real)WENOEPS;
 
     const Real alpha0 = 1.0f / (10.0f*is0plus*is0plus);
-    const Real alpha1 = 6.0f / (10.0f*is1plus*is1plus);
-    const Real alpha2 = 3.0f / (10.0f*is2plus*is2plus);
+    const Real alpha1 = 6.0f * (1.0f / (10.0f*is1plus*is1plus));
+    const Real alpha2 = 3.0f * (1.0f / (10.0f*is2plus*is2plus));
     const Real alphasumInv = 1.0f / (alpha0+alpha1+alpha2);
 
     const Real omega0 = alpha0 * alphasumInv;
@@ -195,7 +195,7 @@ inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, 
     return omega0*sum0 + omega1*sum1 + omega2*sum2;
 
 #else
-
+    // 28 FLOP
     const Real sum0 = 1.5f*c - 0.5f*b;
     const Real sum1 = 0.5f*(c + d);
 
@@ -203,7 +203,7 @@ inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, 
     const Real is1 = (d-c)*(d-c);
 
     const Real alpha0 = 1.0f / (3.0f * (is0+WENOEPS)*(is0+WENOEPS));
-    const Real alpha1 = 2.0f / (3.0f * (is1+WENOEPS)*(is1+WENOEPS));
+    const Real alpha1 = 2.0f * (1.0f / (3.0f * (is1+WENOEPS)*(is1+WENOEPS)));
 
     const Real omega0 = alpha0 / (alpha0+alpha1);
     const Real omega1 = 1.0f - omega0;
@@ -340,6 +340,8 @@ inline void _load_1ghost_Y(Real& g0, const uint_t iy0, const Real * const ghosts
     g0 = ghosts[GHOSTMAPY(ix, iy0, iz)];
     assert(!isnan(g0));
 }
+
+
 
 
 __device__
@@ -845,7 +847,7 @@ inline void _char_vel_einfeldt(const Real rm, const Real rp,
         const Real pm, const Real pp,
         const Real Gm, const Real Gp,
         const Real Pm, const Real Pp,
-        Real& outm, Real& outp) // ? FLOP
+        Real& outm, Real& outp) // 29 FLOP
 {
     /* *
      * Compute upper and lower bounds of signal velocities for the Riemann
@@ -858,8 +860,8 @@ inline void _char_vel_einfeldt(const Real rm, const Real rp,
      * */
 
     // 1.)
-    assert(rm > 0);
-    assert(rp > 0);
+    assert(rm > 0.0f);
+    assert(rp > 0.0f);
     const Real Rr   = sqrtf(rp / rm);
     const Real Rinv = 1.0f / (1.0f + Rr);
 
@@ -903,6 +905,7 @@ inline Real _char_vel_star(const Real rm, const Real rp,
     const Real facm = rm * (sm - vm);
     const Real facp = rp * (sp - vp);
     return (pp - pm + vm*facm - vp*facp) / (facm - facp);
+    /* return (pp + vm*facm - (pm + vp*facp)) / (facm - facp); */
 }
 
 
@@ -920,9 +923,9 @@ inline Real _hllc_rho(const Real rm, const Real rp,
      * */
 
     // 1.)
-    const int sign_star = ss == 0 ? 0 : (ss < 0 ? -1 : 1);
-    const Real s_minus = min(0.0f, sm);
-    const Real s_pluss = max(0.0f, sp);
+    const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
+    const Real s_minus = fminf(0.0f, sm);
+    const Real s_pluss = fmaxf(0.0f, sp);
 
     // 2.)
     const Real chi_starm = (sm - vm) / (sm - ss);
@@ -937,7 +940,7 @@ inline Real _hllc_rho(const Real rm, const Real rp,
     const Real fp = qp*vp;
 
     // 4.)
-    const Real flux = (0.5f*(1 + sign_star)) * (fm + s_minus*q_deltam) + (0.5*(1 - sign_star)) * (fp + s_pluss*q_deltap);
+    const Real flux = (0.5f*(1.0f + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1.0f - sign_star)) * (fp + s_pluss*q_deltap);
     assert(!isnan(flux));
     return flux;
 }
@@ -958,7 +961,7 @@ inline Real _hllc_vel(const Real rm,  const Real rp,
      * */
 
     // 1.)
-    const int sign_star = ss == 0 ? 0 : (ss < 0 ? -1 : 1);
+    const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
     const Real s_minus  = fminf(0.0f, sm);
     const Real s_pluss  = fmaxf(0.0f, sp);
 
@@ -975,7 +978,7 @@ inline Real _hllc_vel(const Real rm,  const Real rp,
     const Real fp = qp*vdp;
 
     // 4.)
-    const Real flux = (0.5f*(1 + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1 - sign_star)) * (fp + s_pluss*q_deltap);
+    const Real flux = (0.5f*(1.0f + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1.0f - sign_star)) * (fp + s_pluss*q_deltap);
     assert(!isnan(flux));
     assert(!isnan(ss));
     assert(!isnan(sm));
@@ -999,7 +1002,7 @@ inline Real _hllc_pvel(const Real rm, const Real rp,
      * */
 
     // 1.)
-    const int sign_star = ss == 0 ? 0 : (ss < 0 ? -1 : 1);
+    const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
     const Real s_minus  = fminf(0.0f, sm);
     const Real s_pluss  = fmaxf(0.0f, sp);
 
@@ -1016,7 +1019,7 @@ inline Real _hllc_pvel(const Real rm, const Real rp,
     const Real fp = qp*vp + pp;
 
     // 4.)
-    const Real flux = (0.5f*(1 + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1 - sign_star)) * (fp + s_pluss*q_deltap);
+    const Real flux = (0.5f*(1.0f + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1.0f - sign_star)) * (fp + s_pluss*q_deltap);
     assert(!isnan(flux));
     assert(rm > 0);
     assert(rp > 0);
@@ -1043,7 +1046,7 @@ inline Real _hllc_e(const Real rm,  const Real rp,
      * */
 
     // 1.)
-    const int sign_star = ss == 0 ? 0 : (ss < 0 ? -1 : 1);
+    const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
     const Real s_minus  = fminf(0.0f, sm);
     const Real s_pluss  = fmaxf(0.0f, sp);
 
@@ -1060,7 +1063,7 @@ inline Real _hllc_e(const Real rm,  const Real rp,
     const Real fp = vdp*(qp + pp);
 
     // 4.)
-    const Real flux = (0.5f*(1 + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1 - sign_star)) * (fp + s_pluss*q_deltap);
+    const Real flux = (0.5f*(1.0f + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1.0f - sign_star)) * (fp + s_pluss*q_deltap);
     assert(!isnan(flux));
     return flux;
 }
@@ -1070,15 +1073,15 @@ __device__
 inline Real _extraterm_hllc_vel(const Real um, const Real up,
         const Real Gm, const Real Gp,
         const Real Pm, const Real Pp,
-        const Real sm, const Real sp, const Real ss)
+        const Real sm, const Real sp, const Real ss) // 19 FLOP
 {
-    const int sign_star   = (ss == 0) ? 0 : ((ss < 0) ? -1 : 1);
+    const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
     const Real s_minus   = fminf(0.0f, sm);
     const Real s_pluss   = fmaxf(0.0f, sp);
     const Real chi_starm = (sm - um)/(sm - ss) - 1.0f;
     const Real chi_starp = (sp - up)/(sp - ss) - 1.0f;
 
-    return (0.5f*(1 + sign_star))*(um + s_minus*chi_starm) + (0.5f*(1 - sign_star))*(up + s_pluss*chi_starp);
+    return (0.5f*(1.0f + sign_star))*(um + s_minus*chi_starm) + (0.5f*(1.0f - sign_star))*(up + s_pluss*chi_starp);
 }
 
 
