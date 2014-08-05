@@ -234,611 +234,6 @@ inline Real _weno_minus_clipped(const Real a, const Real b, const Real c, const 
 }
 
 
-__device__
-inline void _print_stencil(const Stencil& s, const uint_t ix, const uint_t iy, const uint_t iz)
-{
-    printf("(%d,%d,%d) im3 = %f, im2 = %f, im1 = %f, i = %f, ip1 = %f, ip2 = %f\n",ix,iy,iz,s.im3,s.im2,s.im1,s.i,s.ip1,s.ip2);
-}
-
-
-__device__
-inline void _load_stencil_tex3D_X(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex, const uint_t ix, const uint_t iy, const uint_t iz)
-{
-    // read textures (clamped x-addressing)
-    s.im3 = tex3D(tex, ix-3, iy, iz);
-    s.im2 = tex3D(tex, ix-2, iy, iz);
-    s.im1 = tex3D(tex, ix-1, iy, iz);
-    s.i   = tex3D(tex, ix,   iy, iz);
-    s.ip1 = tex3D(tex, ix+1, iy, iz);
-    s.ip2 = tex3D(tex, ix+2, iy, iz);
-    assert(!isnan(s.im3));
-    assert(!isnan(s.im2));
-    assert(!isnan(s.im1));
-    assert(!isnan(s.i));
-    assert(!isnan(s.ip1));
-    assert(!isnan(s.ip2));
-}
-
-
-__device__
-inline void _load_3ghosts_X(Real& g0, Real& g1, Real& g2, const Real * const ghosts, const uint_t iy, const uint_t iz)
-{
-    g0 = ghosts[GHOSTMAPX(0, iy, iz)];
-    g1 = ghosts[GHOSTMAPX(1, iy, iz)];
-    g2 = ghosts[GHOSTMAPX(2, iy, iz)];
-    assert(!isnan(g0));
-    assert(!isnan(g1));
-    assert(!isnan(g2));
-}
-
-
-__device__
-inline void _load_2ghosts_X(Real& g0, Real& g1, const uint_t ix0, const uint_t ix1, const Real * const ghosts, const uint_t iy, const uint_t iz)
-{
-    assert(ix0 < 3 && ix1 < 3);
-    g0 = ghosts[GHOSTMAPX(ix0, iy, iz)];
-    g1 = ghosts[GHOSTMAPX(ix1, iy, iz)];
-    assert(!isnan(g0));
-    assert(!isnan(g1));
-}
-
-
-__device__
-inline void _load_1ghost_X(Real& g0, const uint_t ix0, const Real * const ghosts, const uint_t iy, const uint_t iz)
-{
-    assert(ix0 < 3);
-    g0 = ghosts[GHOSTMAPX(ix0, iy, iz)];
-    assert(!isnan(g0));
-}
-
-__device__
-inline void _load_stencil_tex3D_Y(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex, const uint_t ix, const uint_t iy, const uint_t iz)
-{
-    // read textures (clamped y-addressing)
-    s.im3 = tex3D(tex, ix, iy-3, iz);
-    s.im2 = tex3D(tex, ix, iy-2, iz);
-    s.im1 = tex3D(tex, ix, iy-1, iz);
-    s.i   = tex3D(tex, ix, iy,   iz);
-    s.ip1 = tex3D(tex, ix, iy+1, iz);
-    s.ip2 = tex3D(tex, ix, iy+2, iz);
-    assert(!isnan(s.im3));
-    assert(!isnan(s.im2));
-    assert(!isnan(s.im1));
-    assert(!isnan(s.i));
-    assert(!isnan(s.ip1));
-    assert(!isnan(s.ip2));
-}
-
-
-__device__
-inline void _load_3ghosts_Y(Real& g0, Real& g1, Real& g2, const Real * const ghosts, const uint_t ix, const uint_t iz)
-{
-    g0 = ghosts[GHOSTMAPY(ix, 0, iz)];
-    g1 = ghosts[GHOSTMAPY(ix, 1, iz)];
-    g2 = ghosts[GHOSTMAPY(ix, 2, iz)];
-    assert(!isnan(g0));
-    assert(!isnan(g1));
-    assert(!isnan(g2));
-}
-
-
-__device__
-inline void _load_2ghosts_Y(Real& g0, Real& g1, const uint_t iy0, const uint_t iy1, const Real * const ghosts, const uint_t ix, const uint_t iz)
-{
-    assert(iy0 < 3 && iy1 < 3);
-    g0 = ghosts[GHOSTMAPY(ix, iy0, iz)];
-    g1 = ghosts[GHOSTMAPY(ix, iy1, iz)];
-    assert(!isnan(g0));
-    assert(!isnan(g1));
-}
-
-
-__device__
-inline void _load_1ghost_Y(Real& g0, const uint_t iy0, const Real * const ghosts, const uint_t ix, const uint_t iz)
-{
-    assert(iy0 < 3);
-    g0 = ghosts[GHOSTMAPY(ix, iy0, iz)];
-    assert(!isnan(g0));
-}
-
-
-
-
-__device__
-inline void _read_stencil_X(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex,
-        const Real * const ghostL, const Real * const ghostR,
-        const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz)
-{
-    switch (ix)
-    {
-        case 0:
-            s.im3 = ghostL[GHOSTMAPX(0, iy, iz-3+global_iz)];
-            s.im2 = ghostL[GHOSTMAPX(1, iy, iz-3+global_iz)];
-            s.im1 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)];
-            s.i   = tex3D(tex, ix,   iy, iz);
-            s.ip1 = tex3D(tex, ix+1, iy, iz);
-            s.ip2 = tex3D(tex, ix+2, iy, iz);
-            break;
-        case 1:
-            s.im3 = ghostL[GHOSTMAPX(1, iy, iz-3+global_iz)];
-            s.im2 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)];
-            s.im1 = tex3D(tex, ix-1, iy, iz);
-            s.i   = tex3D(tex, ix,   iy, iz);
-            s.ip1 = tex3D(tex, ix+1, iy, iz);
-            s.ip2 = tex3D(tex, ix+2, iy, iz);
-            break;
-        case 2:
-            s.im3 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)];
-            s.im2 = tex3D(tex, ix-2, iy, iz);
-            s.im1 = tex3D(tex, ix-1, iy, iz);
-            s.i   = tex3D(tex, ix,   iy, iz);
-            s.ip1 = tex3D(tex, ix+1, iy, iz);
-            s.ip2 = tex3D(tex, ix+2, iy, iz);
-            break;
-        case NXP1-3:
-            s.im3 = tex3D(tex, ix-3, iy, iz);
-            s.im2 = tex3D(tex, ix-2, iy, iz);
-            s.im1 = tex3D(tex, ix-1, iy, iz);
-            s.i   = tex3D(tex, ix,   iy, iz);
-            s.ip1 = tex3D(tex, ix+1, iy, iz);
-            s.ip2 = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)];
-            break;
-        case NXP1-2:
-            s.im3 = tex3D(tex, ix-3, iy, iz);
-            s.im2 = tex3D(tex, ix-2, iy, iz);
-            s.im1 = tex3D(tex, ix-1, iy, iz);
-            s.i   = tex3D(tex, ix,   iy, iz);
-            s.ip1 = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)];
-            s.ip2 = ghostR[GHOSTMAPX(1, iy, iz-3+global_iz)];
-            break;
-        case NXP1-1:
-            s.im3 = tex3D(tex, ix-3, iy, iz);
-            s.im2 = tex3D(tex, ix-2, iy, iz);
-            s.im1 = tex3D(tex, ix-1, iy, iz);
-            s.i   = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)];
-            s.ip1 = ghostR[GHOSTMAPX(1, iy, iz-3+global_iz)];
-            s.ip2 = ghostR[GHOSTMAPX(2, iy, iz-3+global_iz)];
-            break;
-        default:
-            s.im3 = tex3D(tex, ix-3, iy, iz);
-            s.im2 = tex3D(tex, ix-2, iy, iz);
-            s.im1 = tex3D(tex, ix-1, iy, iz);
-            s.i   = tex3D(tex, ix,   iy, iz);
-            s.ip1 = tex3D(tex, ix+1, iy, iz);
-            s.ip2 = tex3D(tex, ix+2, iy, iz);
-            break;
-    }
-    /* if (ix == 0) */
-    /* { */
-    /*     s.im3 = ghostL[GHOSTMAPX(0, iy, iz-3+global_iz)]; */
-    /*     s.im2 = ghostL[GHOSTMAPX(1, iy, iz-3+global_iz)]; */
-    /*     s.im1 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)]; */
-    /*     s.i   = tex3D(tex, ix,   iy, iz); */
-    /*     s.ip1 = tex3D(tex, ix+1, iy, iz); */
-    /*     s.ip2 = tex3D(tex, ix+2, iy, iz); */
-    /* } */
-    /* else if (ix == 1) */
-    /* { */
-    /*     s.im2 = ghostL[GHOSTMAPX(1, iy, iz-3+global_iz)]; */
-    /*     s.im1 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)]; */
-    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
-    /*     s.i   = tex3D(tex, ix,   iy, iz); */
-    /*     s.ip1 = tex3D(tex, ix+1, iy, iz); */
-    /*     s.ip2 = tex3D(tex, ix+2, iy, iz); */
-    /* } */
-    /* else if (ix == 2) */
-    /* { */
-    /*     s.im1 = ghostL[GHOSTMAPX(2, iy, iz-3+global_iz)]; */
-    /*     s.im2 = tex3D(tex, ix-2, iy, iz); */
-    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
-    /*     s.i   = tex3D(tex, ix,   iy, iz); */
-    /*     s.ip1 = tex3D(tex, ix+1, iy, iz); */
-    /*     s.ip2 = tex3D(tex, ix+2, iy, iz); */
-    /* } */
-    /* else if (ix == NXP1-3) */
-    /* { */
-    /*     s.im3 = tex3D(tex, ix-3, iy, iz); */
-    /*     s.im2 = tex3D(tex, ix-2, iy, iz); */
-    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
-    /*     s.i   = tex3D(tex, ix,   iy, iz); */
-    /*     s.ip1 = tex3D(tex, ix+1, iy, iz); */
-    /*     s.ip2 = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)]; */
-    /* } */
-    /* else if (ix == NXP1-2) */
-    /* { */
-    /*     s.im3 = tex3D(tex, ix-3, iy, iz); */
-    /*     s.im2 = tex3D(tex, ix-2, iy, iz); */
-    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
-    /*     s.i   = tex3D(tex, ix,   iy, iz); */
-    /*     s.ip1 = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)]; */
-    /*     s.ip2 = ghostR[GHOSTMAPX(1, iy, iz-3+global_iz)]; */
-    /* } */
-    /* else if (ix == NXP1-1) */
-    /* { */
-    /*     s.im3 = tex3D(tex, ix-3, iy, iz); */
-    /*     s.im2 = tex3D(tex, ix-2, iy, iz); */
-    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
-    /*     s.i   = ghostR[GHOSTMAPX(0, iy, iz-3+global_iz)]; */
-    /*     s.ip1 = ghostR[GHOSTMAPX(1, iy, iz-3+global_iz)]; */
-    /*     s.ip2 = ghostR[GHOSTMAPX(2, iy, iz-3+global_iz)]; */
-    /* } */
-    /* else */
-    /* { */
-    /*     s.im3 = tex3D(tex, ix-3, iy, iz); */
-    /*     s.im2 = tex3D(tex, ix-2, iy, iz); */
-    /*     s.im1 = tex3D(tex, ix-1, iy, iz); */
-    /*     s.i   = tex3D(tex, ix,   iy, iz); */
-    /*     s.ip1 = tex3D(tex, ix+1, iy, iz); */
-    /*     s.ip2 = tex3D(tex, ix+2, iy, iz); */
-    /* } */
-    assert(!isnan(s.im3));
-    assert(!isnan(s.im2));
-    assert(!isnan(s.im1));
-    assert(!isnan(s.i));
-    assert(!isnan(s.ip1));
-    assert(!isnan(s.ip2));
-}
-
-
-__device__
-inline void _read_stencil_Y(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex,
-        const Real * const ghostL, const Real * const ghostR,
-        const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz)
-{
-    switch (iy)
-    {
-        case 0:
-            s.im3 = ghostL[GHOSTMAPY(ix, 0, iz-3+global_iz)];
-            s.im2 = ghostL[GHOSTMAPY(ix, 1, iz-3+global_iz)];
-            s.im1 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)];
-            s.i   = tex3D(tex, ix, iy,   iz);
-            s.ip1 = tex3D(tex, ix, iy+1, iz);
-            s.ip2 = tex3D(tex, ix, iy+2, iz);
-            break;
-        case 1:
-            s.im3 = ghostL[GHOSTMAPY(ix, 1, iz-3+global_iz)];
-            s.im2 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)];
-            s.im1 = tex3D(tex, ix, iy-1, iz);
-            s.i   = tex3D(tex, ix, iy,   iz);
-            s.ip1 = tex3D(tex, ix, iy+1, iz);
-            s.ip2 = tex3D(tex, ix, iy+2, iz);
-            break;
-        case 2:
-            s.im3 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)];
-            s.im2 = tex3D(tex, ix, iy-2, iz);
-            s.im1 = tex3D(tex, ix, iy-1, iz);
-            s.i   = tex3D(tex, ix, iy,   iz);
-            s.ip1 = tex3D(tex, ix, iy+1, iz);
-            s.ip2 = tex3D(tex, ix, iy+2, iz);
-            break;
-        case NYP1-3:
-            s.im3 = tex3D(tex, ix, iy-3, iz);
-            s.im2 = tex3D(tex, ix, iy-2, iz);
-            s.im1 = tex3D(tex, ix, iy-1, iz);
-            s.i   = tex3D(tex, ix, iy,   iz);
-            s.ip1 = tex3D(tex, ix, iy+1, iz);
-            s.ip2 = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)];
-            break;
-        case NYP1-2:
-            s.im3 = tex3D(tex, ix, iy-3, iz);
-            s.im2 = tex3D(tex, ix, iy-2, iz);
-            s.im1 = tex3D(tex, ix, iy-1, iz);
-            s.i   = tex3D(tex, ix, iy,   iz);
-            s.ip1 = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)];
-            s.ip2 = ghostR[GHOSTMAPY(ix, 1, iz-3+global_iz)];
-            break;
-        case NYP1-1:
-            s.im3 = tex3D(tex, ix, iy-3, iz);
-            s.im2 = tex3D(tex, ix, iy-2, iz);
-            s.im1 = tex3D(tex, ix, iy-1, iz);
-            s.i   = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)];
-            s.ip1 = ghostR[GHOSTMAPY(ix, 1, iz-3+global_iz)];
-            s.ip2 = ghostR[GHOSTMAPY(ix, 2, iz-3+global_iz)];
-            break;
-        default:
-            s.im3 = tex3D(tex, ix, iy-3, iz);
-            s.im2 = tex3D(tex, ix, iy-2, iz);
-            s.im1 = tex3D(tex, ix, iy-1, iz);
-            s.i   = tex3D(tex, ix, iy,   iz);
-            s.ip1 = tex3D(tex, ix, iy+1, iz);
-            s.ip2 = tex3D(tex, ix, iy+2, iz);
-            break;
-    }
-    /* if (iy == 0) */
-    /* { */
-    /*     s.im3 = ghostL[GHOSTMAPY(ix, 0, iz-3+global_iz)]; */
-    /*     s.im2 = ghostL[GHOSTMAPY(ix, 1, iz-3+global_iz)]; */
-    /*     s.im1 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)]; */
-    /*     s.i   = tex3D(tex, ix, iy,   iz); */
-    /*     s.ip1 = tex3D(tex, ix, iy+1, iz); */
-    /*     s.ip2 = tex3D(tex, ix, iy+2, iz); */
-    /* } */
-    /* else if (iy == 1) */
-    /* { */
-    /*     s.im3 = ghostL[GHOSTMAPY(ix, 1, iz-3+global_iz)]; */
-    /*     s.im2 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)]; */
-    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
-    /*     s.i   = tex3D(tex, ix, iy,   iz); */
-    /*     s.ip1 = tex3D(tex, ix, iy+1, iz); */
-    /*     s.ip2 = tex3D(tex, ix, iy+2, iz); */
-    /* } */
-    /* else if (iy == 2) */
-    /* { */
-    /*     s.im3 = ghostL[GHOSTMAPY(ix, 2, iz-3+global_iz)]; */
-    /*     s.im2 = tex3D(tex, ix, iy-2, iz); */
-    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
-    /*     s.i   = tex3D(tex, ix, iy,   iz); */
-    /*     s.ip1 = tex3D(tex, ix, iy+1, iz); */
-    /*     s.ip2 = tex3D(tex, ix, iy+2, iz); */
-    /* } */
-    /* else if (iy == NYP1-3) */
-    /* { */
-    /*     s.im3 = tex3D(tex, ix, iy-3, iz); */
-    /*     s.im2 = tex3D(tex, ix, iy-2, iz); */
-    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
-    /*     s.i   = tex3D(tex, ix, iy,   iz); */
-    /*     s.ip1 = tex3D(tex, ix, iy+1, iz); */
-    /*     s.ip2 = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)]; */
-    /* } */
-    /* else if (iy == NYP1-2) */
-    /* { */
-    /*     s.im3 = tex3D(tex, ix, iy-3, iz); */
-    /*     s.im2 = tex3D(tex, ix, iy-2, iz); */
-    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
-    /*     s.i   = tex3D(tex, ix, iy,   iz); */
-    /*     s.ip1 = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)]; */
-    /*     s.ip2 = ghostR[GHOSTMAPY(ix, 1, iz-3+global_iz)]; */
-    /* } */
-    /* else if (iy == NYP1-1) */
-    /* { */
-    /*     s.im3 = tex3D(tex, ix, iy-3, iz); */
-    /*     s.im2 = tex3D(tex, ix, iy-2, iz); */
-    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
-    /*     s.i   = ghostR[GHOSTMAPY(ix, 0, iz-3+global_iz)]; */
-    /*     s.ip1 = ghostR[GHOSTMAPY(ix, 1, iz-3+global_iz)]; */
-    /*     s.ip2 = ghostR[GHOSTMAPY(ix, 2, iz-3+global_iz)]; */
-    /* } */
-    /* else */
-    /* { */
-    /*     s.im3 = tex3D(tex, ix, iy-3, iz); */
-    /*     s.im2 = tex3D(tex, ix, iy-2, iz); */
-    /*     s.im1 = tex3D(tex, ix, iy-1, iz); */
-    /*     s.i   = tex3D(tex, ix, iy,   iz); */
-    /*     s.ip1 = tex3D(tex, ix, iy+1, iz); */
-    /*     s.ip2 = tex3D(tex, ix, iy+2, iz); */
-    /* } */
-    assert(!isnan(s.im3));
-    assert(!isnan(s.im2));
-    assert(!isnan(s.im1));
-    assert(!isnan(s.i));
-    assert(!isnan(s.ip1));
-    assert(!isnan(s.ip2));
-}
-
-
-__device__
-inline void _read_stencil_Z(Stencil& s, const texture<float, 3, cudaReadModeElementType> tex,
-        const uint_t ix, const uint_t iy, const uint_t iz)
-{
-    s.im3 = tex3D(tex, ix, iy, iz-3);
-    s.im2 = tex3D(tex, ix, iy, iz-2);
-    s.im1 = tex3D(tex, ix, iy, iz-1);
-    s.i   = tex3D(tex, ix, iy, iz);
-    s.ip1 = tex3D(tex, ix, iy, iz+1);
-    s.ip2 = tex3D(tex, ix, iy, iz+2);
-    assert(!isnan(s.im3));
-    assert(!isnan(s.im2));
-    assert(!isnan(s.im1));
-    assert(!isnan(s.i));
-    assert(!isnan(s.ip1));
-    assert(!isnan(s.ip2));
-}
-
-
-__device__
-inline void _xfetch_data(const texture<float, 3, cudaReadModeElementType> tex,
-        const Real * const ghostL, const Real * const ghostR,
-        const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz,
-        Real& qm3, Real& qm2, Real& qm1, Real& qp1, Real& qp2, Real& qp3)
-{
-    // Indexers for the left ghosts.  The starting element is in the
-    // outermost layer.  iz must be shifted according to the currently
-    // processed chunk, since all of the xghosts reside on the GPU.
-
-    const uint_t idxm1 = GHOSTMAPX(2, iy, iz-3+global_iz);
-    const uint_t idxm2 = GHOSTMAPX(1, iy, iz-3+global_iz);
-    const uint_t idxm3 = GHOSTMAPX(0, iy, iz-3+global_iz);
-
-    // Indexers for the right ghosts.  The starting element is in the
-    // innermost layer.  iz must be shifted according to the currently
-    // processed chunk, since all of the xghosts reside on the GPU.
-
-    const uint_t idxp1 = GHOSTMAPX(0, iy, iz-3+global_iz);
-    const uint_t idxp2 = GHOSTMAPX(1, iy, iz-3+global_iz);
-    const uint_t idxp3 = GHOSTMAPX(2, iy, iz-3+global_iz);
-
-    if (ix == 0)
-    {
-        qm3 = ghostL[idxm3];
-        qm2 = ghostL[idxm2];
-        qm1 = ghostL[idxm1];
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = tex3D(tex, ix+1, iy, iz);
-        qp3 = tex3D(tex, ix+2, iy, iz);
-    }
-    else if (ix == 1)
-    {
-        qm3 = ghostL[idxm2];
-        qm2 = ghostL[idxm1];
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = tex3D(tex, ix+1, iy, iz);
-        qp3 = tex3D(tex, ix+2, iy, iz);
-    }
-    else if (ix == 2)
-    {
-        qm3 = ghostL[idxm1];
-        qm2 = tex3D(tex, ix-2, iy, iz);
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = tex3D(tex, ix+1, iy, iz);
-        qp3 = tex3D(tex, ix+2, iy, iz);
-    }
-    else if (ix == NXP1-3)
-    {
-        qm3 = tex3D(tex, ix-3, iy, iz);
-        qm2 = tex3D(tex, ix-2, iy, iz);
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = tex3D(tex, ix+1, iy, iz);
-        qp3 = ghostR[idxp1];
-    }
-    else if (ix == NXP1-2)
-    {
-        qm3 = tex3D(tex, ix-3, iy, iz);
-        qm2 = tex3D(tex, ix-2, iy, iz);
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = ghostR[idxp1];
-        qp3 = ghostR[idxp2];
-    }
-    else if (ix == NXP1-1)
-    {
-        qm3 = tex3D(tex, ix-3, iy, iz);
-        qm2 = tex3D(tex, ix-2, iy, iz);
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = ghostR[idxp1];
-        qp2 = ghostR[idxp2];
-        qp3 = ghostR[idxp3];
-    }
-    else
-    {
-        qm3 = tex3D(tex, ix-3, iy, iz);
-        qm2 = tex3D(tex, ix-2, iy, iz);
-        qm1 = tex3D(tex, ix-1, iy, iz);
-        qp1 = tex3D(tex, ix,   iy, iz);
-        qp2 = tex3D(tex, ix+1, iy, iz);
-        qp3 = tex3D(tex, ix+2, iy, iz);
-    }
-    assert(!isnan(qm3));
-    assert(!isnan(qm2));
-    assert(!isnan(qm1));
-    assert(!isnan(qp1));
-    assert(!isnan(qp2));
-    assert(!isnan(qp3));
-}
-
-
-__device__
-inline void _yfetch_data(const texture<float, 3, cudaReadModeElementType> tex,
-        const Real* const ghostL, const Real* const ghostR,
-        const uint_t ix, const uint_t iy, const uint_t iz, const uint_t global_iz,
-        Real& qm3, Real& qm2, Real& qm1, Real& qp1, Real& qp2, Real& qp3)
-{
-    // Indexers for the left ghosts.  The starting element is in the
-    // outermost layer.  iz must be shifted according to the currently
-    // processed chunk, since all of the yghosts reside on the GPU.
-    const uint_t idxm1 = GHOSTMAPY(ix, 2, iz-3+global_iz);
-    const uint_t idxm2 = GHOSTMAPY(ix, 1, iz-3+global_iz);
-    const uint_t idxm3 = GHOSTMAPY(ix, 0, iz-3+global_iz);
-
-    // Indexers for the right ghosts.  The starting element is in the
-    // innermost layer.  iz must be shifted according to the currently
-    // processed chunk, since all of the yghosts reside on the GPU.
-    const uint_t idxp1 = GHOSTMAPY(ix, 0, iz-3+global_iz);
-    const uint_t idxp2 = GHOSTMAPY(ix, 1, iz-3+global_iz);
-    const uint_t idxp3 = GHOSTMAPY(ix, 2, iz-3+global_iz);
-
-    if (iy == 0)
-    {
-        qm3 = ghostL[idxm3];
-        qm2 = ghostL[idxm2];
-        qm1 = ghostL[idxm1];
-        qp1 = tex3D(tex, ix, iy,   iz);
-        qp2 = tex3D(tex, ix, iy+1, iz);
-        qp3 = tex3D(tex, ix, iy+2, iz);
-    }
-    else if (iy == 1)
-    {
-        qm3 = ghostL[idxm2];
-        qm2 = ghostL[idxm1];
-        qm1 = tex3D(tex, ix, iy-1, iz);
-        qp1 = tex3D(tex, ix, iy,   iz);
-        qp2 = tex3D(tex, ix, iy+1, iz);
-        qp3 = tex3D(tex, ix, iy+2, iz);
-    }
-    else if (iy == 2)
-    {
-        qm3 = ghostL[idxm1];
-        qm2 = tex3D(tex, ix, iy-2, iz);
-        qm1 = tex3D(tex, ix, iy-1, iz);
-        qp1 = tex3D(tex, ix, iy,   iz);
-        qp2 = tex3D(tex, ix, iy+1, iz);
-        qp3 = tex3D(tex, ix, iy+2, iz);
-    }
-    else if (iy == NYP1-3)
-    {
-        qm3 = tex3D(tex, ix, iy-3, iz);
-        qm2 = tex3D(tex, ix, iy-2, iz);
-        qm1 = tex3D(tex, ix, iy-1, iz);
-        qp1 = tex3D(tex, ix, iy,   iz);
-        qp2 = tex3D(tex, ix, iy+1, iz);
-        qp3 = ghostR[idxp1];
-    }
-    else if (iy == NYP1-2)
-    {
-        qm3 = tex3D(tex, ix, iy-3, iz);
-        qm2 = tex3D(tex, ix, iy-2, iz);
-        qm1 = tex3D(tex, ix, iy-1, iz);
-        qp1 = tex3D(tex, ix, iy,   iz);
-        qp2 = ghostR[idxp1];
-        qp3 = ghostR[idxp2];
-    }
-    else if (iy == NYP1-1)
-    {
-        qm3 = tex3D(tex, ix, iy-3, iz);
-        qm2 = tex3D(tex, ix, iy-2, iz);
-        qm1 = tex3D(tex, ix, iy-1, iz);
-        qp1 = ghostR[idxp1];
-        qp2 = ghostR[idxp2];
-        qp3 = ghostR[idxp3];
-    }
-    else
-    {
-        qm3 = tex3D(tex, ix, iy-3, iz);
-        qm2 = tex3D(tex, ix, iy-2, iz);
-        qm1 = tex3D(tex, ix, iy-1, iz);
-        qp1 = tex3D(tex, ix, iy,   iz);
-        qp2 = tex3D(tex, ix, iy+1, iz);
-        qp3 = tex3D(tex, ix, iy+2, iz);
-    }
-    assert(!isnan(qm3));
-    assert(!isnan(qm2));
-    assert(!isnan(qm1));
-    assert(!isnan(qp1));
-    assert(!isnan(qp2));
-    assert(!isnan(qp3));
-}
-
-
-__device__
-inline void _zfetch_data(const texture<float, 3, cudaReadModeElementType> tex,
-        const uint_t ix, const uint_t iy, const uint_t iz,
-        Real& qm3, Real& qm2, Real& qm1, Real& qp1, Real& qp2, Real& qp3)
-{
-    qm3 = tex3D(tex, ix, iy, iz-3);
-    qm2 = tex3D(tex, ix, iy, iz-2);
-    qm1 = tex3D(tex, ix, iy, iz-1);
-    qp1 = tex3D(tex, ix, iy, iz);
-    qp2 = tex3D(tex, ix, iy, iz+1);
-    qp3 = tex3D(tex, ix, iy, iz+2);
-    assert(!isnan(qm3));
-    assert(!isnan(qm2));
-    assert(!isnan(qm1));
-    assert(!isnan(qp1));
-    assert(!isnan(qp2));
-    assert(!isnan(qp3));
-}
 
 
 __device__
@@ -1107,3 +502,651 @@ inline void _fetch_flux(const uint_t ix, const uint_t iy, const uint_t iz,
     assert(!isnan(fzp));
     assert(!isnan(fzm));
 }
+
+
+__device__
+inline void _load_internal_X(const uint_t ix, const uint_t iy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t dummy1,
+        const devPtrSet * const dummy2)
+{
+    // texture only
+    r[0]  = tex3D(texR, ix-3, iy, iz);
+    r[1]  = tex3D(texR, ix-2, iy, iz);
+    r[2]  = tex3D(texR, ix-1, iy, iz);
+    r[3]  = tex3D(texR, ix,   iy, iz);
+    r[4]  = tex3D(texR, ix+1, iy, iz);
+    r[5]  = tex3D(texR, ix+2, iy, iz);
+
+    u[0]  = tex3D(texU, ix-3, iy, iz);
+    u[1]  = tex3D(texU, ix-2, iy, iz);
+    u[2]  = tex3D(texU, ix-1, iy, iz);
+    u[3]  = tex3D(texU, ix,   iy, iz);
+    u[4]  = tex3D(texU, ix+1, iy, iz);
+    u[5]  = tex3D(texU, ix+2, iy, iz);
+
+    v[0]  = tex3D(texV, ix-3, iy, iz);
+    v[1]  = tex3D(texV, ix-2, iy, iz);
+    v[2]  = tex3D(texV, ix-1, iy, iz);
+    v[3]  = tex3D(texV, ix,   iy, iz);
+    v[4]  = tex3D(texV, ix+1, iy, iz);
+    v[5]  = tex3D(texV, ix+2, iy, iz);
+
+    w[0]  = tex3D(texW, ix-3, iy, iz);
+    w[1]  = tex3D(texW, ix-2, iy, iz);
+    w[2]  = tex3D(texW, ix-1, iy, iz);
+    w[3]  = tex3D(texW, ix,   iy, iz);
+    w[4]  = tex3D(texW, ix+1, iy, iz);
+    w[5]  = tex3D(texW, ix+2, iy, iz);
+
+    e[0]  = tex3D(texE, ix-3, iy, iz);
+    e[1]  = tex3D(texE, ix-2, iy, iz);
+    e[2]  = tex3D(texE, ix-1, iy, iz);
+    e[3]  = tex3D(texE, ix,   iy, iz);
+    e[4]  = tex3D(texE, ix+1, iy, iz);
+    e[5]  = tex3D(texE, ix+2, iy, iz);
+
+    G[0]  = tex3D(texG, ix-3, iy, iz);
+    G[1]  = tex3D(texG, ix-2, iy, iz);
+    G[2]  = tex3D(texG, ix-1, iy, iz);
+    G[3]  = tex3D(texG, ix,   iy, iz);
+    G[4]  = tex3D(texG, ix+1, iy, iz);
+    G[5]  = tex3D(texG, ix+2, iy, iz);
+
+    P[0]  = tex3D(texP, ix-3, iy, iz);
+    P[1]  = tex3D(texP, ix-2, iy, iz);
+    P[2]  = tex3D(texP, ix-1, iy, iz);
+    P[3]  = tex3D(texP, ix,   iy, iz);
+    P[4]  = tex3D(texP, ix+1, iy, iz);
+    P[5]  = tex3D(texP, ix+2, iy, iz);
+}
+
+
+__device__
+inline void _load_internal_Y(const uint_t ix, const uint_t iy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t dummy1,
+        const devPtrSet * const dummy2)
+{
+    // texture only
+    r[0]  = tex3D(texR, ix, iy-3, iz);
+    r[1]  = tex3D(texR, ix, iy-2, iz);
+    r[2]  = tex3D(texR, ix, iy-1, iz);
+    r[3]  = tex3D(texR, ix, iy,   iz);
+    r[4]  = tex3D(texR, ix, iy+1, iz);
+    r[5]  = tex3D(texR, ix, iy+2, iz);
+
+    u[0]  = tex3D(texU, ix, iy-3, iz);
+    u[1]  = tex3D(texU, ix, iy-2, iz);
+    u[2]  = tex3D(texU, ix, iy-1, iz);
+    u[3]  = tex3D(texU, ix, iy,   iz);
+    u[4]  = tex3D(texU, ix, iy+1, iz);
+    u[5]  = tex3D(texU, ix, iy+2, iz);
+
+    v[0]  = tex3D(texV, ix, iy-3, iz);
+    v[1]  = tex3D(texV, ix, iy-2, iz);
+    v[2]  = tex3D(texV, ix, iy-1, iz);
+    v[3]  = tex3D(texV, ix, iy,   iz);
+    v[4]  = tex3D(texV, ix, iy+1, iz);
+    v[5]  = tex3D(texV, ix, iy+2, iz);
+
+    w[0]  = tex3D(texW, ix, iy-3, iz);
+    w[1]  = tex3D(texW, ix, iy-2, iz);
+    w[2]  = tex3D(texW, ix, iy-1, iz);
+    w[3]  = tex3D(texW, ix, iy,   iz);
+    w[4]  = tex3D(texW, ix, iy+1, iz);
+    w[5]  = tex3D(texW, ix, iy+2, iz);
+
+    e[0]  = tex3D(texE, ix, iy-3, iz);
+    e[1]  = tex3D(texE, ix, iy-2, iz);
+    e[2]  = tex3D(texE, ix, iy-1, iz);
+    e[3]  = tex3D(texE, ix, iy,   iz);
+    e[4]  = tex3D(texE, ix, iy+1, iz);
+    e[5]  = tex3D(texE, ix, iy+2, iz);
+
+    G[0]  = tex3D(texG, ix, iy-3, iz);
+    G[1]  = tex3D(texG, ix, iy-2, iz);
+    G[2]  = tex3D(texG, ix, iy-1, iz);
+    G[3]  = tex3D(texG, ix, iy,   iz);
+    G[4]  = tex3D(texG, ix, iy+1, iz);
+    G[5]  = tex3D(texG, ix, iy+2, iz);
+
+    P[0]  = tex3D(texP, ix, iy-3, iz);
+    P[1]  = tex3D(texP, ix, iy-2, iz);
+    P[2]  = tex3D(texP, ix, iy-1, iz);
+    P[3]  = tex3D(texP, ix, iy,   iz);
+    P[4]  = tex3D(texP, ix, iy+1, iz);
+    P[5]  = tex3D(texP, ix, iy+2, iz);
+}
+
+
+__device__
+inline void _load_internal_Z(const uint_t ix, const uint_t iy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t dummy1,
+        const devPtrSet * const dummy2)
+{
+    // texture only
+    r[0]  = tex3D(texR, ix, iy, iz-3);
+    r[1]  = tex3D(texR, ix, iy, iz-2);
+    r[2]  = tex3D(texR, ix, iy, iz-1);
+    r[3]  = tex3D(texR, ix, iy, iz);
+    r[4]  = tex3D(texR, ix, iy, iz+1);
+    r[5]  = tex3D(texR, ix, iy, iz+2);
+
+    u[0]  = tex3D(texU, ix, iy, iz-3);
+    u[1]  = tex3D(texU, ix, iy, iz-2);
+    u[2]  = tex3D(texU, ix, iy, iz-1);
+    u[3]  = tex3D(texU, ix, iy, iz);
+    u[4]  = tex3D(texU, ix, iy, iz+1);
+    u[5]  = tex3D(texU, ix, iy, iz+2);
+
+    v[0]  = tex3D(texV, ix, iy, iz-3);
+    v[1]  = tex3D(texV, ix, iy, iz-2);
+    v[2]  = tex3D(texV, ix, iy, iz-1);
+    v[3]  = tex3D(texV, ix, iy, iz);
+    v[4]  = tex3D(texV, ix, iy, iz+1);
+    v[5]  = tex3D(texV, ix, iy, iz+2);
+
+    w[0]  = tex3D(texW, ix, iy, iz-3);
+    w[1]  = tex3D(texW, ix, iy, iz-2);
+    w[2]  = tex3D(texW, ix, iy, iz-1);
+    w[3]  = tex3D(texW, ix, iy, iz);
+    w[4]  = tex3D(texW, ix, iy, iz+1);
+    w[5]  = tex3D(texW, ix, iy, iz+2);
+
+    e[0]  = tex3D(texE, ix, iy, iz-3);
+    e[1]  = tex3D(texE, ix, iy, iz-2);
+    e[2]  = tex3D(texE, ix, iy, iz-1);
+    e[3]  = tex3D(texE, ix, iy, iz);
+    e[4]  = tex3D(texE, ix, iy, iz+1);
+    e[5]  = tex3D(texE, ix, iy, iz+2);
+
+    G[0]  = tex3D(texG, ix, iy, iz-3);
+    G[1]  = tex3D(texG, ix, iy, iz-2);
+    G[2]  = tex3D(texG, ix, iy, iz-1);
+    G[3]  = tex3D(texG, ix, iy, iz);
+    G[4]  = tex3D(texG, ix, iy, iz+1);
+    G[5]  = tex3D(texG, ix, iy, iz+2);
+
+    P[0]  = tex3D(texP, ix, iy, iz-3);
+    P[1]  = tex3D(texP, ix, iy, iz-2);
+    P[2]  = tex3D(texP, ix, iy, iz-1);
+    P[3]  = tex3D(texP, ix, iy, iz);
+    P[4]  = tex3D(texP, ix, iy, iz+1);
+    P[5]  = tex3D(texP, ix, iy, iz+2);
+}
+
+
+
+
+template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
+__device__ inline void _load_1X(const uint_t dummy, const uint_t iy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t global_iz,
+        const devPtrSet * const ghost)
+{
+    // GMEM
+    const uint_t id0 = GHOSTMAPX(ghostStart, iy, iz-3+global_iz);
+
+    r[haloStart] = ghost->r[id0];
+    u[haloStart] = ghost->u[id0];
+    v[haloStart] = ghost->v[id0];
+    w[haloStart] = ghost->w[id0];
+    e[haloStart] = ghost->e[id0];
+    G[haloStart] = ghost->G[id0];
+    P[haloStart] = ghost->P[id0];
+
+    // texture
+    r[texStart+0]  = tex3D(texR, ix0+0, iy, iz);
+    r[texStart+1]  = tex3D(texR, ix0+1, iy, iz);
+    r[texStart+2]  = tex3D(texR, ix0+2, iy, iz);
+    r[texStart+3]  = tex3D(texR, ix0+3, iy, iz);
+    r[texStart+4]  = tex3D(texR, ix0+4, iy, iz);
+
+    u[texStart+0]  = tex3D(texU, ix0+0, iy, iz);
+    u[texStart+1]  = tex3D(texU, ix0+1, iy, iz);
+    u[texStart+2]  = tex3D(texU, ix0+2, iy, iz);
+    u[texStart+3]  = tex3D(texU, ix0+3, iy, iz);
+    u[texStart+4]  = tex3D(texU, ix0+4, iy, iz);
+
+    v[texStart+0]  = tex3D(texV, ix0+0, iy, iz);
+    v[texStart+1]  = tex3D(texV, ix0+1, iy, iz);
+    v[texStart+2]  = tex3D(texV, ix0+2, iy, iz);
+    v[texStart+3]  = tex3D(texV, ix0+3, iy, iz);
+    v[texStart+4]  = tex3D(texV, ix0+4, iy, iz);
+
+    w[texStart+0]  = tex3D(texW, ix0+0, iy, iz);
+    w[texStart+1]  = tex3D(texW, ix0+1, iy, iz);
+    w[texStart+2]  = tex3D(texW, ix0+2, iy, iz);
+    w[texStart+3]  = tex3D(texW, ix0+3, iy, iz);
+    w[texStart+4]  = tex3D(texW, ix0+4, iy, iz);
+
+    e[texStart+0]  = tex3D(texE, ix0+0, iy, iz);
+    e[texStart+1]  = tex3D(texE, ix0+1, iy, iz);
+    e[texStart+2]  = tex3D(texE, ix0+2, iy, iz);
+    e[texStart+3]  = tex3D(texE, ix0+3, iy, iz);
+    e[texStart+4]  = tex3D(texE, ix0+4, iy, iz);
+
+    G[texStart+0]  = tex3D(texG, ix0+0, iy, iz);
+    G[texStart+1]  = tex3D(texG, ix0+1, iy, iz);
+    G[texStart+2]  = tex3D(texG, ix0+2, iy, iz);
+    G[texStart+3]  = tex3D(texG, ix0+3, iy, iz);
+    G[texStart+4]  = tex3D(texG, ix0+4, iy, iz);
+
+    P[texStart+0]  = tex3D(texP, ix0+0, iy, iz);
+    P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
+    P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
+    P[texStart+3]  = tex3D(texP, ix0+3, iy, iz);
+    P[texStart+4]  = tex3D(texP, ix0+4, iy, iz);
+}
+
+template <uint_t iy0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
+__device__ inline void _load_1Y(const uint_t ix, const uint_t dummy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t global_iz,
+        const devPtrSet * const ghost)
+{
+    // GMEM
+    const uint_t id0 = GHOSTMAPY(ix, ghostStart, iz-3+global_iz);
+
+    r[haloStart] = ghost->r[id0];
+    u[haloStart] = ghost->u[id0];
+    v[haloStart] = ghost->v[id0];
+    w[haloStart] = ghost->w[id0];
+    e[haloStart] = ghost->e[id0];
+    G[haloStart] = ghost->G[id0];
+    P[haloStart] = ghost->P[id0];
+
+    // texture
+    r[texStart+0]  = tex3D(texR, ix, iy0+0, iz);
+    r[texStart+1]  = tex3D(texR, ix, iy0+1, iz);
+    r[texStart+2]  = tex3D(texR, ix, iy0+2, iz);
+    r[texStart+3]  = tex3D(texR, ix, iy0+3, iz);
+    r[texStart+4]  = tex3D(texR, ix, iy0+4, iz);
+
+    u[texStart+0]  = tex3D(texU, ix, iy0+0, iz);
+    u[texStart+1]  = tex3D(texU, ix, iy0+1, iz);
+    u[texStart+2]  = tex3D(texU, ix, iy0+2, iz);
+    u[texStart+3]  = tex3D(texU, ix, iy0+3, iz);
+    u[texStart+4]  = tex3D(texU, ix, iy0+4, iz);
+
+    v[texStart+0]  = tex3D(texV, ix, iy0+0, iz);
+    v[texStart+1]  = tex3D(texV, ix, iy0+1, iz);
+    v[texStart+2]  = tex3D(texV, ix, iy0+2, iz);
+    v[texStart+3]  = tex3D(texV, ix, iy0+3, iz);
+    v[texStart+4]  = tex3D(texV, ix, iy0+4, iz);
+
+    w[texStart+0]  = tex3D(texW, ix, iy0+0, iz);
+    w[texStart+1]  = tex3D(texW, ix, iy0+1, iz);
+    w[texStart+2]  = tex3D(texW, ix, iy0+2, iz);
+    w[texStart+3]  = tex3D(texW, ix, iy0+3, iz);
+    w[texStart+4]  = tex3D(texW, ix, iy0+4, iz);
+
+    e[texStart+0]  = tex3D(texE, ix, iy0+0, iz);
+    e[texStart+1]  = tex3D(texE, ix, iy0+1, iz);
+    e[texStart+2]  = tex3D(texE, ix, iy0+2, iz);
+    e[texStart+3]  = tex3D(texE, ix, iy0+3, iz);
+    e[texStart+4]  = tex3D(texE, ix, iy0+4, iz);
+
+    G[texStart+0]  = tex3D(texG, ix, iy0+0, iz);
+    G[texStart+1]  = tex3D(texG, ix, iy0+1, iz);
+    G[texStart+2]  = tex3D(texG, ix, iy0+2, iz);
+    G[texStart+3]  = tex3D(texG, ix, iy0+3, iz);
+    G[texStart+4]  = tex3D(texG, ix, iy0+4, iz);
+
+    P[texStart+0]  = tex3D(texP, ix, iy0+0, iz);
+    P[texStart+1]  = tex3D(texP, ix, iy0+1, iz);
+    P[texStart+2]  = tex3D(texP, ix, iy0+2, iz);
+    P[texStart+3]  = tex3D(texP, ix, iy0+3, iz);
+    P[texStart+4]  = tex3D(texP, ix, iy0+4, iz);
+}
+
+
+template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
+__device__ inline void _load_2X(const uint_t dummy, const uint_t iy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t global_iz,
+        const devPtrSet * const ghost)
+{
+    // GMEM
+    const uint_t id0 = GHOSTMAPX(ghostStart+0, iy, iz-3+global_iz);
+    const uint_t id1 = GHOSTMAPX(ghostStart+1, iy, iz-3+global_iz);
+
+    r[haloStart+0] = ghost->r[id0];
+    r[haloStart+1] = ghost->r[id1];
+
+    u[haloStart+0] = ghost->u[id0];
+    u[haloStart+1] = ghost->u[id1];
+
+    v[haloStart+0] = ghost->v[id0];
+    v[haloStart+1] = ghost->v[id1];
+
+    w[haloStart+0] = ghost->w[id0];
+    w[haloStart+1] = ghost->w[id1];
+
+    e[haloStart+0] = ghost->e[id0];
+    e[haloStart+1] = ghost->e[id1];
+
+    G[haloStart+0] = ghost->G[id0];
+    G[haloStart+1] = ghost->G[id1];
+
+    P[haloStart+0] = ghost->P[id0];
+    P[haloStart+1] = ghost->P[id1];
+
+    // texture
+    r[texStart+0]  = tex3D(texR, ix0+0, iy, iz);
+    r[texStart+1]  = tex3D(texR, ix0+1, iy, iz);
+    r[texStart+2]  = tex3D(texR, ix0+2, iy, iz);
+    r[texStart+3]  = tex3D(texR, ix0+3, iy, iz);
+
+    u[texStart+0]  = tex3D(texU, ix0+0, iy, iz);
+    u[texStart+1]  = tex3D(texU, ix0+1, iy, iz);
+    u[texStart+2]  = tex3D(texU, ix0+2, iy, iz);
+    u[texStart+3]  = tex3D(texU, ix0+3, iy, iz);
+
+    v[texStart+0]  = tex3D(texV, ix0+0, iy, iz);
+    v[texStart+1]  = tex3D(texV, ix0+1, iy, iz);
+    v[texStart+2]  = tex3D(texV, ix0+2, iy, iz);
+    v[texStart+3]  = tex3D(texV, ix0+3, iy, iz);
+
+    w[texStart+0]  = tex3D(texW, ix0+0, iy, iz);
+    w[texStart+1]  = tex3D(texW, ix0+1, iy, iz);
+    w[texStart+2]  = tex3D(texW, ix0+2, iy, iz);
+    w[texStart+3]  = tex3D(texW, ix0+3, iy, iz);
+
+    e[texStart+0]  = tex3D(texE, ix0+0, iy, iz);
+    e[texStart+1]  = tex3D(texE, ix0+1, iy, iz);
+    e[texStart+2]  = tex3D(texE, ix0+2, iy, iz);
+    e[texStart+3]  = tex3D(texE, ix0+3, iy, iz);
+
+    G[texStart+0]  = tex3D(texG, ix0+0, iy, iz);
+    G[texStart+1]  = tex3D(texG, ix0+1, iy, iz);
+    G[texStart+2]  = tex3D(texG, ix0+2, iy, iz);
+    G[texStart+3]  = tex3D(texG, ix0+3, iy, iz);
+
+    P[texStart+0]  = tex3D(texP, ix0+0, iy, iz);
+    P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
+    P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
+    P[texStart+3]  = tex3D(texP, ix0+3, iy, iz);
+}
+
+
+template <uint_t iy0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
+__device__ inline void _load_2Y(const uint_t ix, const uint_t dummy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t global_iz,
+        const devPtrSet * const ghost)
+{
+    // GMEM
+    const uint_t id0 = GHOSTMAPY(ix, ghostStart+0, iz-3+global_iz);
+    const uint_t id1 = GHOSTMAPY(ix, ghostStart+1, iz-3+global_iz);
+
+    r[haloStart+0] = ghost->r[id0];
+    r[haloStart+1] = ghost->r[id1];
+
+    u[haloStart+0] = ghost->u[id0];
+    u[haloStart+1] = ghost->u[id1];
+
+    v[haloStart+0] = ghost->v[id0];
+    v[haloStart+1] = ghost->v[id1];
+
+    w[haloStart+0] = ghost->w[id0];
+    w[haloStart+1] = ghost->w[id1];
+
+    e[haloStart+0] = ghost->e[id0];
+    e[haloStart+1] = ghost->e[id1];
+
+    G[haloStart+0] = ghost->G[id0];
+    G[haloStart+1] = ghost->G[id1];
+
+    P[haloStart+0] = ghost->P[id0];
+    P[haloStart+1] = ghost->P[id1];
+
+    // texture
+    r[texStart+0]  = tex3D(texR, ix, iy0+0, iz);
+    r[texStart+1]  = tex3D(texR, ix, iy0+1, iz);
+    r[texStart+2]  = tex3D(texR, ix, iy0+2, iz);
+    r[texStart+3]  = tex3D(texR, ix, iy0+3, iz);
+
+    u[texStart+0]  = tex3D(texU, ix, iy0+0, iz);
+    u[texStart+1]  = tex3D(texU, ix, iy0+1, iz);
+    u[texStart+2]  = tex3D(texU, ix, iy0+2, iz);
+    u[texStart+3]  = tex3D(texU, ix, iy0+3, iz);
+
+    v[texStart+0]  = tex3D(texV, ix, iy0+0, iz);
+    v[texStart+1]  = tex3D(texV, ix, iy0+1, iz);
+    v[texStart+2]  = tex3D(texV, ix, iy0+2, iz);
+    v[texStart+3]  = tex3D(texV, ix, iy0+3, iz);
+
+    w[texStart+0]  = tex3D(texW, ix, iy0+0, iz);
+    w[texStart+1]  = tex3D(texW, ix, iy0+1, iz);
+    w[texStart+2]  = tex3D(texW, ix, iy0+2, iz);
+    w[texStart+3]  = tex3D(texW, ix, iy0+3, iz);
+
+    e[texStart+0]  = tex3D(texE, ix, iy0+0, iz);
+    e[texStart+1]  = tex3D(texE, ix, iy0+1, iz);
+    e[texStart+2]  = tex3D(texE, ix, iy0+2, iz);
+    e[texStart+3]  = tex3D(texE, ix, iy0+3, iz);
+
+    G[texStart+0]  = tex3D(texG, ix, iy0+0, iz);
+    G[texStart+1]  = tex3D(texG, ix, iy0+1, iz);
+    G[texStart+2]  = tex3D(texG, ix, iy0+2, iz);
+    G[texStart+3]  = tex3D(texG, ix, iy0+3, iz);
+
+    P[texStart+0]  = tex3D(texP, ix, iy0+0, iz);
+    P[texStart+1]  = tex3D(texP, ix, iy0+1, iz);
+    P[texStart+2]  = tex3D(texP, ix, iy0+2, iz);
+    P[texStart+3]  = tex3D(texP, ix, iy0+3, iz);
+}
+
+
+
+template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
+__device__ inline void _load_3X(const uint_t dummy, const uint_t iy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t global_iz,
+        const devPtrSet * const ghost)
+{
+    // GMEM
+    const uint_t id0 = GHOSTMAPX(ghostStart+0, iy, iz-3+global_iz);
+    const uint_t id1 = GHOSTMAPX(ghostStart+1, iy, iz-3+global_iz);
+    const uint_t id2 = GHOSTMAPX(ghostStart+2, iy, iz-3+global_iz);
+
+    r[haloStart+0] = ghost->r[id0];
+    r[haloStart+1] = ghost->r[id1];
+    r[haloStart+2] = ghost->r[id2];
+
+    u[haloStart+0] = ghost->u[id0];
+    u[haloStart+1] = ghost->u[id1];
+    u[haloStart+2] = ghost->u[id2];
+
+    v[haloStart+0] = ghost->v[id0];
+    v[haloStart+1] = ghost->v[id1];
+    v[haloStart+2] = ghost->v[id2];
+
+    w[haloStart+0] = ghost->w[id0];
+    w[haloStart+1] = ghost->w[id1];
+    w[haloStart+2] = ghost->w[id2];
+
+    e[haloStart+0] = ghost->e[id0];
+    e[haloStart+1] = ghost->e[id1];
+    e[haloStart+2] = ghost->e[id2];
+
+    G[haloStart+0] = ghost->G[id0];
+    G[haloStart+1] = ghost->G[id1];
+    G[haloStart+2] = ghost->G[id2];
+
+    P[haloStart+0] = ghost->P[id0];
+    P[haloStart+1] = ghost->P[id1];
+    P[haloStart+2] = ghost->P[id2];
+
+    // texture
+    r[texStart+0]  = tex3D(texR, ix0+0, iy, iz);
+    r[texStart+1]  = tex3D(texR, ix0+1, iy, iz);
+    r[texStart+2]  = tex3D(texR, ix0+2, iy, iz);
+
+    u[texStart+0]  = tex3D(texU, ix0+0, iy, iz);
+    u[texStart+1]  = tex3D(texU, ix0+1, iy, iz);
+    u[texStart+2]  = tex3D(texU, ix0+2, iy, iz);
+
+    v[texStart+0]  = tex3D(texV, ix0+0, iy, iz);
+    v[texStart+1]  = tex3D(texV, ix0+1, iy, iz);
+    v[texStart+2]  = tex3D(texV, ix0+2, iy, iz);
+
+    w[texStart+0]  = tex3D(texW, ix0+0, iy, iz);
+    w[texStart+1]  = tex3D(texW, ix0+1, iy, iz);
+    w[texStart+2]  = tex3D(texW, ix0+2, iy, iz);
+
+    e[texStart+0]  = tex3D(texE, ix0+0, iy, iz);
+    e[texStart+1]  = tex3D(texE, ix0+1, iy, iz);
+    e[texStart+2]  = tex3D(texE, ix0+2, iy, iz);
+
+    G[texStart+0]  = tex3D(texG, ix0+0, iy, iz);
+    G[texStart+1]  = tex3D(texG, ix0+1, iy, iz);
+    G[texStart+2]  = tex3D(texG, ix0+2, iy, iz);
+
+    P[texStart+0]  = tex3D(texP, ix0+0, iy, iz);
+    P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
+    P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
+}
+
+
+template <uint_t iy0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
+__device__ inline void _load_3Y(const uint_t ix, const uint_t dummy, const uint_t iz,
+        Real * const r,
+        Real * const u,
+        Real * const v,
+        Real * const w,
+        Real * const e,
+        Real * const G,
+        Real * const P,
+        const uint_t global_iz,
+        const devPtrSet * const ghost)
+{
+    // GMEM
+    const uint_t id0 = GHOSTMAPY(ix, ghostStart+0, iz-3+global_iz);
+    const uint_t id1 = GHOSTMAPY(ix, ghostStart+1, iz-3+global_iz);
+    const uint_t id2 = GHOSTMAPY(ix, ghostStart+2, iz-3+global_iz);
+
+    r[haloStart+0] = ghost->r[id0];
+    r[haloStart+1] = ghost->r[id1];
+    r[haloStart+2] = ghost->r[id2];
+
+    u[haloStart+0] = ghost->u[id0];
+    u[haloStart+1] = ghost->u[id1];
+    u[haloStart+2] = ghost->u[id2];
+
+    v[haloStart+0] = ghost->v[id0];
+    v[haloStart+1] = ghost->v[id1];
+    v[haloStart+2] = ghost->v[id2];
+
+    w[haloStart+0] = ghost->w[id0];
+    w[haloStart+1] = ghost->w[id1];
+    w[haloStart+2] = ghost->w[id2];
+
+    e[haloStart+0] = ghost->e[id0];
+    e[haloStart+1] = ghost->e[id1];
+    e[haloStart+2] = ghost->e[id2];
+
+    G[haloStart+0] = ghost->G[id0];
+    G[haloStart+1] = ghost->G[id1];
+    G[haloStart+2] = ghost->G[id2];
+
+    P[haloStart+0] = ghost->P[id0];
+    P[haloStart+1] = ghost->P[id1];
+    P[haloStart+2] = ghost->P[id2];
+
+    // texture
+    r[texStart+0]  = tex3D(texR, ix, iy0+0, iz);
+    r[texStart+1]  = tex3D(texR, ix, iy0+1, iz);
+    r[texStart+2]  = tex3D(texR, ix, iy0+2, iz);
+
+    u[texStart+0]  = tex3D(texU, ix, iy0+0, iz);
+    u[texStart+1]  = tex3D(texU, ix, iy0+1, iz);
+    u[texStart+2]  = tex3D(texU, ix, iy0+2, iz);
+
+    v[texStart+0]  = tex3D(texV, ix, iy0+0, iz);
+    v[texStart+1]  = tex3D(texV, ix, iy0+1, iz);
+    v[texStart+2]  = tex3D(texV, ix, iy0+2, iz);
+
+    w[texStart+0]  = tex3D(texW, ix, iy0+0, iz);
+    w[texStart+1]  = tex3D(texW, ix, iy0+1, iz);
+    w[texStart+2]  = tex3D(texW, ix, iy0+2, iz);
+
+    e[texStart+0]  = tex3D(texE, ix, iy0+0, iz);
+    e[texStart+1]  = tex3D(texE, ix, iy0+1, iz);
+    e[texStart+2]  = tex3D(texE, ix, iy0+2, iz);
+
+    G[texStart+0]  = tex3D(texG, ix, iy0+0, iz);
+    G[texStart+1]  = tex3D(texG, ix, iy0+1, iz);
+    G[texStart+2]  = tex3D(texG, ix, iy0+2, iz);
+
+    P[texStart+0]  = tex3D(texP, ix, iy0+0, iz);
+    P[texStart+1]  = tex3D(texP, ix, iy0+1, iz);
+    P[texStart+2]  = tex3D(texP, ix, iy0+2, iz);
+}
+
+
+__device__
+void _print_stencil(const uint_t bx, const uint_t by, const uint_t tx, const uint_t ty, const Real * const s)
+{
+    if (bx == blockIdx.x && by == blockIdx.y && tx == threadIdx.x && ty == threadIdx.y)
+    {
+        printf("Block [%d,%d,%d], Thread [%d,%d,%d], Stencil:\n(",bx,by,blockIdx.z,tx,ty,threadIdx.z);
+        for (uint_t i = 0; i < _STENCIL_WIDTH_-1; ++i)
+            printf("%f, ", s[i]);
+        printf("%f)\n", s[_STENCIL_WIDTH_-1]);
+    }
+}
+
+
+
