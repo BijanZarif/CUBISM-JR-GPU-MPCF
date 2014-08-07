@@ -232,33 +232,63 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
                 w[i] = w[i]/r[i];
             }
 
-            const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]);
-            const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]);
+            Real rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp;
+            _weno_reconstruction(rm, rp, r);
+            _weno_reconstruction(Gm, Gp, G);
+            _weno_reconstruction(Pm, Pp, P);
+            _weno_reconstruction(pm, pp, e);
+            _weno_reconstruction(um, up, u);
+            _weno_reconstruction(vm, vp, v);
+            _weno_reconstruction(wm, wp, w);
+            rm = _weno_clip_minus(rm, r[1], r[2], r[3]);
+            rp = _weno_clip_pluss(rp, r[2], r[3], r[4]);
+            Gm = _weno_clip_minus(Gm, G[1], G[2], G[3]);
+            Gp = _weno_clip_pluss(Gp, G[2], G[3], G[4]);
+            Pm = _weno_clip_minus(Pm, P[1], P[2], P[3]);
+            Pp = _weno_clip_pluss(Pp, P[2], P[3], P[4]);
+            pm = _weno_clip_minus(pm, e[1], e[2], e[3]);
+            pp = _weno_clip_pluss(pp, e[2], e[3], e[4]);
+            um = _weno_clip_minus(um, u[1], u[2], u[3]);
+            up = _weno_clip_pluss(up, u[2], u[3], u[4]);
+            vm = _weno_clip_minus(vm, v[1], v[2], v[3]);
+            vp = _weno_clip_pluss(vp, v[2], v[3], v[4]);
+            wm = _weno_clip_minus(wm, w[1], w[2], w[3]);
+            wp = _weno_clip_pluss(wp, w[2], w[3], w[4]);
             assert(!isnan(rp)); assert(!isnan(rm));
-
-            const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]);
-            const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]);
             assert(!isnan(Gp)); assert(!isnan(Gm));
-
-            const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]);
-            const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]);
             assert(!isnan(Pp)); assert(!isnan(Pm));
-
-            const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]);
-            const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]);
             assert(!isnan(pp)); assert(!isnan(pm));
-
-            const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]);
-            const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]);
             assert(!isnan(up)); assert(!isnan(um));
-
-            const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]);
-            const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]);
             assert(!isnan(vp)); assert(!isnan(vm));
-
-            const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]);
-            const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]);
             assert(!isnan(wp)); assert(!isnan(wm));
+
+            /* const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]); */
+            /* const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]); */
+            /* assert(!isnan(rp)); assert(!isnan(rm)); */
+
+            /* const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]); */
+            /* const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]); */
+            /* assert(!isnan(Gp)); assert(!isnan(Gm)); */
+
+            /* const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]); */
+            /* const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]); */
+            /* assert(!isnan(Pp)); assert(!isnan(Pm)); */
+
+            /* const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]); */
+            /* const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]); */
+            /* assert(!isnan(pp)); assert(!isnan(pm)); */
+
+            /* const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]); */
+            /* const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]); */
+            /* assert(!isnan(up)); assert(!isnan(um)); */
+
+            /* const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]); */
+            /* const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]); */
+            /* assert(!isnan(vp)); assert(!isnan(vm)); */
+
+            /* const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]); */
+            /* const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]); */
+            /* assert(!isnan(wp)); assert(!isnan(wm)); */
 
             // 3.)
             Real sm, sp;

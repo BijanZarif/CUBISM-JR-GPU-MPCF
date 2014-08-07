@@ -97,8 +97,94 @@ texture<float, 3, cudaReadModeElementType> texP;
 //                             DEVICE FUNCTIONS                              //
 ///////////////////////////////////////////////////////////////////////////////
 __device__
+inline void _weno_reconstruction(Real& recon_m, Real& recon_p, const Real * const __restrict__ s)
+{
+    const Real wenoeps_f = (Real)WENOEPS;
+
+#ifndef _WENO3_
+    // 184 FLOP
+    const Real inv6 = 1.0f/6.0f;
+    const Real inv3 = 1.0f/3.0f;
+    const Real q1 =   4.0f*inv3;
+    const Real q2 =  19.0f*inv3;
+    const Real q3 =  11.0f*inv3;
+    const Real q4 =  25.0f*inv3;
+    const Real q5 =  31.0f*inv3;
+    const Real q6 =  10.0f*inv3;
+    const Real q7 =  13.0f*inv3;
+    const Real q8 =   5.0f*inv3;
+
+    const Real sum0m =  inv3*s[0] - 7.0f*inv6*s[1] + 11.0f*inv6*s[2];
+    const Real sum1m = -inv6*s[1] + 5.0f*inv6*s[2] +       inv3*s[3];
+    const Real sum2p =  inv3*s[3] + 5.0f*inv6*s[2] -       inv6*s[1];
+    const Real sum2m =  inv3*s[2] + 5.0f*inv6*s[3] -       inv6*s[4];
+    const Real sum1p = -inv6*s[4] + 5.0f*inv6*s[3] +       inv3*s[2];
+    const Real sum0p =  inv3*s[5] - 7.0f*inv6*s[4] + 11.0f*inv6*s[3];
+
+    const Real is0m = s[0]*(s[0]*q1 - s[1]*q2 + s[2]*q3) + s[1]*(s[1]*q4 - s[2]*q5) + s[2]*s[2]*q6;
+    const Real is1m = s[1]*(s[1]*q1 - s[2]*q7 + s[3]*q8) + s[2]*(s[2]*q7 - s[3]*q7) + s[3]*s[3]*q1;
+    const Real is2p = s[1]*(s[1]*q1 - s[2]*q2 + s[3]*q3) + s[2]*(s[2]*q4 - s[3]*q5) + s[3]*s[3]*q6;
+    const Real is2m = s[2]*(s[2]*q6 - s[3]*q5 + s[4]*q3) + s[3]*(s[3]*q4 - s[4]*q2) + s[4]*s[4]*q1;
+    const Real is1p = s[2]*(s[2]*q1 - s[3]*q7 + s[4]*q8) + s[3]*(s[3]*q7 - s[4]*q7) + s[4]*s[4]*q1;
+    const Real is0p = s[3]*(s[3]*q6 - s[4]*q5 + s[5]*q3) + s[4]*(s[4]*q4 - s[5]*q2) + s[5]*s[5]*q1;
+
+    const Real is0plusm = is0m + wenoeps_f;
+    const Real is1plusm = is1m + wenoeps_f;
+    const Real is2plusp = is2p + wenoeps_f;
+    const Real is2plusm = is2m + wenoeps_f;
+    const Real is1plusp = is1p + wenoeps_f;
+    const Real is0plusp = is0p + wenoeps_f;
+
+    const Real alpha0m = 1.0f / (10.0f*is0plusm*is0plusm);
+    const Real alpha1m = 6.0f * (1.0f / (10.0f*is1plusm*is1plusm));
+    const Real alpha2p = 3.0f * (1.0f / (10.0f*is2plusp*is2plusp));
+    const Real alpha2m = 3.0f * (1.0f / (10.0f*is2plusm*is2plusm));
+    const Real alpha1p = 6.0f * (1.0f / (10.0f*is1plusp*is1plusp));
+    const Real alpha0p = 1.0f / (10.0f*is0plusp*is0plusp);
+    const Real alphasumInvm = 1.0f / (alpha0m+alpha1m+alpha2m);
+    const Real alphasumInvp = 1.0f / (alpha0p+alpha1p+alpha2p);
+
+    const Real omega0m = alpha0m * alphasumInvm;
+    const Real omega1m = alpha1m * alphasumInvm;
+    const Real omega1p = alpha1p * alphasumInvp;
+    const Real omega0p = alpha0p * alphasumInvp;
+    const Real omega2m = 1.0f - omega0m - omega1m;
+    const Real omega2p = 1.0f - omega0p - omega1p;
+
+    recon_m = omega0m*sum0m + omega1m*sum1m + omega2m*sum2m;
+    recon_p = omega0p*sum0p + omega1p*sum1p + omega2p*sum2p;
+
+#else
+    // WENO 3
+    // 45 FLOP
+    const Real sum0m  = 1.5f*s[2] - 0.5f*s[1];
+    const Real sum1mp = 0.5f*(s[2] + s[3]);
+    const Real sum0p  = 1.5f*s[3] - 0.5f*s[4];
+
+    const Real is0m  = (s[2]-s[1])*(s[2]-s[1]);
+    const Real is1mp = (s[3]-s[2])*(s[3]-s[2]);
+    const Real is0p  = (s[3]-s[4])*(s[3]-s[4]);
+
+    const Real alpha0m  = 1.0f / (3.0f * (is0m+wenoeps_f)*(is0m+wenoeps_f));
+    const Real alpha1mp = 2.0f * (1.0f / (3.0f * (is1mp+wenoeps_f)*(is1mp+wenoeps_f)));
+    const Real alpha0p  = 1.0f / (3.0f * (is0p+wenoeps_f)*(is0p+wenoeps_f));
+
+    const Real omega0m = alpha0m / (alpha0m+alpha1mp);
+    const Real omega0p = alpha0p / (alpha0p+alpha1mp);
+    const Real omega1m = 1.0f - omega0m;
+    const Real omega1p = 1.0f - omega0p;
+
+    recon_m = omega0m*sum0m + omega1m*sum1mp;
+    recon_p = omega0p*sum0p + omega1p*sum1mp;
+
+#endif
+}
+
+
+__device__
 inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, const Real f)
 {
+    const Real wenoeps_f = (Real)WENOEPS;
 #ifndef _WENO3_
     // 96 FLOP
     const Real inv6 = 1.0f/6.0f;
@@ -120,9 +206,9 @@ inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, 
     const Real is1 = c*(c*q6 - d*q7 + e*q8) + d*(d*q7 - e*q7) + e*e*q6;
     const Real is2 = b*(b*q6 - c*q5 + d*q3) + c*(c*q4 - d*q2) + d*d*q1;
 
-    const Real is0plus = is0 + (Real)WENOEPS;
-    const Real is1plus = is1 + (Real)WENOEPS;
-    const Real is2plus = is2 + (Real)WENOEPS;
+    const Real is0plus = is0 + wenoeps_f;
+    const Real is1plus = is1 + wenoeps_f;
+    const Real is2plus = is2 + wenoeps_f;
 
     const Real alpha0 = 1.0f / (10.0f*is0plus*is0plus);
     const Real alpha1 = 6.0f * (1.0f / (10.0f*is1plus*is1plus));
@@ -143,8 +229,8 @@ inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, 
     const Real is0 = (d-e)*(d-e);
     const Real is1 = (d-c)*(d-c);
 
-    const Real alpha0 = 1.0f / (3.0f * (is0+WENOEPS)*(is0+WENOEPS));
-    const Real alpha1 = 2.0f * (1.0f / (3.0f * (is1+WENOEPS)*(is1+WENOEPS)));
+    const Real alpha0 = 1.0f / (3.0f * (is0+wenoeps_f)*(is0+wenoeps_f));
+    const Real alpha1 = 2.0f * (1.0f / (3.0f * (is1+wenoeps_f)*(is1+wenoeps_f)));
 
     const Real omega0 = alpha0 / (alpha0+alpha1);
     const Real omega1 = 1.0f - omega0;
@@ -158,6 +244,7 @@ inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, 
 __device__
 inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, const Real e)
 {
+    const Real wenoeps_f = (Real)WENOEPS;
 #ifndef _WENO3_
     // 96 FLOP
     const Real inv6 = 1.0f/6.0f;
@@ -179,9 +266,9 @@ inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, 
     const Real is1 = b*(b*q1 - c*q7 + d*q8) + c*(c*q7 - d*q7) + d*d*q1;
     const Real is2 = c*(c*q6 - d*q5 + e*q3) + d*(d*q4 - e*q2) + e*e*q1;
 
-    const Real is0plus = is0 + (Real)WENOEPS;
-    const Real is1plus = is1 + (Real)WENOEPS;
-    const Real is2plus = is2 + (Real)WENOEPS;
+    const Real is0plus = is0 + wenoeps_f;
+    const Real is1plus = is1 + wenoeps_f;
+    const Real is2plus = is2 + wenoeps_f;
 
     const Real alpha0 = 1.0f / (10.0f*is0plus*is0plus);
     const Real alpha1 = 6.0f * (1.0f / (10.0f*is1plus*is1plus));
@@ -202,8 +289,8 @@ inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, 
     const Real is0 = (c-b)*(c-b);
     const Real is1 = (d-c)*(d-c);
 
-    const Real alpha0 = 1.0f / (3.0f * (is0+WENOEPS)*(is0+WENOEPS));
-    const Real alpha1 = 2.0f * (1.0f / (3.0f * (is1+WENOEPS)*(is1+WENOEPS)));
+    const Real alpha0 = 1.0f / (3.0f * (is0+wenoeps_f)*(is0+wenoeps_f));
+    const Real alpha1 = 2.0f * (1.0f / (3.0f * (is1+wenoeps_f)*(is1+wenoeps_f)));
 
     const Real omega0 = alpha0 / (alpha0+alpha1);
     const Real omega1 = 1.0f - omega0;
@@ -211,6 +298,24 @@ inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, 
     return omega0*sum0 + omega1*sum1;
 
 #endif
+}
+
+
+__device__
+inline Real _weno_clip_minus(const Real recon_m, const Real b, const Real c, const Real d)
+{
+    const Real min_in = fminf( fminf(b,c), d );
+    const Real max_in = fmaxf( fmaxf(b,c), d );
+    return fminf(fmaxf(recon_m, min_in), max_in);
+}
+
+
+__device__
+inline Real _weno_clip_pluss(const Real recon_p, const Real c, const Real d, const Real e)
+{
+    const Real min_in = fminf( fminf(c,d), e );
+    const Real max_in = fmaxf( fmaxf(c,d), e );
+    return fminf(fmaxf(recon_p, min_in), max_in);
 }
 
 
