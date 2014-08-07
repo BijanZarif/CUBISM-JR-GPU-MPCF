@@ -56,7 +56,7 @@ endif
 ifneq "$(findstring localhost.localdomain,$(shell hostname))" "" #Cyrus
 	mpi-inc = /usr/include/openmpi-x86_64
 	mpi-lib = /usr/lib64/openmpi/lib
-	CUFLAGS += -arch=sm_35 -Xptxas -v
+	CUFLAGS += -arch=sm_35 -Xptxas -v -maxrregcount=64
 	# CUFLAGS += -arch=sm_35 -Xptxas -v,-dlcm=cg -maxrregcount 90
 	LIBS += -L/usr/local/cuda-6.0/lib64 -lcudart
 endif

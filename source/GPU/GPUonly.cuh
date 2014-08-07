@@ -13,17 +13,17 @@
 #define NXP1 NX+1
 #define NYP1 NY+1
 
-struct devPtrSet // 7 fluid quantities
+struct DevicePointer // 7 fluid quantities
 {
     // helper structure to pass compound flow variables as one kernel argument
-    Real *r;
-    Real *u;
-    Real *v;
-    Real *w;
-    Real *e;
-    Real *G;
-    Real *P;
-    devPtrSet(RealPtrVec_t& c) : r(c[0]), u(c[1]), v(c[2]), w(c[3]), e(c[4]), G(c[5]), P(c[6]) { assert(c.size() == 7); }
+    Real * __restrict__ r;
+    Real * __restrict__ u;
+    Real * __restrict__ v;
+    Real * __restrict__ w;
+    Real * __restrict__ e;
+    Real * __restrict__ G;
+    Real * __restrict__ P;
+    DevicePointer(RealPtrVec_t& c) : r(c[0]), u(c[1]), v(c[2]), w(c[3]), e(c[4]), G(c[5]), P(c[6]) { assert(c.size() == 7); }
 };
 
 
@@ -482,7 +482,7 @@ inline Real _extraterm_hllc_vel(const Real um, const Real up,
 
 __device__
 inline void _fetch_flux(const uint_t ix, const uint_t iy, const uint_t iz,
-        const Real * const xflux, const Real * const yflux, const Real * const zflux,
+        const Real * const __restrict__ xflux, const Real * const __restrict__ yflux, const Real * const __restrict__ zflux,
         Real& fxp, Real& fxm, Real& fyp, Real& fym, Real& fzp, Real& fzm)
 {
     /* fxp = xflux[ID3(ix+1, iy, iz, NXP1, NY)]; */
@@ -506,15 +506,15 @@ inline void _fetch_flux(const uint_t ix, const uint_t iy, const uint_t iz,
 
 __device__
 inline void _load_internal_X(const uint_t ix, const uint_t iy, const uint_t iz,
-        Real * const r,
-        Real * const u,
-        Real * const v,
-        Real * const w,
-        Real * const e,
-        Real * const G,
-        Real * const P,
+        Real * const __restrict__ r,
+        Real * const __restrict__ u,
+        Real * const __restrict__ v,
+        Real * const __restrict__ w,
+        Real * const __restrict__ e,
+        Real * const __restrict__ G,
+        Real * const __restrict__ P,
         const uint_t dummy1,
-        const devPtrSet * const dummy2)
+        const DevicePointer * const dummy2)
 {
     // texture only
     r[0]  = tex3D(texR, ix-3, iy, iz);
@@ -565,20 +565,33 @@ inline void _load_internal_X(const uint_t ix, const uint_t iy, const uint_t iz,
     P[3]  = tex3D(texP, ix,   iy, iz);
     P[4]  = tex3D(texP, ix+1, iy, iz);
     P[5]  = tex3D(texP, ix+2, iy, iz);
+
+#ifndef NDEBUG
+    for (uint_t i = 0; i < 6; ++i)
+    {
+        assert(r[i] >  0.0f);
+        assert(e[i] >  0.0f);
+        assert(G[i] >  0.0f);
+        assert(P[i] >= 0.0f);
+        assert(!isnan(u[i]));
+        assert(!isnan(v[i]));
+        assert(!isnan(w[i]));
+    }
+#endif
 }
 
 
 __device__
 inline void _load_internal_Y(const uint_t ix, const uint_t iy, const uint_t iz,
-        Real * const r,
-        Real * const u,
-        Real * const v,
-        Real * const w,
-        Real * const e,
-        Real * const G,
-        Real * const P,
+        Real * const __restrict__ r,
+        Real * const __restrict__ u,
+        Real * const __restrict__ v,
+        Real * const __restrict__ w,
+        Real * const __restrict__ e,
+        Real * const __restrict__ G,
+        Real * const __restrict__ P,
         const uint_t dummy1,
-        const devPtrSet * const dummy2)
+        const DevicePointer * const dummy2)
 {
     // texture only
     r[0]  = tex3D(texR, ix, iy-3, iz);
@@ -629,20 +642,33 @@ inline void _load_internal_Y(const uint_t ix, const uint_t iy, const uint_t iz,
     P[3]  = tex3D(texP, ix, iy,   iz);
     P[4]  = tex3D(texP, ix, iy+1, iz);
     P[5]  = tex3D(texP, ix, iy+2, iz);
+
+#ifndef NDEBUG
+    for (uint_t i = 0; i < 6; ++i)
+    {
+        assert(r[i] >  0.0f);
+        assert(e[i] >  0.0f);
+        assert(G[i] >  0.0f);
+        assert(P[i] >= 0.0f);
+        assert(!isnan(u[i]));
+        assert(!isnan(v[i]));
+        assert(!isnan(w[i]));
+    }
+#endif
 }
 
 
 __device__
 inline void _load_internal_Z(const uint_t ix, const uint_t iy, const uint_t iz,
-        Real * const r,
-        Real * const u,
-        Real * const v,
-        Real * const w,
-        Real * const e,
-        Real * const G,
-        Real * const P,
+        Real * const __restrict__ r,
+        Real * const __restrict__ u,
+        Real * const __restrict__ v,
+        Real * const __restrict__ w,
+        Real * const __restrict__ e,
+        Real * const __restrict__ G,
+        Real * const __restrict__ P,
         const uint_t dummy1,
-        const devPtrSet * const dummy2)
+        const DevicePointer * const dummy2)
 {
     // texture only
     r[0]  = tex3D(texR, ix, iy, iz-3);
@@ -693,6 +719,19 @@ inline void _load_internal_Z(const uint_t ix, const uint_t iy, const uint_t iz,
     P[3]  = tex3D(texP, ix, iy, iz);
     P[4]  = tex3D(texP, ix, iy, iz+1);
     P[5]  = tex3D(texP, ix, iy, iz+2);
+
+#ifndef NDEBUG
+    for (uint_t i = 0; i < 6; ++i)
+    {
+        assert(r[i] >  0.0f);
+        assert(e[i] >  0.0f);
+        assert(G[i] >  0.0f);
+        assert(P[i] >= 0.0f);
+        assert(!isnan(u[i]));
+        assert(!isnan(v[i]));
+        assert(!isnan(w[i]));
+    }
+#endif
 }
 
 
@@ -700,15 +739,15 @@ inline void _load_internal_Z(const uint_t ix, const uint_t iy, const uint_t iz,
 
 template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
 __device__ inline void _load_1X(const uint_t dummy, const uint_t iy, const uint_t iz,
-        Real * const r,
-        Real * const u,
-        Real * const v,
-        Real * const w,
-        Real * const e,
-        Real * const G,
-        Real * const P,
+        Real * const __restrict__ r,
+        Real * const __restrict__ u,
+        Real * const __restrict__ v,
+        Real * const __restrict__ w,
+        Real * const __restrict__ e,
+        Real * const __restrict__ G,
+        Real * const __restrict__ P,
         const uint_t global_iz,
-        const devPtrSet * const ghost)
+        const DevicePointer * const __restrict__ ghost)
 {
     // GMEM
     const uint_t id0 = GHOSTMAPX(ghostStart, iy, iz-3+global_iz);
@@ -763,19 +802,32 @@ __device__ inline void _load_1X(const uint_t dummy, const uint_t iy, const uint_
     P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
     P[texStart+3]  = tex3D(texP, ix0+3, iy, iz);
     P[texStart+4]  = tex3D(texP, ix0+4, iy, iz);
+
+#ifndef NDEBUG
+    for (uint_t i = 0; i < 6; ++i)
+    {
+        assert(r[i] >  0.0f);
+        assert(e[i] >  0.0f);
+        assert(G[i] >  0.0f);
+        assert(P[i] >= 0.0f);
+        assert(!isnan(u[i]));
+        assert(!isnan(v[i]));
+        assert(!isnan(w[i]));
+    }
+#endif
 }
 
 template <uint_t iy0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
 __device__ inline void _load_1Y(const uint_t ix, const uint_t dummy, const uint_t iz,
-        Real * const r,
-        Real * const u,
-        Real * const v,
-        Real * const w,
-        Real * const e,
-        Real * const G,
-        Real * const P,
+        Real * const __restrict__ r,
+        Real * const __restrict__ u,
+        Real * const __restrict__ v,
+        Real * const __restrict__ w,
+        Real * const __restrict__ e,
+        Real * const __restrict__ G,
+        Real * const __restrict__ P,
         const uint_t global_iz,
-        const devPtrSet * const ghost)
+        const DevicePointer * const __restrict__ ghost)
 {
     // GMEM
     const uint_t id0 = GHOSTMAPY(ix, ghostStart, iz-3+global_iz);
@@ -830,20 +882,33 @@ __device__ inline void _load_1Y(const uint_t ix, const uint_t dummy, const uint_
     P[texStart+2]  = tex3D(texP, ix, iy0+2, iz);
     P[texStart+3]  = tex3D(texP, ix, iy0+3, iz);
     P[texStart+4]  = tex3D(texP, ix, iy0+4, iz);
+
+#ifndef NDEBUG
+    for (uint_t i = 0; i < 6; ++i)
+    {
+        assert(r[i] >  0.0f);
+        assert(e[i] >  0.0f);
+        assert(G[i] >  0.0f);
+        assert(P[i] >= 0.0f);
+        assert(!isnan(u[i]));
+        assert(!isnan(v[i]));
+        assert(!isnan(w[i]));
+    }
+#endif
 }
 
 
 template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
 __device__ inline void _load_2X(const uint_t dummy, const uint_t iy, const uint_t iz,
-        Real * const r,
-        Real * const u,
-        Real * const v,
-        Real * const w,
-        Real * const e,
-        Real * const G,
-        Real * const P,
+        Real * const __restrict__ r,
+        Real * const __restrict__ u,
+        Real * const __restrict__ v,
+        Real * const __restrict__ w,
+        Real * const __restrict__ e,
+        Real * const __restrict__ G,
+        Real * const __restrict__ P,
         const uint_t global_iz,
-        const devPtrSet * const ghost)
+        const DevicePointer * const __restrict__ ghost)
 {
     // GMEM
     const uint_t id0 = GHOSTMAPX(ghostStart+0, iy, iz-3+global_iz);
@@ -905,20 +970,33 @@ __device__ inline void _load_2X(const uint_t dummy, const uint_t iy, const uint_
     P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
     P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
     P[texStart+3]  = tex3D(texP, ix0+3, iy, iz);
+
+#ifndef NDEBUG
+    for (uint_t i = 0; i < 6; ++i)
+    {
+        assert(r[i] >  0.0f);
+        assert(e[i] >  0.0f);
+        assert(G[i] >  0.0f);
+        assert(P[i] >= 0.0f);
+        assert(!isnan(u[i]));
+        assert(!isnan(v[i]));
+        assert(!isnan(w[i]));
+    }
+#endif
 }
 
 
 template <uint_t iy0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
 __device__ inline void _load_2Y(const uint_t ix, const uint_t dummy, const uint_t iz,
-        Real * const r,
-        Real * const u,
-        Real * const v,
-        Real * const w,
-        Real * const e,
-        Real * const G,
-        Real * const P,
+        Real * const __restrict__ r,
+        Real * const __restrict__ u,
+        Real * const __restrict__ v,
+        Real * const __restrict__ w,
+        Real * const __restrict__ e,
+        Real * const __restrict__ G,
+        Real * const __restrict__ P,
         const uint_t global_iz,
-        const devPtrSet * const ghost)
+        const DevicePointer * const __restrict__ ghost)
 {
     // GMEM
     const uint_t id0 = GHOSTMAPY(ix, ghostStart+0, iz-3+global_iz);
@@ -980,21 +1058,34 @@ __device__ inline void _load_2Y(const uint_t ix, const uint_t dummy, const uint_
     P[texStart+1]  = tex3D(texP, ix, iy0+1, iz);
     P[texStart+2]  = tex3D(texP, ix, iy0+2, iz);
     P[texStart+3]  = tex3D(texP, ix, iy0+3, iz);
+
+#ifndef NDEBUG
+    for (uint_t i = 0; i < 6; ++i)
+    {
+        assert(r[i] >  0.0f);
+        assert(e[i] >  0.0f);
+        assert(G[i] >  0.0f);
+        assert(P[i] >= 0.0f);
+        assert(!isnan(u[i]));
+        assert(!isnan(v[i]));
+        assert(!isnan(w[i]));
+    }
+#endif
 }
 
 
 
 template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
 __device__ inline void _load_3X(const uint_t dummy, const uint_t iy, const uint_t iz,
-        Real * const r,
-        Real * const u,
-        Real * const v,
-        Real * const w,
-        Real * const e,
-        Real * const G,
-        Real * const P,
+        Real * const __restrict__ r,
+        Real * const __restrict__ u,
+        Real * const __restrict__ v,
+        Real * const __restrict__ w,
+        Real * const __restrict__ e,
+        Real * const __restrict__ G,
+        Real * const __restrict__ P,
         const uint_t global_iz,
-        const devPtrSet * const ghost)
+        const DevicePointer * const __restrict__ ghost)
 {
     // GMEM
     const uint_t id0 = GHOSTMAPX(ghostStart+0, iy, iz-3+global_iz);
@@ -1057,20 +1148,33 @@ __device__ inline void _load_3X(const uint_t dummy, const uint_t iy, const uint_
     P[texStart+0]  = tex3D(texP, ix0+0, iy, iz);
     P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
     P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
+
+#ifndef NDEBUG
+    for (uint_t i = 0; i < 6; ++i)
+    {
+        assert(r[i] >  0.0f);
+        assert(e[i] >  0.0f);
+        assert(G[i] >  0.0f);
+        assert(P[i] >= 0.0f);
+        assert(!isnan(u[i]));
+        assert(!isnan(v[i]));
+        assert(!isnan(w[i]));
+    }
+#endif
 }
 
 
 template <uint_t iy0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
 __device__ inline void _load_3Y(const uint_t ix, const uint_t dummy, const uint_t iz,
-        Real * const r,
-        Real * const u,
-        Real * const v,
-        Real * const w,
-        Real * const e,
-        Real * const G,
-        Real * const P,
+        Real * const __restrict__ r,
+        Real * const __restrict__ u,
+        Real * const __restrict__ v,
+        Real * const __restrict__ w,
+        Real * const __restrict__ e,
+        Real * const __restrict__ G,
+        Real * const __restrict__ P,
         const uint_t global_iz,
-        const devPtrSet * const ghost)
+        const DevicePointer * const __restrict__ ghost)
 {
     // GMEM
     const uint_t id0 = GHOSTMAPY(ix, ghostStart+0, iz-3+global_iz);
@@ -1133,20 +1237,33 @@ __device__ inline void _load_3Y(const uint_t ix, const uint_t dummy, const uint_
     P[texStart+0]  = tex3D(texP, ix, iy0+0, iz);
     P[texStart+1]  = tex3D(texP, ix, iy0+1, iz);
     P[texStart+2]  = tex3D(texP, ix, iy0+2, iz);
-}
 
-
-__device__
-void _print_stencil(const uint_t bx, const uint_t by, const uint_t tx, const uint_t ty, const Real * const s)
-{
-    if (bx == blockIdx.x && by == blockIdx.y && tx == threadIdx.x && ty == threadIdx.y)
+#ifndef NDEBUG
+    for (uint_t i = 0; i < 6; ++i)
     {
-        printf("Block [%d,%d,%d], Thread [%d,%d,%d], Stencil:\n(",bx,by,blockIdx.z,tx,ty,threadIdx.z);
-        for (uint_t i = 0; i < _STENCIL_WIDTH_-1; ++i)
-            printf("%f, ", s[i]);
-        printf("%f)\n", s[_STENCIL_WIDTH_-1]);
+        assert(r[i] >  0.0f);
+        assert(e[i] >  0.0f);
+        assert(G[i] >  0.0f);
+        assert(P[i] >= 0.0f);
+        assert(!isnan(u[i]));
+        assert(!isnan(v[i]));
+        assert(!isnan(w[i]));
     }
+#endif
 }
+
+
+/* __device__ */
+/* void _print_stencil(const uint_t bx, const uint_t by, const uint_t tx, const uint_t ty, const Real * const s) */
+/* { */
+/*     if (bx == blockIdx.x && by == blockIdx.y && tx == threadIdx.x && ty == threadIdx.y) */
+/*     { */
+/*         printf("Block [%d,%d,%d], Thread [%d,%d,%d], Stencil:\n(",bx,by,blockIdx.z,tx,ty,threadIdx.z); */
+/*         for (uint_t i = 0; i < _STENCIL_WIDTH_-1; ++i) */
+/*             printf("%f, ", s[i]); */
+/*         printf("%f)\n", s[_STENCIL_WIDTH_-1]); */
+/*     } */
+/* } */
 
 
 
