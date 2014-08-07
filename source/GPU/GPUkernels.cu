@@ -158,7 +158,7 @@ void _zextraterm_hllc(const uint_t nslices,
 
 __global__
 void _xflux(const uint_t nslices, const uint_t global_iz,
-        DevicePointer ghostL, DevicePointer ghostR, DevicePointer flux,
+        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
         Real * const __restrict__ xtra_vel,
         Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
         Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
@@ -204,12 +204,14 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             Real P[6];
 
             // 1.)
+            // GMEM transactions are cached, effective GMEM accesses are 7*3
+            // (according to nvvp)
             if (0 == ix)
-                _load_3X<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL);
+                _load_3X<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*TEX)
             else if (1 == ix)
-                _load_2X<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL);
+                _load_2X<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*TEX)
             else if (2 == ix)
-                _load_1X<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL);
+                _load_1X<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*TEX)
             else if (NXP1-3 == ix)
                 _load_1X<NXP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else if (NXP1-2 == ix)
@@ -217,105 +219,105 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             else if (NXP1-1 == ix)
                 _load_3X<NXP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else
-                _load_internal_X(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL);
+                _load_internal_X(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
 
-            /* // 2.) */
-            /* // convert to primitive variables */
-/* #pragma unroll 6 */
-            /* for (uint_t i = 0; i < 6; ++i) */
-            /* { */
-            /*     e[i] = (e[i] - 0.5f*(u[i]*u[i] + v[i]*v[i] + w[i]*w[i])/r[i] - P[i]) / G[i]; */
-            /*     u[i] = u[i]/r[i]; */
-            /*     v[i] = v[i]/r[i]; */
-            /*     w[i] = w[i]/r[i]; */
-            /* } */
-
-            /* const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]); */
-            /* const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]); */
-            /* assert(!isnan(rp)); assert(!isnan(rm)); */
-
-            /* const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]); */
-            /* const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]); */
-            /* assert(!isnan(Gp)); assert(!isnan(Gm)); */
-
-            /* const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]); */
-            /* const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]); */
-            /* assert(!isnan(Pp)); assert(!isnan(Pm)); */
-
-            /* const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]); */
-            /* const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]); */
-            /* assert(!isnan(pp)); assert(!isnan(pm)); */
-
-            /* const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]); */
-            /* const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]); */
-            /* assert(!isnan(up)); assert(!isnan(um)); */
-
-            /* const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]); */
-            /* const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]); */
-            /* assert(!isnan(vp)); assert(!isnan(vm)); */
-
-            /* const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]); */
-            /* const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]); */
-            /* assert(!isnan(wp)); assert(!isnan(wm)); */
-
-            /* // 3.) */
-            /* Real sm, sp; */
-            /* _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); */
-            /* const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp); */
-            /* assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss)); */
-
-            /* // 4.) */
-            /* const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss); */
-            /* const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss); */
-            /* const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss); */
-            /* const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss); */
-            /* const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); */
-            /* const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss); */
-            /* const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss); */
-            /* assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP)); */
-
-            /* const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss); */
-
+            // 2.)
+            // convert to primitive variables
 #pragma unroll 6
             for (uint_t i = 0; i < 6; ++i)
             {
-                r[0] += r[i];
-                u[0] += u[i];
-                v[0] += v[i];
-                w[0] += w[i];
-                e[0] += e[i];
-                G[0] += G[i];
-                P[0] += P[i];
+                e[i] = (e[i] - 0.5f*(u[i]*u[i] + v[i]*v[i] + w[i]*w[i])/r[i] - P[i]) / G[i];
+                u[i] = u[i]/r[i];
+                v[i] = v[i]/r[i];
+                w[i] = w[i]/r[i];
             }
+
+            const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]);
+            const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]);
+            assert(!isnan(rp)); assert(!isnan(rm));
+
+            const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]);
+            const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]);
+            assert(!isnan(Gp)); assert(!isnan(Gm));
+
+            const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]);
+            const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]);
+            assert(!isnan(Pp)); assert(!isnan(Pm));
+
+            const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]);
+            const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]);
+            assert(!isnan(pp)); assert(!isnan(pm));
+
+            const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]);
+            const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]);
+            assert(!isnan(up)); assert(!isnan(um));
+
+            const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]);
+            const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]);
+            assert(!isnan(vp)); assert(!isnan(vm));
+
+            const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]);
+            const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]);
+            assert(!isnan(wp)); assert(!isnan(wm));
+
+            // 3.)
+            Real sm, sp;
+            _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp);
+            const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp);
+            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
+
+            // 4.)
+            const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss);
+            const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss);
+            const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss);
+            const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss);
+            const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss);
+            const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss);
+            const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss);
+            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+
+            const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss);
+
+/* #pragma unroll 6 */
+/*             for (uint_t i = 0; i < 6; ++i) */
+/*             { */
+/*                 r[0] += r[i]; */
+/*                 u[0] += u[i]; */
+/*                 v[0] += v[i]; */
+/*                 w[0] += w[i]; */
+/*                 e[0] += e[i]; */
+/*                 G[0] += G[i]; */
+/*                 P[0] += P[i]; */
+/*             } */
+/*             const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1); */
+/*             flux.r[idx] = r[0]; */
+/*             flux.u[idx] = u[0]; */
+/*             flux.v[idx] = v[0]; */
+/*             flux.w[idx] = w[0]; */
+/*             flux.e[idx] = e[0]; */
+/*             flux.G[idx] = G[0]; */
+/*             flux.P[idx] = P[0]; */
+/*             xtra_vel[idx] = r[0]; */
+/*             xtra_Gm[idx]  = w[0]; */
+/*             xtra_Gp[idx]  = e[0]; */
+/*             xtra_Pm[idx]  = P[0]; */
+/*             xtra_Pp[idx]  = u[0]; */
+
             const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
-            flux.r[idx] = r[0];
-            flux.u[idx] = u[0];
-            flux.v[idx] = v[0];
-            flux.w[idx] = w[0];
-            flux.e[idx] = e[0];
-            flux.G[idx] = G[0];
-            flux.P[idx] = P[0];
-            xtra_vel[idx] = r[0];
-            xtra_Gm[idx]  = w[0];
-            xtra_Gp[idx]  = e[0];
-            xtra_Pm[idx]  = P[0];
-            xtra_Pp[idx]  = u[0];
+            flux.r[idx] = fr;
+            flux.u[idx] = fu;
+            flux.v[idx] = fv;
+            flux.w[idx] = fw;
+            flux.e[idx] = fe;
+            flux.G[idx] = fG;
+            flux.P[idx] = fP;
 
-            /* const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1); */
-            /* flux.r[idx] = fr; */
-            /* flux.u[idx] = fu; */
-            /* flux.v[idx] = fv; */
-            /* flux.w[idx] = fw; */
-            /* flux.e[idx] = fe; */
-            /* flux.G[idx] = fG; */
-            /* flux.P[idx] = fP; */
-
-            /* // 5.) */
-            /* xtra_vel[idx] = hllc_vel; */
-            /* xtra_Gm[idx]  = Gm; */
-            /* xtra_Gp[idx]  = Gp; */
-            /* xtra_Pm[idx]  = Pm; */
-            /* xtra_Pp[idx]  = Pp; */
+            // 5.)
+            xtra_vel[idx] = hllc_vel;
+            xtra_Gm[idx]  = Gm;
+            xtra_Gp[idx]  = Gp;
+            xtra_Pm[idx]  = Pm;
+            xtra_Pp[idx]  = Pp;
         }
     }
 }
@@ -324,7 +326,7 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
 
 __global__
 void _yflux(const uint_t nslices, const uint_t global_iz,
-        DevicePointer ghostL, DevicePointer ghostR, DevicePointer flux,
+        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
         Real * const __restrict__ xtra_vel,
         Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
         Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
@@ -370,12 +372,14 @@ void _yflux(const uint_t nslices, const uint_t global_iz,
             Real P[6];
 
             // 1.)
+            // GMEM transactions are cached, effective GMEM accesses are 7*3
+            // (according to nvvp)
             if (0 == iy)
-                _load_3Y<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL);
+                _load_3Y<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*TEX)
             else if (1 == iy)
-                _load_2Y<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL);
+                _load_2Y<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*TEX)
             else if (2 == iy)
-                _load_1Y<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL);
+                _load_1Y<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*TEX)
             else if (NYP1-3 == iy)
                 _load_1Y<NYP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else if (NYP1-2 == iy)
@@ -383,7 +387,7 @@ void _yflux(const uint_t nslices, const uint_t global_iz,
             else if (NYP1-1 == iy)
                 _load_3Y<NYP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else
-                _load_internal_Y(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL);
+                _load_internal_Y(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
 
             // 2.)
             // convert to primitive variables
@@ -506,7 +510,7 @@ void _zflux(const uint_t nslices, DevicePointer flux,
             Real P[6];
 
             // 1.)
-            _load_internal_Z(ix, iy, iz, r, u, v, w, e, G, P, 0, NULL);
+            _load_internal_Z(ix, iy, iz, r, u, v, w, e, G, P, 0, NULL); // load 7*(6*TEX)
 
             // 2.)
             // convert to primitive variables
@@ -873,10 +877,40 @@ void GPU::TestKernel()
 
     DevicePointer zflux(d_zflux);
 
-    DevicePointer rhs(d_rhs);
+
+    // rearrange GPU memory for TEST
+    for (int var = 0; var < 7; ++var)
+    {
+        cudaFree(d_tmp[var]);
+        cudaFree(d_rhs[var]);
+    }
+    cudaFree(d_Gm);
+    cudaFree(d_Gp);
+    cudaFree(d_Pm);
+    cudaFree(d_Pp);
+    cudaFree(d_hllc_vel);
+    cudaFree(d_sumG);
+    cudaFree(d_sumP);
+    cudaFree(d_divU);
+
+    const uint_t nslices = NodeBlock::sizeZ;
+    const uint_t xflxSize = (NodeBlock::sizeX+1)*NodeBlock::sizeY*nslices;
+    const uint_t yflxSize = NodeBlock::sizeX*(NodeBlock::sizeY+1)*nslices;
+    const uint_t zflxSize = NodeBlock::sizeX*NodeBlock::sizeY*(nslices+1);
+
+    Real *d_extra_X[5];
+    Real *d_extra_Y[5];
+    Real *d_extra_Z[5];
+    for (int i = 0; i < 5; ++i)
+    {
+        cudaMalloc(&(d_extra_X[i]), xflxSize * sizeof(Real));
+        cudaMalloc(&(d_extra_Y[i]), yflxSize * sizeof(Real));
+        cudaMalloc(&(d_extra_Z[i]), zflxSize * sizeof(Real));
+    }
+    GPU::tell_memUsage_GPU();
+
 
     {
-        const uint_t nslices = NodeBlock::sizeZ;
 
         const dim3 xblocks(1, _NTHREADS_, 1);
         const dim3 yblocks(_NTHREADS_, 1, 1);
@@ -885,18 +919,30 @@ void GPU::TestKernel()
         const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1);
         const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
 
-        GPU::profiler.push_startCUDA("_XFLUX");
-        /* _xflux<<<xgrid, xblocks>>>(nslices, 0, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-        _xflux<<<1, 1>>>(nslices, 0, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        cudaStream_t *_s = (cudaStream_t *) malloc(3*sizeof(cudaStream_t));
+        for (int i = 0; i < 3; ++i)
+            cudaStreamCreate(&(_s[i]));
+
+        GPU::profiler.push_startCUDA("_XFLUX", &_s[0]);
+        _xflux<<<xgrid, xblocks, 0, _s[0]>>>(nslices, 0, xghostL, xghostR, xflux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]);
         GPU::profiler.pop_stopCUDA();
 
-        GPU::profiler.push_startCUDA("_YFLUX");
-        _yflux<<<ygrid, yblocks>>>(nslices, 0, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        GPU::profiler.push_startCUDA("_YFLUX", &_s[0]);
+        _yflux<<<ygrid, yblocks, 0, _s[0]>>>(nslices, 0, yghostL, yghostR, yflux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]);
         GPU::profiler.pop_stopCUDA();
 
-        GPU::profiler.push_startCUDA("_ZFLUX");
-        _zflux<<<zgrid, zblocks>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        GPU::profiler.push_startCUDA("_ZFLUX", &_s[0]);
+        _zflux<<<zgrid, zblocks, 0, _s[0]>>>(nslices, zflux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]);
         GPU::profiler.pop_stopCUDA();
+
+        /* _xflux<<<xgrid, xblocks, 0, _s[0]>>>(nslices, 0, xghostL, xghostR, xflux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]); */
+        /* _yflux<<<ygrid, yblocks, 0, _s[1]>>>(nslices, 0, yghostL, yghostR, yflux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]); */
+        /* _zflux<<<zgrid, zblocks, 0, _s[2]>>>(nslices, zflux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]); */
+
+        cudaDeviceSynchronize();
+
+        for (int i = 0; i < 3; ++i)
+            cudaStreamDestroy(_s[i]);
     }
 }
 
