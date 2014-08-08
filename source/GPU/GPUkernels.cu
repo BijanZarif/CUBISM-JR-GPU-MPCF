@@ -221,17 +221,18 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             else
                 _load_internal_X(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
 
-            // 2.)
-            // convert to primitive variables
-#pragma unroll 6
-            for (uint_t i = 0; i < 6; ++i)
-            {
-                e[i] = (e[i] - 0.5f*(u[i]*u[i] + v[i]*v[i] + w[i]*w[i])/r[i] - P[i]) / G[i];
-                u[i] = u[i]/r[i];
-                v[i] = v[i]/r[i];
-                w[i] = w[i]/r[i];
-            }
+            /* // 2.) */
+            /* // convert to primitive variables */
+/* #pragma unroll 6 */
+            /* for (uint_t i = 0; i < 6; ++i) */
+            /* { */
+            /*     e[i] = (e[i] - 0.5f*(u[i]*u[i] + v[i]*v[i] + w[i]*w[i])/r[i] - P[i]) / G[i]; */
+            /*     u[i] = u[i]/r[i]; */
+            /*     v[i] = v[i]/r[i]; */
+            /*     w[i] = w[i]/r[i]; */
+            /* } */
 
+///////////////////////////////////////////////////////////////////////////////
             /* Real rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp; */
             /* _weno_reconstruction(rm, rp, r); */
             /* _weno_reconstruction(Gm, Gp, G); */
@@ -261,77 +262,81 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             /* assert(!isnan(up)); assert(!isnan(um)); */
             /* assert(!isnan(vp)); assert(!isnan(vm)); */
             /* assert(!isnan(wp)); assert(!isnan(wm)); */
+///////////////////////////////////////////////////////////////////////////////
 
-            const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]);
-            const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]);
-            assert(!isnan(rp)); assert(!isnan(rm));
+            /* const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]); */
+            /* const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]); */
+            /* assert(!isnan(rp)); assert(!isnan(rm)); */
 
-            const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]);
-            const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]);
-            assert(!isnan(Gp)); assert(!isnan(Gm));
+            /* const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]); */
+            /* const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]); */
+            /* assert(!isnan(Gp)); assert(!isnan(Gm)); */
 
-            const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]);
-            const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]);
-            assert(!isnan(Pp)); assert(!isnan(Pm));
+            /* const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]); */
+            /* const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]); */
+            /* assert(!isnan(Pp)); assert(!isnan(Pm)); */
 
-            const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]);
-            const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]);
-            assert(!isnan(pp)); assert(!isnan(pm));
+            /* const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]); */
+            /* const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]); */
+            /* assert(!isnan(pp)); assert(!isnan(pm)); */
 
-            const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]);
-            const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]);
-            assert(!isnan(up)); assert(!isnan(um));
+            /* const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]); */
+            /* const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]); */
+            /* assert(!isnan(up)); assert(!isnan(um)); */
 
-            const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]);
-            const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]);
-            assert(!isnan(vp)); assert(!isnan(vm));
+            /* const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]); */
+            /* const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]); */
+            /* assert(!isnan(vp)); assert(!isnan(vm)); */
 
-            const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]);
-            const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]);
-            assert(!isnan(wp)); assert(!isnan(wm));
+            /* const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]); */
+            /* const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]); */
+            /* assert(!isnan(wp)); assert(!isnan(wm)); */
 
-            // 3.)
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp);
-            const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp);
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
+            /* // 3.) */
+            /* Real sm, sp; */
+            /* _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); */
+            /* const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp); */
+            /* assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss)); */
 
-            // 4.)
-            const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss);
-            const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss);
-            const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss);
-            const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss);
-            const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss);
-            const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss);
-            const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss);
-            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+            /* // 4.) */
+            /* const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss); */
+            /* const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss); */
+            /* const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss); */
+            /* const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss); */
+            /* const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); */
+            /* const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss); */
+            /* const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss); */
+            /* assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP)); */
 
-            const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss);
+            /* const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss); */
 
-/* #pragma unroll 6 */
-/*             for (uint_t i = 0; i < 6; ++i) */
-/*             { */
-/*                 r[0] += r[i]; */
-/*                 u[0] += u[i]; */
-/*                 v[0] += v[i]; */
-/*                 w[0] += w[i]; */
-/*                 e[0] += e[i]; */
-/*                 G[0] += G[i]; */
-/*                 P[0] += P[i]; */
-/*             } */
-/*             const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1); */
-/*             flux.r[idx] = r[0]; */
-/*             flux.u[idx] = u[0]; */
-/*             flux.v[idx] = v[0]; */
-/*             flux.w[idx] = w[0]; */
-/*             flux.e[idx] = e[0]; */
-/*             flux.G[idx] = G[0]; */
-/*             flux.P[idx] = P[0]; */
-/*             xtra_vel[idx] = r[0]; */
-/*             xtra_Gm[idx]  = w[0]; */
-/*             xtra_Gp[idx]  = e[0]; */
-/*             xtra_Pm[idx]  = P[0]; */
-/*             xtra_Pp[idx]  = u[0]; */
+            if (global_iz)
+            {
+#pragma unroll 6
+                for (uint_t i = 0; i < 6; ++i)
+                {
+                    r[0] += r[i];
+                    u[0] += u[i];
+                    v[0] += v[i];
+                    w[0] += w[i];
+                    e[0] += e[i];
+                    G[0] += G[i];
+                    P[0] += P[i];
+                }
+            }
+            const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
+            flux.r[idx] = r[0];
+            flux.u[idx] = u[0];
+            flux.v[idx] = v[0];
+            flux.w[idx] = w[0];
+            flux.e[idx] = e[0];
+            flux.G[idx] = G[0];
+            flux.P[idx] = P[0];
+            xtra_vel[idx] = r[0];
+            xtra_Gm[idx]  = w[0];
+            xtra_Gp[idx]  = e[0];
+            xtra_Pm[idx]  = P[0];
+            xtra_Pp[idx]  = u[0];
 
             /* const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1); */
             /* flux.r[idx] = fr; */
