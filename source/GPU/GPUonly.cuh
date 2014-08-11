@@ -186,7 +186,7 @@ inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, 
 {
     const Real wenoeps_f = (Real)WENOEPS;
 #ifndef _WENO3_
-    // 96 FLOP
+    // (90 MUL/ADD/SUB + 6 DIV) = 96 FLOP
     const Real inv6 = 1.0f/6.0f;
     const Real inv3 = 1.0f/3.0f;
     const Real q1 =  10.0f*inv3;
@@ -246,7 +246,7 @@ inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, 
 {
     const Real wenoeps_f = (Real)WENOEPS;
 #ifndef _WENO3_
-    // 96 FLOP
+    // (90 MUL/ADD/SUB + 6 DIV) = 96 FLOP
     const Real inv6 = 1.0f/6.0f;
     const Real inv3 = 1.0f/3.0f;
     const Real q1 =   4.0f*inv3;
@@ -347,7 +347,7 @@ inline void _char_vel_einfeldt(const Real rm, const Real rp,
         const Real pm, const Real pp,
         const Real Gm, const Real Gp,
         const Real Pm, const Real Pp,
-        Real& outm, Real& outp) // 29 FLOP
+        Real& outm, Real& outp) // (23 MUL/ADD/SUB + 6 DIV) = 29 FLOP
 {
     /* *
      * Compute upper and lower bounds of signal velocities for the Riemann
@@ -400,7 +400,7 @@ __device__
 inline Real _char_vel_star(const Real rm, const Real rp,
         const Real vm, const Real vp,
         const Real pm, const Real pp,
-        const Real sm, const Real sp) // 11 FLOP
+        const Real sm, const Real sp) // (10 MUL/ADD/SUB + 1 DIV) = 11 FLOP
 {
     const Real facm = rm * (sm - vm);
     const Real facp = rp * (sp - vp);
@@ -412,7 +412,7 @@ inline Real _char_vel_star(const Real rm, const Real rp,
 __device__
 inline Real _hllc_rho(const Real rm, const Real rp,
         const Real vm, const Real vp,
-        const Real sm, const Real sp, const Real ss) // 23 FLOP
+        const Real sm, const Real sp, const Real ss) // (21 MUL/ADD/SUB + 2 DIV) = 23 FLOP
 {
     /* *
      * The flux computation is split into 4 parts:
@@ -450,7 +450,7 @@ __device__
 inline Real _hllc_vel(const Real rm,  const Real rp,
         const Real vm,  const Real vp,
         const Real vdm, const Real vdp,
-        const Real sm,  const Real sp,  const Real ss) // 25 FLOP
+        const Real sm,  const Real sp,  const Real ss) // (23 MUL/ADD/SUB + 2 DIV) = 25 FLOP
 {
     /* *
      * The flux computation is split into 4 parts:
@@ -491,7 +491,7 @@ __device__
 inline Real _hllc_pvel(const Real rm, const Real rp,
         const Real vm, const Real vp,
         const Real pm, const Real pp,
-        const Real sm, const Real sp, const Real ss) // 29 FLOP
+        const Real sm, const Real sp, const Real ss) // (27 MUL/ADD/SUB + 2 DIV) = 29 FLOP
 {
     /* *
      * The flux computation is split into 4 parts:
@@ -535,7 +535,7 @@ inline Real _hllc_e(const Real rm,  const Real rp,
         const Real pm,  const Real pp,
         const Real Gm,  const Real Gp,
         const Real Pm,  const Real Pp,
-        const Real sm,  const Real sp,  const Real ss) // 59 FLOP
+        const Real sm,  const Real sp,  const Real ss) // (55 MUL/ADD/SUB + 4 DIV) = 59 FLOP
 {
     /* *
      * The flux computation is split into 4 parts:
@@ -573,7 +573,7 @@ __device__
 inline Real _extraterm_hllc_vel(const Real um, const Real up,
         const Real Gm, const Real Gp,
         const Real Pm, const Real Pp,
-        const Real sm, const Real sp, const Real ss) // 19 FLOP
+        const Real sm, const Real sp, const Real ss) // (17 MUL/ADD/SUB + 2 DIV) = 19 FLOP
 {
     const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
     const Real s_minus   = fminf(0.0f, sm);

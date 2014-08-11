@@ -1,7 +1,7 @@
 /* File        : pureCopyKernel.cu */
 /* Maintainer  : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Fri 08 Aug 2014 03:39:40 PM CEST */
-/* Modified    : Fri 08 Aug 2014 07:00:34 PM CEST */
+/* Modified    : Sat 09 Aug 2014 09:46:56 AM CEST */
 /* Description : */
 #include <stdio.h>
 
