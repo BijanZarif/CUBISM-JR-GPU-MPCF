@@ -233,7 +233,7 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             } // 6 x (8 MUL/ADD/SUB + 5 DIV) = 78 FLOPS
 
 ///////////////////////////////////////////////////////////////////////////////
-            // TEST //
+            // TEST MORE SOFTWARE PIPELINE //
             /* Real rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp; */
             /* _weno_reconstruction(rm, rp, r); */
             /* _weno_reconstruction(Gm, Gp, G); */
