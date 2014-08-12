@@ -45,7 +45,7 @@ typedef std::vector<Real> cuda_vector_t;
 
 namespace GPU
 {
-    // Named events
+    // Events
     enum {H2D_3DARRAY=0};
 
     // TODO: REMOVE
@@ -68,8 +68,10 @@ namespace GPU
     void h2d_tmp(const RealPtrVec_t& src, const uint_t N);
     void d2h_rhs(RealPtrVec_t& dst, const uint_t N);
     void d2h_tmp(RealPtrVec_t& dst, const uint_t N);
+    void d2h_divF(RealPtrVec_t& dst, const uint_t N, const int s_id);
 
     // sync
+    void wait_event(const int e_id);
     void h2d_3DArray_wait();
     void d2h_rhs_wait();
     void d2h_tmp_wait();
@@ -86,12 +88,12 @@ namespace GPU
     ///////////////////////////////////////////////////////////////////////////
     void bind_textures();
     void unbind_textures();
-    void xflux(const uint_t nslices, const uint_t global_iz);
-    void yflux(const uint_t nslices, const uint_t global_iz);
-    void zflux(const uint_t nslices);
+    void xflux(const uint_t nslices, const uint_t global_iz, const int s_id);
+    void yflux(const uint_t nslices, const uint_t global_iz, const int s_id);
+    void zflux(const uint_t nslices, const int s_id);
     void divergence(const Real a, const Real dtinvh, const uint_t nslices);
     void update(const Real b, const uint_t nslices);
-    void MaxSpeedOfSound(const uint_t nslices);
+    void MaxSpeedOfSound(const uint_t nslices, const int s_id);
 
     // Test Kernel wrapper
     void TestKernel();

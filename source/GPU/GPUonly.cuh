@@ -75,10 +75,16 @@ extern Real *d_sumG, *d_sumP, *d_divU;
 extern int *d_maxSOS;
 
 // use non-null stream (async)
+extern cudaStream_t *stream;
+
+// TODO: remove
 extern cudaStream_t stream1;
 extern cudaStream_t stream2;
 
 // events
+extern cudaEvent_t *event;
+
+// TODO: remove
 extern cudaEvent_t h2d_tmp_completed;
 extern cudaEvent_t divergence_completed;
 extern cudaEvent_t update_completed;

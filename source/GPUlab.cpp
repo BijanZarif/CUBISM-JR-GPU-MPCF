@@ -28,8 +28,8 @@ GPUlab::GPUlab(GridMPI& G, const uint_t nslices_, const int verbosity) :
     GPU_output_size( SLICE_GPU * nslices_ ),
     nslices(nslices_), nslices_last( sizeZ % nslices_ ), nchunks( (sizeZ + nslices_ - 1) / nslices_ ),
     cart_world(G.getCartComm()), request(6), status(6),
-    BUFFER1(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 0), // per chunk, stream 0
-    BUFFER2(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 1), // per chunk, stream 1
+    BUFFER1(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 0), // per chunk
+    BUFFER2(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 0), // per chunk
     grid(G),
     halox(3*sizeY*sizeZ), // all domain (buffer zone for halo extraction + MPI send/recv)
     haloy(sizeX*3*sizeZ), // all domain
@@ -196,7 +196,8 @@ void GPUlab::_process_chunk_sos(const RealPtrVec_t& src)
     ///////////////////////////////////////////////////////////////////
     // 5.)
     ///////////////////////////////////////////////////////////////////
-    GPU::h2d_3DArray_wait(0);
+    GPU::wait_event(GPU::H2D_3DARRAY);
+    /* GPU::h2d_3DArray_wait(0); */
 }
 
 
@@ -241,7 +242,9 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
     // 3.)
     ///////////////////////////////////////////////////////////////////
     /* _dump_chunk(1); */
-    Convection_CUDA convection(a, dtinvh);
+    /* Convection_CUDA convection(a, dtinvh); */
+    Convection_CUDA convection;
+
     if (chatty) printf("\t[LAUNCH CONVECTION KERNEL CHUNK %d]\n", curr_chunk_id);
     /* convection.compute(curr_slices, curr_iz); */
     //
@@ -264,6 +267,8 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
     // TODO: MUST CHANGE -> DIVERGENCE + UPDATE
     switch (chunk_state)
     {
+        // DL divF and update
+        //
         // Since operations are on previous chunk, this must only be
         // done on INTERMEDIATE or LAST chunks.  The copy back of
         // SINGLE and (actual) LAST chunks must be done after
@@ -272,19 +277,25 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
         case LAST: // operations are on chunk one before LAST (because of use of previous_buffer)!
             const uint_t prevOFFSET = SLICE_GPU * prev_iz;
 
-            GPU::d2h_rhs_wait(); // make sure previous d2h has finished
-            timer.start();
-            _copy_range(tmp, prevOFFSET, prev_buffer->GPUtmp, 0, SLICE_GPU * prev_slices);
-            const double t4 = timer.stop();
-            if (chatty)
-                printf("\t[COPY BACK TMP CHUNK %d TAKES %f sec]\n", prev_chunk_id, t4);
+            // wait for d2h_divF
+            // (one kernel update(a, b, dtinvh, src, tmp, offset, divF, Nelements) )
+            // compute tmp <- a * tmp - dtinvh * divF
+            // update  src <- b * tmp + src
+            //
 
-            GPU::d2h_tmp_wait();
-            timer.start();
-            _copy_range(src, prevOFFSET, prev_buffer->GPUout, 0, SLICE_GPU * prev_slices);
-            const double t2 = timer.stop();
-            if (chatty)
-                printf("\t[COPY BACK OUTPUT CHUNK %d TAKES %f sec]\n", prev_chunk_id, t2);
+            /* GPU::d2h_rhs_wait(); // make sure previous d2h has finished */
+            /* timer.start(); */
+            /* _copy_range(tmp, prevOFFSET, prev_buffer->GPUtmp, 0, SLICE_GPU * prev_slices); */
+            /* const double t4 = timer.stop(); */
+            /* if (chatty) */
+            /*     printf("\t[COPY BACK TMP CHUNK %d TAKES %f sec]\n", prev_chunk_id, t4); */
+
+            /* GPU::d2h_tmp_wait(); */
+            /* timer.start(); */
+            /* _copy_range(src, prevOFFSET, prev_buffer->GPUout, 0, SLICE_GPU * prev_slices); */
+            /* const double t2 = timer.stop(); */
+            /* if (chatty) */
+            /*     printf("\t[COPY BACK OUTPUT CHUNK %d TAKES %f sec]\n", prev_chunk_id, t2); */
 
             break;
     }
@@ -304,7 +315,7 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
     ///////////////////////////////////////////////////////////////////
     // 7.)
     ///////////////////////////////////////////////////////////////////
-    OFFSET = SLICE_GPU * curr_iz;
+    const uint_t OFFSET = SLICE_GPU * curr_iz;
 
     timer.start();
     switch (chunk_state)
@@ -320,7 +331,7 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
 
         case INTERMEDIATE:
             {
-                // left ghosts (reuse previous buffer)
+                // left zghosts (reuse previous buffer)
                 const uint_t prevOFFSET = SLICE_GPU * prev_slices;
                 _copy_range(curr_buffer->GPUin, 0, prev_buffer->GPUin, prevOFFSET, haloz.Nhalo);
 
@@ -331,14 +342,14 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
 
         case LAST:
             {
-                // left ghosts (reuse previous buffer)
+                // left zghosts (reuse previous buffer)
                 const uint_t prevOFFSET = SLICE_GPU * prev_slices;
                 _copy_range(curr_buffer->GPUin, 0, prev_buffer->GPUin, prevOFFSET, haloz.Nhalo);
 
                 // interior
                 _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, OFFSET, SLICE_GPU * curr_slices);
 
-                // right ghosts
+                // right zghosts
                 const uint_t current_rightOFFSET = haloz.Nhalo + SLICE_GPU * curr_slices;
                 _copy_range(curr_buffer->GPUin, current_rightOFFSET, haloz.right, 0, haloz.Nhalo);
                 break;
@@ -351,15 +362,16 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
     ///////////////////////////////////////////////////////////////////
     // 8.)
     ///////////////////////////////////////////////////////////////////
-    // TODO: REMOVE
-    /* GPU::d2h_rhs(prev_buffer->GPUtmp, SLICE_GPU * prev_slices); */
-    GPU::d2h_rhs(prev_buffer->GPUtmp, GPU_output_size);
+    /* // TODO: REMOVE */
+    /* /1* GPU::d2h_rhs(prev_buffer->GPUtmp, SLICE_GPU * prev_slices); *1/ */
+    /* GPU::d2h_rhs(prev_buffer->GPUtmp, GPU_output_size); */
 
     ///////////////////////////////////////////////////////////////////
     // 9.)
     ///////////////////////////////////////////////////////////////////
     /* GPU::d2h_tmp(prev_buffer->GPUout, SLICE_GPU * prev_slices); */
-    GPU::d2h_tmp(prev_buffer->GPUout, GPU_output_size);
+    /* GPU::d2h_tmp(prev_buffer->GPUout, GPU_output_size); */
+    GPU::d2h_divF(prev_buffer->GPUout, GPU_output_size, prev_buffer->stream_id);
 
     ///////////////////////////////////////////////////////////////////
     // 10.)

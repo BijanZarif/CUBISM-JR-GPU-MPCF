@@ -817,7 +817,7 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 ///////////////////////////////////////////////////////////////////////////////
 //                              KERNEL WRAPPERS                              //
 ///////////////////////////////////////////////////////////////////////////////
-void GPU::xflux(const uint_t nslices, const uint_t global_iz)
+void GPU::xflux(const uint_t nslices, const uint_t global_iz, const int s_id)
 {
 #ifndef _MUTE_GPU_
     DevicePointer xghostL(d_xgl);
@@ -827,16 +827,16 @@ void GPU::xflux(const uint_t nslices, const uint_t global_iz)
     {
         const dim3 blocks(1, _NTHREADS_, 1);
         const dim3 grid(NXP1, (NY + _NTHREADS_ -1)/_NTHREADS_, 1);
-        GPU::profiler.push_startCUDA("_XFLUX", &stream1);
-        _xflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        GPU::profiler.push_startCUDA("_XFLUX", &stream[s_id]);
+        _xflux<<<grid, blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
         GPU::profiler.pop_stopCUDA();
     }
 
     {
         const dim3 xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
         const dim3 xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
-        GPU::profiler.push_startCUDA("_XEXTRATERM", &stream1);
-        _xextraterm_hllc<<<xtraGrid, xtraBlocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+        GPU::profiler.push_startCUDA("_XEXTRATERM", &stream[s_id]);
+        _xextraterm_hllc<<<xtraGrid, xtraBlocks, 0, stream[s_id]>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
         GPU::profiler.pop_stopCUDA();
 
         // 70.1% of Peak BW (w/ ECC) on K20c
@@ -848,7 +848,7 @@ void GPU::xflux(const uint_t nslices, const uint_t global_iz)
 }
 
 
-void GPU::yflux(const uint_t nslices, const uint_t global_iz)
+void GPU::yflux(const uint_t nslices, const uint_t global_iz, const int s_id)
 {
 #ifndef _MUTE_GPU_
     DevicePointer yghostL(d_ygl);
@@ -859,15 +859,15 @@ void GPU::yflux(const uint_t nslices, const uint_t global_iz)
 
     {
         const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1);
-        GPU::profiler.push_startCUDA("_YFLUX", &stream1);
-        _yflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+        GPU::profiler.push_startCUDA("_YFLUX", &stream[s_id]);
+        _yflux<<<grid, blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
         GPU::profiler.pop_stopCUDA();
     }
 
     {
         const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-        GPU::profiler.push_startCUDA("_YEXTRATERM", &stream1);
-        _yextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+        GPU::profiler.push_startCUDA("_YEXTRATERM", &stream[s_id]);
+        _yextraterm_hllc<<<grid, blocks, 0, stream[s_id]>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
         GPU::profiler.pop_stopCUDA();
 
         // 78.6% of Peak BW (w/ ECC) on K20c
@@ -879,7 +879,7 @@ void GPU::yflux(const uint_t nslices, const uint_t global_iz)
 }
 
 
-void GPU::zflux(const uint_t nslices)
+void GPU::zflux(const uint_t nslices, const int s_id)
 {
 #ifndef _MUTE_GPU_
     DevicePointer zflux(d_zflux);
@@ -887,12 +887,12 @@ void GPU::zflux(const uint_t nslices)
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
     const dim3 blocks(_NTHREADS_, 1, 1);
 
-    GPU::profiler.push_startCUDA("_ZFLUX", &stream1);
-    _zflux<<<grid, blocks, 0, stream1>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+    GPU::profiler.push_startCUDA("_ZFLUX", &stream[s_id]);
+    _zflux<<<grid, blocks, 0, stream[s_id]>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
     GPU::profiler.pop_stopCUDA();
 
-    GPU::profiler.push_startCUDA("_ZEXTRATERM", &stream1);
-    _zextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+    GPU::profiler.push_startCUDA("_ZEXTRATERM", &stream[s_id]);
+    _zextraterm_hllc<<<grid, blocks, 0, stream[s_id]>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
     GPU::profiler.pop_stopCUDA();
 
     // 76.7% of Peak BW (w/ ECC) on K20c
@@ -944,14 +944,14 @@ void GPU::update(const Real b, const uint_t nslices)
 }
 
 
-void GPU::MaxSpeedOfSound(const uint_t nslices)
+void GPU::MaxSpeedOfSound(const uint_t nslices, const int s_id)
 {
 #ifndef _MUTE_GPU_
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
     const dim3 blocks(_NTHREADS_, 1, 1);
 
-    GPU::profiler.push_startCUDA("_MAXSOS", &stream1);
-    _maxSOS<<<grid, blocks, 0, stream1>>>(nslices, d_maxSOS);
+    GPU::profiler.push_startCUDA("_MAXSOS", &stream[s_id]);
+    _maxSOS<<<grid, blocks, 0, stream[s_id]>>>(nslices, d_maxSOS);
     GPU::profiler.pop_stopCUDA();
 #endif
 }

@@ -379,6 +379,14 @@ void GPU::d2h_tmp(RealPtrVec_t& dst, const uint_t N)
 ///////////////////////////////////////////////////////////////////////////
 // Sync
 ///////////////////////////////////////////////////////////////////////////
+void GPU::wait_event(const int e_id)
+{
+#ifndef _MUTE_GPU_
+    cudaEventSynchronize(event[e_id]);
+#endif
+}
+
+
 void GPU::h2d_3DArray_wait()
 {
 #ifndef _MUTE_GPU_

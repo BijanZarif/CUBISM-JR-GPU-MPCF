@@ -13,5 +13,5 @@
 class MaxSpeedOfSound_CUDA
 {
     public:
-        void compute(const uint_t nslices);
+        void compute(const uint_t nslices, const int s_id);
 };

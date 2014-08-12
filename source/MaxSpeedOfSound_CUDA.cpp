@@ -10,9 +10,9 @@
 #include "GPU.h"
 
 
-void MaxSpeedOfSound_CUDA::compute(const uint_t nslices)
+void MaxSpeedOfSound_CUDA::compute(const uint_t nslices, const int s_id)
 {
     GPU::bind_textures();
-    GPU::MaxSpeedOfSound(nslices);
+    GPU::MaxSpeedOfSound(nslices, s_id);
     GPU::unbind_textures();
 }
