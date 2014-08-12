@@ -55,6 +55,8 @@ class GPUlab
         const uint_t nslices_last; // nslices_last = sizeZ % nslices
         const uint_t nchunks;
 
+        Profiler *profiler;
+
         int* maxSOS; // pointer to mapped memory CPU/GPU
 
         ///////////////////////////////////////////////////////////////////////
@@ -116,17 +118,19 @@ class GPUlab
         {
             static const uint_t NVAR = GridMPI::NVAR; // number of variables in set
             const uint_t _sizeIn, _sizeOut;
+            const int stream_id;
             uint_t Nxghost, Nyghost; // may change depending on last chunk
 
             // Tmp storage for GPU input data
             cuda_vector_t GPUin_all;
             RealPtrVec_t GPUin;
 
+            // TODO: REMOVE
             // Tmp storage for GPU tmp
             cuda_vector_t GPUtmp_all;
             RealPtrVec_t GPUtmp;
 
-            // Tmp storage for GPU output data (updated solution)
+            // Tmp storage for GPU output data
             cuda_vector_t GPUout_all;
             RealPtrVec_t GPUout;
 
@@ -134,8 +138,8 @@ class GPUlab
             cuda_vector_t xyghost_all;
             RealPtrVec_t xghost_l, xghost_r, yghost_l, yghost_r;
 
-            HostBuffer(const uint_t sizeIn, const uint_t sizeOut, const uint_t sizeXghost, const uint_t sizeYghost) :
-                _sizeIn(sizeIn), _sizeOut(sizeOut),
+            HostBuffer(const uint_t sizeIn, const uint_t sizeOut, const uint_t sizeXghost, const uint_t sizeYghost, const int s_ID = -1) :
+                _sizeIn(sizeIn), _sizeOut(sizeOut), stream_id(s_ID),
                 Nxghost(sizeXghost), Nyghost(sizeYghost),
                 GPUin_all(NVAR*sizeIn, 0.0), GPUin(NVAR, NULL),
                 GPUtmp_all(NVAR*sizeOut, 0.0), GPUtmp(NVAR, NULL),

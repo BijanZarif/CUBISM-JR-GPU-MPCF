@@ -42,11 +42,19 @@ int *h_maxSOS; // host, mapped
 int *d_maxSOS; // device, mapped (different address)
 
 // use non-null stream (async)
+#define _NUM_STREAMS_ 2
+cudaStream_t *stream;
+
+// TODO: REMOVE
 cudaStream_t stream1;
 cudaStream_t stream2;
 cudaStream_t stream3;
 
 // events
+#define _NUM_EVENTS_ 2
+cudaEvent_t *event;
+
+// TODO: REMOVE
 cudaEvent_t divergence_completed;
 cudaEvent_t update_completed;
 cudaEvent_t h2d_3Darray_completed;
@@ -60,7 +68,7 @@ cudaEvent_t d2h_tmp_completed;
 ///////////////////////////////////////////////////////////////////////////////
 Profiler GPU::profiler; // combined CPU/GPU profiler
 
-static void _h2d_3DArray(cudaArray_t dst, const Real * const src, const int nslices)
+static void _h2d_3DArray(cudaArray_t dst, const Real * const src, const int nslices, const int s_id)
 {
     cudaMemcpy3DParms copyParams = {0};
     copyParams.extent            = make_cudaExtent(NodeBlock::sizeX, NodeBlock::sizeY, nslices);
@@ -68,7 +76,7 @@ static void _h2d_3DArray(cudaArray_t dst, const Real * const src, const int nsli
     copyParams.srcPtr            = make_cudaPitchedPtr((void *)src, NodeBlock::sizeX * sizeof(Real), NodeBlock::sizeX, NodeBlock::sizeY);
     copyParams.dstArray          = dst;
 
-    cudaMemcpy3DAsync(&copyParams, stream1);
+    cudaMemcpy3DAsync(&copyParams, stream[s_id]);
 }
 
 
@@ -146,11 +154,23 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
     *(int**)sos = h_maxSOS; // return a reference to the caller
 
     // create streams
+    stream = (cudaStream_t *) malloc(_NUM_STREAMS_ * sizeof(cudaStream_t));
+    assert(stream != NULL);
+    for (int i = 0 ; i < _NUM_STREAMS_; ++i)
+        cudaStreamCreate(&stream[i]);
+
+    // TODO: REMOVE
     cudaStreamCreate(&stream1);
     cudaStreamCreate(&stream2);
     cudaStreamCreate(&stream3);
 
     // create events
+    event = (cudaEvent_t *) malloc(_NUM_EVENTS_ * sizeof(cudaEvent_t));
+    assert(event != NULL);
+    for (int i = 0; i < _NUM_EVENTS_; ++i)
+        cudaEventCreate(&event[i]);
+
+    // TODO: REMOVE
     cudaEventCreate(&divergence_completed);
     cudaEventCreate(&update_completed);
     cudaEventCreate(&h2d_3Darray_completed);
@@ -222,11 +242,21 @@ void GPU::dealloc(const bool isroot)
     cudaFreeHost(h_maxSOS);
 
     // destroy streams
+    for (int i = 0; i < _NUM_STREAMS_; ++i)
+        cudaStreamDestroy(stream[i]);
+    free(stream);
+
+    // TODO: REMOVE
     cudaStreamDestroy(stream1);
     cudaStreamDestroy(stream2);
     cudaStreamDestroy(stream3);
 
     // destroy events
+    for (int i = 0; i < _NUM_EVENTS_; ++i)
+        cudaEventDestroy(event[i]);
+    free(event);
+
+    // TODO: REMOVE
     cudaEventDestroy(divergence_completed);
     cudaEventDestroy(update_completed);
     cudaEventDestroy(h2d_3Darray_completed);
@@ -255,34 +285,37 @@ void GPU::dealloc(const bool isroot)
 // H2D / D2H
 ///////////////////////////////////////////////////////////////////////////
 void GPU::upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, const RealPtrVec_t& xghost_r,
-        const uint_t Nyghost, const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r)
+        const uint_t Nyghost, const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r, const int s_id)
 {
 #ifndef _MUTE_GPU_
+    assert(0 <= s_id && s_id < _NUM_STREAMS_);
+
     // TODO: use larger arrays for ghosts to minimize API overhead +
     // increase BW performance
-    GPU::profiler.push_startCUDA("SEND GHOSTS", &stream1);
+    GPU::profiler.push_startCUDA("SEND GHOSTS", &stream[s_id]);
     for (int i = 0; i < VSIZE; ++i)
     {
         // x
-        cudaMemcpyAsync(d_xgl[i], xghost_l[i], Nxghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-        cudaMemcpyAsync(d_xgr[i], xghost_r[i], Nxghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
+        cudaMemcpyAsync(d_xgl[i], xghost_l[i], Nxghost*sizeof(Real), cudaMemcpyHostToDevice, stream[s_id]);
+        cudaMemcpyAsync(d_xgr[i], xghost_r[i], Nxghost*sizeof(Real), cudaMemcpyHostToDevice, stream[s_id]);
         // y
-        cudaMemcpyAsync(d_ygl[i], yghost_l[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
-        cudaMemcpyAsync(d_ygr[i], yghost_r[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream1);
+        cudaMemcpyAsync(d_ygl[i], yghost_l[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream[s_id]);
+        cudaMemcpyAsync(d_ygr[i], yghost_r[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream[s_id]);
     }
     GPU::profiler.pop_stopCUDA();
 #endif
 }
 
 
-void GPU::h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices)
+void GPU::h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices, const int s_id)
 {
 #ifndef _MUTE_GPU_
-    GPU::profiler.push_startCUDA("SEND 3DARRAY", &stream1);
+    assert(0 <= s_id && s_id < _NUM_STREAMS_);
+    GPU::profiler.push_startCUDA("SEND 3DARRAY", &stream[s_id]);
     for (int i = 0; i < VSIZE; ++i)
-        _h2d_3DArray(d_GPUin[i], src[i], nslices);
+        _h2d_3DArray(d_GPUin[i], src[i], nslices, s_id);
     GPU::profiler.pop_stopCUDA();
-    cudaEventRecord(h2d_3Darray_completed, stream1);
+    cudaEventRecord(event[H2D_3DARRAY], stream[s_id]);
 #endif
 }
 
@@ -312,6 +345,18 @@ void GPU::d2h_rhs(RealPtrVec_t& dst, const uint_t N)
         cudaMemcpyAsync(dst[i], d_rhs[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream2);
     GPU::profiler.pop_stopCUDA();
     cudaEventRecord(d2h_rhs_completed, stream2);
+#endif
+}
+
+
+void GPU::d2h_divF(RealPtrVec_t& dst, const uint_t N, const int s_id)
+{
+#ifndef _MUTE_GPU_
+    // download divF for current chunk
+    GPU::profiler.push_startCUDA("RECV DIV(F)", &stream[s_id]);
+    for (int i = 0; i < VSIZE; ++i)
+        cudaMemcpyAsync(dst[i], d_tmp[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream[s_id]);
+    GPU::profiler.pop_stopCUDA();
 #endif
 }
 

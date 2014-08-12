@@ -30,6 +30,7 @@ typedef std::vector<Real, cudaHostAllocator<Real> > cuda_vector_t;
 typedef std::vector<Real> cuda_vector_t;
 #endif
 
+// TODO: REMOVE
 #if defined(_CUDA_TIMER_)
 #define tCUDA_START(stream) { \
     GPUtimer tk; \
@@ -44,6 +45,10 @@ typedef std::vector<Real> cuda_vector_t;
 
 namespace GPU
 {
+    // Named events
+    enum {H2D_3DARRAY=0};
+
+    // TODO: REMOVE
     enum streamID {S1, S2};
 
     extern Profiler profiler;
@@ -58,8 +63,8 @@ namespace GPU
 
     // PCIe transfers
     void upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, const RealPtrVec_t& xghost_r,
-            const uint_t Nyghost, const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r);
-    void h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices);
+            const uint_t Nyghost, const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r, const int s_id);
+    void h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices, const int s_id);
     void h2d_tmp(const RealPtrVec_t& src, const uint_t N);
     void d2h_rhs(RealPtrVec_t& dst, const uint_t N);
     void d2h_tmp(RealPtrVec_t& dst, const uint_t N);
