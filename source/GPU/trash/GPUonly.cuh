@@ -27,43 +27,14 @@ struct DevicePointer // 7 fluid quantities
 };
 
 
-struct Stencil
-{
-    // stencil data compound centered around a face with ID i-1/2:
-    // (i-3) (i-2) (i-1) | (i) (i+1) (i+2)
-    // the face with ID i-1/2 is indicated by "|"
-    Real im3, im2, im1, i, ip1, ip2;
-
-    __device__
-    Stencil(): im3(0), im2(0), im1(0), i(0), ip1(0), ip2(0) { }
-
-    __device__
-    inline bool operator>(const Real f) { return (im3>f && im2>f && im1>f && i>f && ip1>f && ip2>f); }
-    __device__
-    inline bool operator>=(const Real f) { return (im3>=f && im2>=f && im1>=f && i>=f && ip1>=f && ip2>=f); }
-    __device__
-    inline bool operator<(const Real f) { return (im3<f && im2<f && im1<f && i<f && ip1<f && ip2<f); }
-    __device__
-    inline bool operator<=(const Real f) { return (im3<=f && im2<=f && im1<=f && i<=f && ip1<=f && ip2<=f); }
-};
-
-
 ///////////////////////////////////////////////////////////////////////////////
 //                           GLOBAL VARIABLES                                //
 ///////////////////////////////////////////////////////////////////////////////
-// TODO: remove
-extern RealPtrVec_t d_tmp;
-extern RealPtrVec_t d_rhs;
+extern RealPtrVec_t d_flux;
 extern RealPtrVec_t d_xgl;
 extern RealPtrVec_t d_xgr;
 extern RealPtrVec_t d_ygl;
 extern RealPtrVec_t d_ygr;
-
-extern RealPtrVec_t d_flux;
-// TODO: remove
-extern RealPtrVec_t d_xflux;
-extern RealPtrVec_t d_yflux;
-extern RealPtrVec_t d_zflux;
 
 // GPU output
 extern RealPtrVec_t d_divF;
@@ -82,18 +53,6 @@ extern int *d_maxSOS;
 
 // use non-null stream (async)
 extern cudaStream_t *stream;
-
-// TODO: remove
-extern cudaStream_t stream1;
-extern cudaStream_t stream2;
-
-// events
-/* extern cudaEvent_t *event; */
-
-// TODO: remove
-extern cudaEvent_t h2d_tmp_completed;
-extern cudaEvent_t divergence_completed;
-extern cudaEvent_t update_completed;
 
 // texture references
 texture<float, 3, cudaReadModeElementType> texR;

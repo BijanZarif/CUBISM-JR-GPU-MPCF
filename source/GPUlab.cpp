@@ -8,7 +8,6 @@
 #include "Timer.h"
 #include "MaxSpeedOfSound_CUDA.h"
 #include "Convection_CUDA.h"
-#include "Update_CUDA.h"
 #include "Update_CPP.h"
 
 #include <string>
@@ -146,7 +145,7 @@ void GPUlab::_reset()
 }
 
 
-void GPUlab::_process_chunk_sos(const RealPtrVec_t& src)
+void GPUlab::_process_chunk_sos(const real_vector_t& src)
 {
     /* *
      * Processes a chunk for the maxSOS computation:
@@ -159,23 +158,22 @@ void GPUlab::_process_chunk_sos(const RealPtrVec_t& src)
 
     Timer timer;
 
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
     // 1.)
-    ///////////////////////////////////////////////////////////////////
-    /* GPU::h2d_3DArray(curr_buffer->GPUin, curr_slices); */
+    ///////////////////////////////////////////////////////////////////////////
     GPU::h2d_3DArray(curr_buffer->GPUin, nslices, 0);
 
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
     // 2.)
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
     MaxSpeedOfSound_CUDA kernel;
     if (chatty) printf("\t[LAUNCH SOS KERNEL CHUNK %d]\n", curr_chunk_id);
     kernel.compute(curr_slices, 0);
     if (chatty) _end_info_current_chunk();
 
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
     // 3.)
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
     _init_next_chunk();
     if (chatty)
     {
@@ -184,130 +182,61 @@ void GPUlab::_process_chunk_sos(const RealPtrVec_t& src)
         _start_info_current_chunk(title);
     }
 
-
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
     // 4.)
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
     const uint_t OFFSET = SLICE_GPU * curr_iz;
     timer.start();
     _copy_range(curr_buffer->GPUin, 0, src, OFFSET, SLICE_GPU * curr_slices);
     const double t1 = timer.stop();
     if (chatty) printf("\t[COPY SRC CHUNK %d TAKES %f sec]\n", curr_chunk_id, t1);
 
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
     // 5.)
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
     GPU::wait_h2d(0);
-    /* GPU::h2d_3DArray_wait(0); */
 }
 
 
-void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, RealPtrVec_t& src, RealPtrVec_t& tmp)
+void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, real_vector_t& src, real_vector_t& tmp)
 {
     /* *
      * Process chunk for the RHS computation:
-     * 1.)  Convert AOS->SOA tmp (hidden by h2d_3DArray)
-     * 2.)  Upload GPU tmp (needed for divergence, uploaded on TMP stream)
-     * 3.)  Launch GPU convection kernel
-     * 4.)  Launch GPU update kernel
-     * 5.)  Convert SOA->AOS of rhs and updated solution (applies to previous chunk, hidden by 2-4)
-     * 6.)  ============== Initialize next chunk ===================
-     * 7.)  Convert AOS->SOA for GPU input of new chunk (hidden by 2-4)
-     * 8.)  Download GPU rhs of previous chunk into previous buffer (downloaded on TMP stream)
-     * 9.)  Download GPU updated solution of previous chunk into previous buffer (downloaded on TMP stream)
-     * 10.) Compute x/yghosts of new chunk and upload to GPU (overlaps download of 8-9, uploaded on MAIN stream)
-     *      Upload GPU input of new chunk (3DArrays, overlaps download of 8-9, uploaded on MAIN stream)
+     * 1.)  Launch GPU kernels to compute div(F)
+     * 2.)  Update previous chunk using GPU output
+     * 3.)  ============== Initialize next chunk ===================
+     * 4.)  Copy data into pinned buffer for the new chunk
+     * 5.)  Issue download of GPU computation for previous chunk
+     * 6.)  Upload data for new chunk
      * */
 
     Timer timer;
 
-    /* /////////////////////////////////////////////////////////////////// */
-    /* // 1.) */
-    /* /////////////////////////////////////////////////////////////////// */
-    /* // TODO: NOT NEEDE ANYMORE */
-    /* uint_t OFFSET = SLICE_GPU * curr_iz; */
-    /* timer.start(); */
-    /* _copy_range(curr_buffer->GPUtmp, 0, tmp, OFFSET, SLICE_GPU * curr_slices); */
-    /* const double t1 = timer.stop(); */
-    /* if (chatty) */
-    /*     printf("\t[COPY TMP CHUNK %d TAKES %f sec]\n", curr_chunk_id, t1); */
-
-    /* /////////////////////////////////////////////////////////////////// */
-    /* // 2.) */
-    /* /////////////////////////////////////////////////////////////////// */
-    /* // TODO: NOT NEEDE ANYMORE */
-    /* /1* GPU::h2d_tmp(curr_buffer->GPUtmp, SLICE_GPU * curr_slices); *1/ */
-    /* GPU::h2d_tmp(curr_buffer->GPUtmp, GPU_output_size); */
-
-    ///////////////////////////////////////////////////////////////////
-    // 3.)
-    ///////////////////////////////////////////////////////////////////
-    /* _dump_chunk(1); */
-    /* Convection_CUDA convection(a, dtinvh); */
+    ///////////////////////////////////////////////////////////////////////////
+    // 1.)
+    ///////////////////////////////////////////////////////////////////////////
     Convection_CUDA convection;
 
     if (chatty) printf("\t[LAUNCH CONVECTION KERNEL CHUNK %d]\n", curr_chunk_id);
-    /* convection.compute(curr_slices, curr_iz); */
-    //
-    // overlap buf1 & buf2 ???
-    /* profiler->push_start("FLUX KERNELS"); */
     convection.compute(curr_slices, 0, curr_buffer->stream_id);
-    /* profiler->pop_stop(); */
 
-    ///////////////////////////////////////////////////////////////////
-    // 4.)
-    ///////////////////////////////////////////////////////////////////
-    /* // TODO: NOT NEEED */
-    /* Update_CUDA update(b); */
-    /* if (chatty) printf("\t[LAUNCH UPDATE KERNEL CHUNK %d]\n", curr_chunk_id); */
-    /* update.compute(curr_slices); */
-
-    ///////////////////////////////////////////////////////////////////
-    // 5.)
-    ///////////////////////////////////////////////////////////////////
-    // TODO: MUST CHANGE -> DIVERGENCE + UPDATE
+    ///////////////////////////////////////////////////////////////////////////
+    // 2.)
+    ///////////////////////////////////////////////////////////////////////////
     switch (chunk_state)
     {
-        // DL divF and update
-        //
-        // Since operations are on previous chunk, this must only be
-        // done on INTERMEDIATE or LAST chunks.  The copy back of
-        // SINGLE and (actual) LAST chunks must be done after
-        // _process_chunk has finished processing all chunks.
         case INTERMEDIATE:
-        case LAST: // operations are on chunk one before LAST (because of use of previous_buffer)!
-            /* const uint_t prevOFFSET = SLICE_GPU * prev_iz; */
-
-            // wait for d2h_divF
-            // (one kernel update(a, b, dtinvh, src, tmp, offset, divF, Nelements) )
-            // compute tmp <- a * tmp - dtinvh * divF
-            // update  src <- b * tmp + src
-            //
+        case LAST:
             Update_CPP update(a, b, dtinvh);
             GPU::wait_d2h(prev_buffer->stream_id);
             update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
-
-            /* GPU::d2h_rhs_wait(); // make sure previous d2h has finished */
-            /* timer.start(); */
-            /* _copy_range(tmp, prevOFFSET, prev_buffer->GPUtmp, 0, SLICE_GPU * prev_slices); */
-            /* const double t4 = timer.stop(); */
-            /* if (chatty) */
-            /*     printf("\t[COPY BACK TMP CHUNK %d TAKES %f sec]\n", prev_chunk_id, t4); */
-
-            /* GPU::d2h_tmp_wait(); */
-            /* timer.start(); */
-            /* _copy_range(src, prevOFFSET, prev_buffer->GPUout, 0, SLICE_GPU * prev_slices); */
-            /* const double t2 = timer.stop(); */
-            /* if (chatty) */
-            /*     printf("\t[COPY BACK OUTPUT CHUNK %d TAKES %f sec]\n", prev_chunk_id, t2); */
-
             break;
     }
     if (chatty) _end_info_current_chunk();
 
-    ///////////////////////////////////////////////////////////////////
-    // 6.)
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    // 3.)
+    ///////////////////////////////////////////////////////////////////////////
     _init_next_chunk();
     if (chatty)
     {
@@ -316,23 +245,14 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
         _start_info_current_chunk(title);
     }
 
-    ///////////////////////////////////////////////////////////////////
-    // 7.)
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    // 4.)
+    ///////////////////////////////////////////////////////////////////////////
     const uint_t OFFSET = SLICE_GPU * curr_iz;
 
     timer.start();
     switch (chunk_state)
     {
-        /* // Prepare interior nodes for the next call to _process_all. */
-        /* // The ghosts are copied later, once the new Lab has been */
-        /* // loaded. */
-        /* case FIRST: */
-        /*     // interior + right ghosts */
-        /*     printf("copy FIRST\n"); */
-        /*     _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, OFFSET, SLICE_GPU * curr_slices + haloz.Nhalo); */
-        /*     break; */
-
         case INTERMEDIATE:
             {
                 // left zghosts (reuse previous buffer)
@@ -363,23 +283,14 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
     if (chatty)
         printf("\t[COPY SRC CHUNK %d TAKES %f sec]\n", curr_chunk_id, t3);
 
-    ///////////////////////////////////////////////////////////////////
-    // 8.)
-    ///////////////////////////////////////////////////////////////////
-    /* // TODO: REMOVE */
-    /* /1* GPU::d2h_rhs(prev_buffer->GPUtmp, SLICE_GPU * prev_slices); *1/ */
-    /* GPU::d2h_rhs(prev_buffer->GPUtmp, GPU_output_size); */
-
-    ///////////////////////////////////////////////////////////////////
-    // 9.)
-    ///////////////////////////////////////////////////////////////////
-    /* GPU::d2h_tmp(prev_buffer->GPUout, SLICE_GPU * prev_slices); */
-    /* GPU::d2h_tmp(prev_buffer->GPUout, GPU_output_size); */
+    ///////////////////////////////////////////////////////////////////////////
+    // 5.)
+    ///////////////////////////////////////////////////////////////////////////
     GPU::d2h_divF(prev_buffer->GPUout, GPU_output_size, prev_buffer->stream_id);
 
-    ///////////////////////////////////////////////////////////////////
-    // 10.)
-    ///////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    // 6.)
+    ///////////////////////////////////////////////////////////////////////////
     switch (chunk_state)
     {
         case INTERMEDIATE:
@@ -391,7 +302,6 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
                     curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r,
                     curr_buffer->stream_id);
 
-            /* GPU::h2d_3DArray(curr_buffer->GPUin, curr_slices+6); */
             GPU::h2d_3DArray(curr_buffer->GPUin, nslices+6, curr_buffer->stream_id);
 
             break;
@@ -680,7 +590,7 @@ double GPUlab::max_sos(float& sos)
      * 4.) Synchronize stream to make sure reduction is complete
      * */
 
-    RealPtrVec_t& src = grid.pdata();
+    real_vector_t& src = grid.pdata();
 
     Timer tsos;
     tsos.start();
@@ -737,8 +647,8 @@ double GPUlab::process_all(const Real a, const Real b, const Real dtinvh)
      * 5.) Copy back of GPU updated solution for LAST/SINGLE chunk
      * */
 
-    RealPtrVec_t& src = grid.pdata();
-    RealPtrVec_t& tmp = grid.ptmp();
+    real_vector_t& src = grid.pdata();
+    real_vector_t& tmp = grid.ptmp();
 
     Timer tall;
     tall.start();
@@ -785,7 +695,6 @@ double GPUlab::process_all(const Real a, const Real b, const Real dtinvh)
     ///////////////////////////////////////////////////////////////
     // 3.)
     ///////////////////////////////////////////////////////////////
-    /* GPU::h2d_3DArray(curr_buffer->GPUin, curr_slices+6); */
     GPU::h2d_3DArray(curr_buffer->GPUin, nslices+6, curr_buffer->stream_id);
 
     ///////////////////////////////////////////////////////////////
@@ -800,24 +709,6 @@ double GPUlab::process_all(const Real a, const Real b, const Real dtinvh)
     Update_CPP update(a, b, dtinvh);
     GPU::wait_d2h(prev_buffer->stream_id);
     update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
-
-    /* const uint_t prevOFFSET = SLICE_GPU * prev_iz; */
-
-    /* // GPU rhs into tmp (d2h finishes first for rhs) */
-    /* GPU::d2h_rhs_wait(); */
-    /* timer.start(); */
-    /* _copy_range(tmp, prevOFFSET, prev_buffer->GPUtmp, 0, SLICE_GPU * prev_slices); */
-    /* const double t2 = timer.stop(); */
-    /* if (chatty) */
-    /*     printf("\t[COPY BACK TMP CHUNK %d TAKES %f sec]\n", prev_chunk_id, t2); */
-
-    /* // GPU update into src (a.k.a updated flow data) */
-    /* GPU::d2h_tmp_wait(); */
-    /* timer.start(); */
-    /* _copy_range(src, prevOFFSET, prev_buffer->GPUout, 0, SLICE_GPU * prev_slices); */
-    /* const double t3 = timer.stop(); */
-    /* if (chatty) */
-    /*     printf("\t[COPY BACK OUTPUT CHUNK %d TAKES %f sec]\n", prev_chunk_id, t3); */
 
     if (chatty) _end_info_current_chunk();
 

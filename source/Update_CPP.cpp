@@ -10,7 +10,7 @@
 #include <cassert>
 #include <omp.h>
 
-void Update_CPP::compute(RealPtrVec_t& src, RealPtrVec_t& tmp, RealPtrVec_t& divF, const uint_t offset, const uint_t N)
+void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N)
 {
     /* *
      * 1.) tmp <- a * tmp - dtinvh * divF

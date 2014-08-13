@@ -23,5 +23,5 @@ class Update_CPP
     public:
         Update_CPP(const Real a, const Real b, const Real dtinvh) : m_a(a), m_b(b), m_dtinvh(dtinvh) { }
 
-        void compute(RealPtrVec_t& src, RealPtrVec_t& tmp, RealPtrVec_t& divF, const uint_t offset, const uint_t N);
+        void compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N);
 };

@@ -15,5 +15,5 @@
 class MaxSpeedOfSound_CPP
 {
 public:
-    Real compute(const RealPtrVec_t& src) const;
+    Real compute(const real_vector_t& src) const;
 };

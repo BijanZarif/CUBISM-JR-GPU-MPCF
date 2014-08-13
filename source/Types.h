@@ -20,7 +20,7 @@ typedef float Real;
 typedef double Real;
 #endif
 
-typedef std::vector<Real *> RealPtrVec_t;
+typedef std::vector<Real *> real_vector_t; // just a vector holding pointers
 typedef unsigned int uint_t;
 
 enum Coord {X=0, Y, Z};

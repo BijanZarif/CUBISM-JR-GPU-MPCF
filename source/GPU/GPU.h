@@ -30,27 +30,8 @@ typedef std::vector<Real, cudaHostAllocator<Real> > cuda_vector_t;
 typedef std::vector<Real> cuda_vector_t;
 #endif
 
-// TODO: REMOVE
-#if defined(_CUDA_TIMER_)
-#define tCUDA_START(stream) { \
-    GPUtimer tk; \
-    tk.start(stream);
-#define tCUDA_STOP(stream,msg) \
-    tk.stop(stream); \
-    tk.print(msg); }
-#else
-#define tCUDA_START(stream)
-#define tCUDA_STOP(stream,msg)
-#endif
-
 namespace GPU
 {
-    // Events
-    enum {H2D_3DARRAY=0};
-
-    // TODO: REMOVE
-    enum streamID {S1, S2};
-
     extern Profiler profiler;
 
     ///////////////////////////////////////////////////////////////////////////
@@ -62,23 +43,16 @@ namespace GPU
     void dealloc(const bool isroot = true);
 
     // PCIe transfers
-    void upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, const RealPtrVec_t& xghost_r,
-            const uint_t Nyghost, const RealPtrVec_t& yghost_l, const RealPtrVec_t& yghost_r, const int s_id);
-    void h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices, const int s_id);
-    void h2d_tmp(const RealPtrVec_t& src, const uint_t N);
-    void d2h_rhs(RealPtrVec_t& dst, const uint_t N);
-    void d2h_tmp(RealPtrVec_t& dst, const uint_t N);
-    void d2h_divF(RealPtrVec_t& dst, const uint_t N, const int s_id);
+    void upload_xy_ghosts(const uint_t Nxghost, const real_vector_t& xghost_l, const real_vector_t& xghost_r,
+            const uint_t Nyghost, const real_vector_t& yghost_l, const real_vector_t& yghost_r, const int s_id);
+    void h2d_3DArray(const real_vector_t& src, const uint_t nslices, const int s_id);
+    void d2h_divF(real_vector_t& dst, const uint_t N, const int s_id);
 
     // sync
     void wait_h2d(const int e_id);
     void wait_d2h(const int e_id);
-    void h2d_3DArray_wait();
-    void d2h_rhs_wait();
-    void d2h_tmp_wait();
     void syncGPU();
     void syncStream(const int s_id);
-    /* void syncStream(streamID s); */
 
     // stats
     void tell_memUsage_GPU();
@@ -93,8 +67,6 @@ namespace GPU
     void xflux(const uint_t nslices, const uint_t global_iz, const int s_id);
     void yflux(const uint_t nslices, const uint_t global_iz, const int s_id);
     void zflux(const uint_t nslices, const int s_id);
-    void divergence(const Real a, const Real dtinvh, const uint_t nslices);
-    void update(const Real b, const uint_t nslices);
     void MaxSpeedOfSound(const uint_t nslices, const int s_id);
 
     // Test Kernel wrapper
