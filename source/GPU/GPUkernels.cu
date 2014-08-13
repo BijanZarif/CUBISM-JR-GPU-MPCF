@@ -67,64 +67,95 @@ void _xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer fl
             {
                 const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
                 const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
-                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
+
                 // pre-fetch
                 Real _sumG = Gp[idxm];
                 Real _sumP = Pp[idxm];
                 Real _divU = vel[idxp];
-                Real _divFr = flux.r[idxp];
-                Real _divFu = flux.u[idxp];
-                Real _divFv = flux.v[idxp];
-                Real _divFw = flux.w[idxp];
-                Real _divFe = flux.e[idxp];
-                Real _divFG = flux.G[idxp];
-                Real _divFP = flux.P[idxp];
                 _sumG = _sumG + Gm[idxp];
                 _sumP = _sumP + Pm[idxp];
                 _divU = _divU - vel[idxm];
-                _divFr = _divFr - flux.r[idxm];
-                _divFu = _divFu - flux.u[idxm];
-                _divFv = _divFv - flux.v[idxm];
-                _divFw = _divFw - flux.w[idxm];
-                _divFe = _divFe - flux.e[idxm];
-                _divFG = _divFG - flux.G[idxm];
-                _divFP = _divFP - flux.P[idxm];
-
                 // read first batch
                 smem1[threadIdx.x][threadIdx.y+i] = _sumG;
                 smem2[threadIdx.x][threadIdx.y+i] = _sumP;
                 smem3[threadIdx.x][threadIdx.y+i] = _divU;
-                __syncthreads();
-                // read second batch
-                smem4[threadIdx.x][threadIdx.y+i] = _divFr;
-                smem5[threadIdx.x][threadIdx.y+i] = _divFu;
-                smem6[threadIdx.x][threadIdx.y+i] = _divFv;
+            }
+            __syncthreads();
+
+            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
+            {
+                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
+                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
+                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
+
+                // pre-fetch
+                Real _divFr = flux.r[idxp];
+                Real _divFu = flux.u[idxp];
+                Real _divFv = flux.v[idxp];
+                _divFr = _divFr - flux.r[idxm];
+                _divFu = _divFu - flux.u[idxm];
+                _divFv = _divFv - flux.v[idxm];
                 // write first batch
                 sumG[idx] = smem1[threadIdx.y+i][threadIdx.x];
                 sumP[idx] = smem2[threadIdx.y+i][threadIdx.x];
                 divU[idx] = smem3[threadIdx.y+i][threadIdx.x];
-                __syncthreads();
-                // read third batch
-                smem1[threadIdx.x][threadIdx.y+i] = _divFw;
-                smem2[threadIdx.x][threadIdx.y+i] = _divFe;
-                smem3[threadIdx.x][threadIdx.y+i] = _divFG;
+                // read second batch
+                smem4[threadIdx.x][threadIdx.y+i] = _divFr;
+                smem5[threadIdx.x][threadIdx.y+i] = _divFu;
+                smem6[threadIdx.x][threadIdx.y+i] = _divFv;
+            }
+            __syncthreads();
+
+            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
+            {
+                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
+                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
+                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
+
+                // pre-fetch
+                Real _divFw = flux.w[idxp];
+                Real _divFe = flux.e[idxp];
+                Real _divFG = flux.G[idxp];
+                _divFw = _divFw - flux.w[idxm];
+                _divFe = _divFe - flux.e[idxm];
+                _divFG = _divFG - flux.G[idxm];
                 // write second batch
                 divF.r[idx] = smem4[threadIdx.y+i][threadIdx.x];
                 divF.u[idx] = smem5[threadIdx.y+i][threadIdx.x];
                 divF.v[idx] = smem6[threadIdx.y+i][threadIdx.x];
-                __syncthreads();
-                // read fourth batch
-                smem4[threadIdx.x][threadIdx.y+i] = _divFP;
+                // read third batch
+                smem1[threadIdx.x][threadIdx.y+i] = _divFw;
+                smem2[threadIdx.x][threadIdx.y+i] = _divFe;
+                smem3[threadIdx.x][threadIdx.y+i] = _divFG;
+            }
+            __syncthreads();
+
+            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
+            {
+                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
+                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
+                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
+
+                // pre-fetch
+                Real _divFP = flux.P[idxp];
+                _divFP = _divFP - flux.P[idxm];
                 // write third batch
                 divF.w[idx] = smem1[threadIdx.y+i][threadIdx.x];
                 divF.e[idx] = smem2[threadIdx.y+i][threadIdx.x];
                 divF.G[idx] = smem3[threadIdx.y+i][threadIdx.x];
-                __syncthreads();
+                // read fourth batch
+                smem4[threadIdx.x][threadIdx.y+i] = _divFP;
+            }
+            __syncthreads();
+
+            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
+            {
+                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
                 // write fourth batch
                 divF.P[idx] = smem4[threadIdx.y+i][threadIdx.x];
-                // NOTE: __syncthreads() can be omitted since it will not be
-                // touched until next synchronization point
             }
+            // NOTE: __syncthreads() can be omitted since it will not be
+            // touched until next synchronization point
         }
     }
 }

@@ -339,7 +339,7 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
                 const uint_t prevOFFSET = SLICE_GPU * prev_slices;
                 _copy_range(curr_buffer->GPUin, 0, prev_buffer->GPUin, prevOFFSET, haloz.Nhalo);
 
-                // interior + right ghosts
+                // interior + right zghosts
                 _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, OFFSET, SLICE_GPU * curr_slices + haloz.Nhalo);
                 break;
             }
