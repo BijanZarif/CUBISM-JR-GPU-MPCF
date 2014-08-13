@@ -71,12 +71,14 @@ namespace GPU
     void d2h_divF(RealPtrVec_t& dst, const uint_t N, const int s_id);
 
     // sync
-    void wait_event(const int e_id);
+    void wait_h2d(const int e_id);
+    void wait_d2h(const int e_id);
     void h2d_3DArray_wait();
     void d2h_rhs_wait();
     void d2h_tmp_wait();
     void syncGPU();
-    void syncStream(streamID s);
+    void syncStream(const int s_id);
+    /* void syncStream(streamID s); */
 
     // stats
     void tell_memUsage_GPU();

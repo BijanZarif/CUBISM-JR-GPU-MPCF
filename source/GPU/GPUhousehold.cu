@@ -23,7 +23,8 @@ RealPtrVec_t d_xgr(VSIZE, NULL);
 RealPtrVec_t d_ygl(VSIZE, NULL);
 RealPtrVec_t d_ygr(VSIZE, NULL);
 
-/* RealPtrVec_t d_flux(VSIZE, NULL); */
+RealPtrVec_t d_flux(VSIZE, NULL);
+// TODO: remove
 RealPtrVec_t d_xflux(VSIZE, NULL);
 RealPtrVec_t d_yflux(VSIZE, NULL);
 RealPtrVec_t d_zflux(VSIZE, NULL);
@@ -33,6 +34,9 @@ Real *d_Gm, *d_Gp;
 Real *d_Pm, *d_Pp;
 Real *d_hllc_vel;
 Real *d_sumG, *d_sumP, *d_divU;
+
+// GPU output
+RealPtrVec_t d_divF(VSIZE, NULL);
 
 // 3D arrays (GPU input)
 vector<cudaArray_t> d_GPUin(VSIZE, NULL);
@@ -52,7 +56,8 @@ cudaStream_t stream3;
 
 // events
 #define _NUM_EVENTS_ 2
-cudaEvent_t *event;
+cudaEvent_t *event_h2d;
+cudaEvent_t *event_d2h;
 
 // TODO: REMOVE
 cudaEvent_t divergence_completed;
@@ -109,6 +114,7 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
     cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
     for (int var = 0; var < VSIZE; ++var)
     {
+        //TODO: remove
         //tmp
         cudaMalloc(&d_tmp[var], outputSize*sizeof(Real));
         cudaMemset(d_tmp[var], 0, outputSize*sizeof(Real));
@@ -118,7 +124,8 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
         cudaMemset(d_rhs[var], 0, outputSize*sizeof(Real));
 
         // fluxes
-        /* cudaMalloc(&d_flux[var], maxflxSize*sizeof(Real)); */
+        cudaMalloc(&d_flux[var], maxflxSize*sizeof(Real));
+        // TODO: remove
         /* cudaMemset(d_flux[var], 0, maxflxSize*sizeof(Real)); */
         cudaMalloc(&d_xflux[var], xflxSize*sizeof(Real));
         cudaMalloc(&d_yflux[var], yflxSize*sizeof(Real));
@@ -133,6 +140,9 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
 
         cudaMalloc(&d_ygl[var], ygSize*sizeof(Real));
         cudaMalloc(&d_ygr[var], ygSize*sizeof(Real));
+
+        // GPU output
+        cudaMalloc(&d_divF[var], outputSize*sizeof(Real));
 
         // GPU input (+6 slices for zghosts)
         cudaMalloc3DArray(&d_GPUin[var], &fmt, make_cudaExtent(NodeBlock::sizeX, NodeBlock::sizeY, nslices+6));
@@ -165,10 +175,15 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
     cudaStreamCreate(&stream3);
 
     // create events
-    event = (cudaEvent_t *) malloc(_NUM_EVENTS_ * sizeof(cudaEvent_t));
-    assert(event != NULL);
+    event_h2d = (cudaEvent_t *) malloc(_NUM_EVENTS_ * sizeof(cudaEvent_t));
+    event_d2h = (cudaEvent_t *) malloc(_NUM_EVENTS_ * sizeof(cudaEvent_t));
+    assert(event_h2d != NULL);
+    assert(event_d2h != NULL);
     for (int i = 0; i < _NUM_EVENTS_; ++i)
-        cudaEventCreate(&event[i]);
+    {
+        cudaEventCreate(&event_h2d[i]);
+        cudaEventCreate(&event_d2h[i]);
+    }
 
     // TODO: REMOVE
     cudaEventCreate(&divergence_completed);
@@ -206,6 +221,7 @@ void GPU::dealloc(const bool isroot)
 #ifndef _MUTE_GPU_
     for (int var = 0; var < VSIZE; ++var)
     {
+        // TODO: remove
         // tmp
         cudaFree(d_tmp[var]);
 
@@ -213,7 +229,8 @@ void GPU::dealloc(const bool isroot)
         cudaFree(d_rhs[var]);
 
         // fluxes
-        /* cudaFree(d_flux[var]); */
+        cudaFree(d_flux[var]);
+        // TODO: remove
         cudaFree(d_xflux[var]);
         cudaFree(d_yflux[var]);
         cudaFree(d_zflux[var]);
@@ -223,6 +240,9 @@ void GPU::dealloc(const bool isroot)
         cudaFree(d_xgr[var]);
         cudaFree(d_ygl[var]);
         cudaFree(d_ygr[var]);
+
+        // GPU output
+        cudaFree(d_divF[var]);
 
         // input GPU
         cudaFreeArray(d_GPUin[var]);
@@ -253,8 +273,12 @@ void GPU::dealloc(const bool isroot)
 
     // destroy events
     for (int i = 0; i < _NUM_EVENTS_; ++i)
-        cudaEventDestroy(event[i]);
-    free(event);
+    {
+        cudaEventDestroy(event_h2d[i]);
+        cudaEventDestroy(event_d2h[i]);
+    }
+    free(event_h2d);
+    free(event_d2h);
 
     // TODO: REMOVE
     cudaEventDestroy(divergence_completed);
@@ -307,6 +331,7 @@ void GPU::upload_xy_ghosts(const uint_t Nxghost, const RealPtrVec_t& xghost_l, c
 }
 
 
+// TODO: remove
 void GPU::h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices, const int s_id)
 {
 #ifndef _MUTE_GPU_
@@ -315,7 +340,7 @@ void GPU::h2d_3DArray(const RealPtrVec_t& src, const uint_t nslices, const int s
     for (int i = 0; i < VSIZE; ++i)
         _h2d_3DArray(d_GPUin[i], src[i], nslices, s_id);
     GPU::profiler.pop_stopCUDA();
-    cudaEventRecord(event[H2D_3DARRAY], stream[s_id]);
+    cudaEventRecord(event_h2d[s_id], stream[s_id]);
 #endif
 }
 
@@ -355,8 +380,9 @@ void GPU::d2h_divF(RealPtrVec_t& dst, const uint_t N, const int s_id)
     // download divF for current chunk
     GPU::profiler.push_startCUDA("RECV DIV(F)", &stream[s_id]);
     for (int i = 0; i < VSIZE; ++i)
-        cudaMemcpyAsync(dst[i], d_tmp[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream[s_id]);
+        cudaMemcpyAsync(dst[i], d_divF[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream[s_id]);
     GPU::profiler.pop_stopCUDA();
+    cudaEventRecord(event_d2h[s_id], stream[s_id]);
 #endif
 }
 
@@ -379,10 +405,18 @@ void GPU::d2h_tmp(RealPtrVec_t& dst, const uint_t N)
 ///////////////////////////////////////////////////////////////////////////
 // Sync
 ///////////////////////////////////////////////////////////////////////////
-void GPU::wait_event(const int e_id)
+void GPU::wait_h2d(const int e_id)
 {
 #ifndef _MUTE_GPU_
-    cudaEventSynchronize(event[e_id]);
+    cudaEventSynchronize(event_h2d[e_id]);
+#endif
+}
+
+
+void GPU::wait_d2h(const int e_id)
+{
+#ifndef _MUTE_GPU_
+    cudaEventSynchronize(event_d2h[e_id]);
 #endif
 }
 
@@ -422,16 +456,24 @@ void GPU::syncGPU()
 }
 
 
-void GPU::syncStream(streamID s)
+void GPU::syncStream(const int s_id)
 {
 #ifndef _MUTE_GPU_
-    switch (s)
-    {
-        case S1: cudaStreamSynchronize(stream1); break;
-        case S2: cudaStreamSynchronize(stream2); break;
-    }
+    cudaStreamSynchronize(stream[s_id]);
 #endif
 }
+
+
+/* void GPU::syncStream(streamID s) */
+/* { */
+/* #ifndef _MUTE_GPU_ */
+/*     switch (s) */
+/*     { */
+/*         case S1: cudaStreamSynchronize(stream1); break; */
+/*         case S2: cudaStreamSynchronize(stream2); break; */
+/*     } */
+/* #endif */
+/* } */
 
 
 ///////////////////////////////////////////////////////////////////////////

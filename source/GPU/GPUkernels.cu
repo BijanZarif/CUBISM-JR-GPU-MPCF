@@ -38,7 +38,7 @@
 #define _STENCIL_WIDTH_ 8 // 6 + _NFLUXES_ - 1
 
 __global__
-void _xextraterm_hllc(const uint_t nslices,
+void _xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
         const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
         const Real * const __restrict__ vel,
@@ -47,10 +47,13 @@ void _xextraterm_hllc(const uint_t nslices,
     const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x;
     const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y;
 
-    // limiting resource, but runs faster by using 3 buffers
+    // limiting resource
     __shared__ Real smem1[_TILE_DIM_][_TILE_DIM_+1];
     __shared__ Real smem2[_TILE_DIM_][_TILE_DIM_+1];
     __shared__ Real smem3[_TILE_DIM_][_TILE_DIM_+1];
+    __shared__ Real smem4[_TILE_DIM_][_TILE_DIM_+1];
+    __shared__ Real smem5[_TILE_DIM_][_TILE_DIM_+1];
+    __shared__ Real smem6[_TILE_DIM_][_TILE_DIM_+1];
 
     if (ix < NX && iy < NY)
     {
@@ -58,34 +61,77 @@ void _xextraterm_hllc(const uint_t nslices,
         const uint_t iyT = blockIdx.y * _TILE_DIM_ + threadIdx.x;
         const uint_t ixT = blockIdx.x * _TILE_DIM_ + threadIdx.y;
 
-        // per thread:
-        // LOADS  = nslices * (6 * _TILE_DIM_/_BLOCK_ROWS_)
-        // STORES = nslices * (3 * _TILE_DIM_/_BLOCK_ROWS_)
-        // total words transferred per thread:
-        // WORDS  = nslices * (9 * _TILE_DIM_/_BLOCK_ROWS_)
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
             {
-                smem1[threadIdx.x][threadIdx.y+i] = Gp[ID3(iyT,ixT+i,iz,NY,NXP1)]      + Gm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)];
-                smem2[threadIdx.x][threadIdx.y+i] = Pp[ID3(iyT,ixT+i,iz,NY,NXP1)]      + Pm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)];
-                smem3[threadIdx.x][threadIdx.y+i] = vel[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)] - vel[ID3(iyT,ixT+i,iz,NY,NXP1)];
+                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
+                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
+                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
+                // pre-fetch
+                Real _sumG = Gp[idxm];
+                Real _sumP = Pp[idxm];
+                Real _divU = vel[idxp];
+                Real _divFr = flux.r[idxp];
+                Real _divFu = flux.u[idxp];
+                Real _divFv = flux.v[idxp];
+                Real _divFw = flux.w[idxp];
+                Real _divFe = flux.e[idxp];
+                Real _divFG = flux.G[idxp];
+                Real _divFP = flux.P[idxp];
+                _sumG = _sumG + Gm[idxp];
+                _sumP = _sumP + Pm[idxp];
+                _divU = _divU - vel[idxm];
+                _divFr = _divFr - flux.r[idxm];
+                _divFu = _divFu - flux.u[idxm];
+                _divFv = _divFv - flux.v[idxm];
+                _divFw = _divFw - flux.w[idxm];
+                _divFe = _divFe - flux.e[idxm];
+                _divFG = _divFG - flux.G[idxm];
+                _divFP = _divFP - flux.P[idxm];
+
+                // read first batch
+                smem1[threadIdx.x][threadIdx.y+i] = _sumG;
+                smem2[threadIdx.x][threadIdx.y+i] = _sumP;
+                smem3[threadIdx.x][threadIdx.y+i] = _divU;
+                __syncthreads();
+                // read second batch
+                smem4[threadIdx.x][threadIdx.y+i] = _divFr;
+                smem5[threadIdx.x][threadIdx.y+i] = _divFu;
+                smem6[threadIdx.x][threadIdx.y+i] = _divFv;
+                // write first batch
+                sumG[idx] = smem1[threadIdx.y+i][threadIdx.x];
+                sumP[idx] = smem2[threadIdx.y+i][threadIdx.x];
+                divU[idx] = smem3[threadIdx.y+i][threadIdx.x];
+                __syncthreads();
+                // read third batch
+                smem1[threadIdx.x][threadIdx.y+i] = _divFw;
+                smem2[threadIdx.x][threadIdx.y+i] = _divFe;
+                smem3[threadIdx.x][threadIdx.y+i] = _divFG;
+                // write second batch
+                divF.r[idx] = smem4[threadIdx.y+i][threadIdx.x];
+                divF.u[idx] = smem5[threadIdx.y+i][threadIdx.x];
+                divF.v[idx] = smem6[threadIdx.y+i][threadIdx.x];
+                __syncthreads();
+                // read fourth batch
+                smem4[threadIdx.x][threadIdx.y+i] = _divFP;
+                // write third batch
+                divF.w[idx] = smem1[threadIdx.y+i][threadIdx.x];
+                divF.e[idx] = smem2[threadIdx.y+i][threadIdx.x];
+                divF.G[idx] = smem3[threadIdx.y+i][threadIdx.x];
+                __syncthreads();
+                // write fourth batch
+                divF.P[idx] = smem4[threadIdx.y+i][threadIdx.x];
+                // NOTE: __syncthreads() can be omitted since it will not be
+                // touched until next synchronization point
             }
-            __syncthreads();
-            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
-            {
-                sumG[ID3(ix,iy+i,iz,NX,NY)] = smem1[threadIdx.y+i][threadIdx.x];
-                sumP[ID3(ix,iy+i,iz,NX,NY)] = smem2[threadIdx.y+i][threadIdx.x];
-                divU[ID3(ix,iy+i,iz,NX,NY)] = smem3[threadIdx.y+i][threadIdx.x];
-            }
-            __syncthreads();
         }
     }
 }
 
 
 __global__
-void _yextraterm_hllc(const uint_t nslices,
+void _yextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
         const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
         const Real * const __restrict__ vel,
@@ -96,32 +142,50 @@ void _yextraterm_hllc(const uint_t nslices,
 
     if (ix < NX && iy < NY)
     {
-        // per thread:
-        // LOADS  = nslices * 9
-        // STORES = nslices * 3
-        // total words transferred per thread:
-        // WORDS  = nslices * 12
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
             const uint_t idx  = ID3(ix,iy,iz,NX,NY);
             const uint_t idxm = ID3(ix,iy,iz,NX,NYP1);
             const uint_t idxp = ID3(ix,(iy+1),iz,NX,NYP1);
-            Real tq = Gp[idxm];
-            Real tr = Pp[idxm];
-            Real ts = vel[idxp];
-            tq = tq + Gm[idxp];
-            tr = tr + Pm[idxp];
-            ts = ts - vel[idxm];
-            sumG[idx] += tq;
-            sumP[idx] += tr;
-            divU[idx] += ts;
+
+            Real _sumG = Gp[idxm];
+            Real _sumP = Pp[idxm];
+            Real _divU = vel[idxp];
+            Real _divFr = flux.r[idxp];
+            Real _divFu = flux.u[idxp];
+            Real _divFv = flux.v[idxp];
+            Real _divFw = flux.w[idxp];
+            Real _divFe = flux.e[idxp];
+            Real _divFG = flux.G[idxp];
+            Real _divFP = flux.P[idxp];
+            _sumG = _sumG + Gm[idxp];
+            _sumP = _sumP + Pm[idxp];
+            _divU = _divU - vel[idxm];
+            _divFr = _divFr - flux.r[idxm];
+            _divFu = _divFu - flux.u[idxm];
+            _divFv = _divFv - flux.v[idxm];
+            _divFw = _divFw - flux.w[idxm];
+            _divFe = _divFe - flux.e[idxm];
+            _divFG = _divFG - flux.G[idxm];
+            _divFP = _divFP - flux.P[idxm];
+
+            sumG[idx] += _sumG;
+            sumP[idx] += _sumP;
+            divU[idx] += _divU;
+            divF.r[idx] += _divFr;
+            divF.u[idx] += _divFu;
+            divF.v[idx] += _divFv;
+            divF.w[idx] += _divFw;
+            divF.e[idx] += _divFe;
+            divF.G[idx] += _divFG;
+            divF.P[idx] += _divFP;
         }
     }
 }
 
 
 __global__
-void _zextraterm_hllc(const uint_t nslices,
+void _zextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
         const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
         const Real * const __restrict__ vel,
@@ -132,25 +196,48 @@ void _zextraterm_hllc(const uint_t nslices,
 
     if (ix < NX && iy < NY)
     {
-        // per thread:
-        // LOADS  = nslices * 9
-        // STORES = nslices * 3
-        // total words transferred per thread:
-        // WORDS  = nslices * 12
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
             const uint_t idx  = ID3(ix,iy,iz,NX,NY);
             const uint_t idxm = ID3(ix,iy,iz,NX,NY);
             const uint_t idxp = ID3(ix,iy,(iz+1),NX,NY);
-            Real tq = Gp[idxm];
-            Real tr = Pp[idxm];
-            Real ts = vel[idxp];
-            tq = tq + Gm[idxp];
-            tr = tr + Pm[idxp];
-            ts = ts - vel[idxm];
-            sumG[idx] += tq;
-            sumP[idx] += tr;
-            divU[idx] += ts;
+
+            const Real inv6 = 1.0f/6.0f;
+
+            // cummulative sums of x and y
+            const Real cumm_sumG = sumG[idx];
+            const Real cumm_sumP = sumP[idx];
+            const Real cumm_divU = divU[idx];
+
+            Real _sumG = Gp[idxm];
+            Real _sumP = Pp[idxm];
+            Real _divU = vel[idxp];
+            Real _divFr = flux.r[idxp];
+            Real _divFu = flux.u[idxp];
+            Real _divFv = flux.v[idxp];
+            Real _divFw = flux.w[idxp];
+            Real _divFe = flux.e[idxp];
+            Real _divFG = flux.G[idxp];
+            Real _divFP = flux.P[idxp];
+            _sumG = _sumG + Gm[idxp] + cumm_sumG;
+            _sumP = _sumP + Pm[idxp] + cumm_sumP;
+            _divU = _divU - vel[idxm]+ cumm_divU;
+            _divFr = _divFr - flux.r[idxm];
+            _divFu = _divFu - flux.u[idxm];
+            _divFv = _divFv - flux.v[idxm];
+            _divFw = _divFw - flux.w[idxm];
+            _divFe = _divFe - flux.e[idxm];
+            _divFG = _divFG - flux.G[idxm];
+            _divFP = _divFP - flux.P[idxm];
+
+            // final divF
+            divF.r[idx] += _divFr;
+            divF.u[idx] += _divFu;
+            divF.v[idx] += _divFv;
+            divF.w[idx] += _divFw;
+            divF.e[idx] += _divFe;
+            divF.G[idx] += _divFG - inv6*_divU*_sumG;
+            divF.P[idx] += _divFP - inv6*_divU*_sumP;
         }
     }
 }
@@ -822,7 +909,8 @@ void GPU::xflux(const uint_t nslices, const uint_t global_iz, const int s_id)
 #ifndef _MUTE_GPU_
     DevicePointer xghostL(d_xgl);
     DevicePointer xghostR(d_xgr);
-    DevicePointer xflux(d_xflux);
+    DevicePointer xflux(d_flux);
+    DevicePointer divF(d_divF);
 
     {
         const dim3 blocks(1, _NTHREADS_, 1);
@@ -836,7 +924,7 @@ void GPU::xflux(const uint_t nslices, const uint_t global_iz, const int s_id)
         const dim3 xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
         const dim3 xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
         GPU::profiler.push_startCUDA("_XEXTRATERM", &stream[s_id]);
-        _xextraterm_hllc<<<xtraGrid, xtraBlocks, 0, stream[s_id]>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+        _xextraterm_hllc<<<xtraGrid, xtraBlocks, 0, stream[s_id]>>>(nslices, divF, xflux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
         GPU::profiler.pop_stopCUDA();
 
         // 70.1% of Peak BW (w/ ECC) on K20c
@@ -853,7 +941,8 @@ void GPU::yflux(const uint_t nslices, const uint_t global_iz, const int s_id)
 #ifndef _MUTE_GPU_
     DevicePointer yghostL(d_ygl);
     DevicePointer yghostR(d_ygr);
-    DevicePointer yflux(d_yflux);
+    DevicePointer yflux(d_flux);
+    DevicePointer divF(d_divF);
 
     const dim3 blocks(_NTHREADS_, 1, 1);
 
@@ -867,7 +956,7 @@ void GPU::yflux(const uint_t nslices, const uint_t global_iz, const int s_id)
     {
         const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
         GPU::profiler.push_startCUDA("_YEXTRATERM", &stream[s_id]);
-        _yextraterm_hllc<<<grid, blocks, 0, stream[s_id]>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+        _yextraterm_hllc<<<grid, blocks, 0, stream[s_id]>>>(nslices, divF, yflux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
         GPU::profiler.pop_stopCUDA();
 
         // 78.6% of Peak BW (w/ ECC) on K20c
@@ -882,7 +971,8 @@ void GPU::yflux(const uint_t nslices, const uint_t global_iz, const int s_id)
 void GPU::zflux(const uint_t nslices, const int s_id)
 {
 #ifndef _MUTE_GPU_
-    DevicePointer zflux(d_zflux);
+    DevicePointer zflux(d_flux);
+    DevicePointer divF(d_divF);
 
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
     const dim3 blocks(_NTHREADS_, 1, 1);
@@ -892,7 +982,7 @@ void GPU::zflux(const uint_t nslices, const int s_id)
     GPU::profiler.pop_stopCUDA();
 
     GPU::profiler.push_startCUDA("_ZEXTRATERM", &stream[s_id]);
-    _zextraterm_hllc<<<grid, blocks, 0, stream[s_id]>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+    _zextraterm_hllc<<<grid, blocks, 0, stream[s_id]>>>(nslices, divF, zflux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
     GPU::profiler.pop_stopCUDA();
 
     // 76.7% of Peak BW (w/ ECC) on K20c

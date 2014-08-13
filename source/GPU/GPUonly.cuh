@@ -51,6 +51,7 @@ struct Stencil
 ///////////////////////////////////////////////////////////////////////////////
 //                           GLOBAL VARIABLES                                //
 ///////////////////////////////////////////////////////////////////////////////
+// TODO: remove
 extern RealPtrVec_t d_tmp;
 extern RealPtrVec_t d_rhs;
 extern RealPtrVec_t d_xgl;
@@ -58,9 +59,14 @@ extern RealPtrVec_t d_xgr;
 extern RealPtrVec_t d_ygl;
 extern RealPtrVec_t d_ygr;
 
+extern RealPtrVec_t d_flux;
+// TODO: remove
 extern RealPtrVec_t d_xflux;
 extern RealPtrVec_t d_yflux;
 extern RealPtrVec_t d_zflux;
+
+// GPU output
+extern RealPtrVec_t d_divF;
 
 // 3D arrays
 extern std::vector<cudaArray_t> d_GPUin;
@@ -82,7 +88,7 @@ extern cudaStream_t stream1;
 extern cudaStream_t stream2;
 
 // events
-extern cudaEvent_t *event;
+/* extern cudaEvent_t *event; */
 
 // TODO: remove
 extern cudaEvent_t h2d_tmp_completed;

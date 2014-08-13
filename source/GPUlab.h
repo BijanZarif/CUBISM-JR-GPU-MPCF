@@ -195,7 +195,7 @@ class GPUlab
         void _alloc_GPU();
         void _free_GPU();
         inline void _syncGPU() { GPU::syncGPU(); }
-        inline void _syncStream(GPU::streamID s) { GPU::syncStream(s); }
+        inline void _syncStream(const int s) { GPU::syncStream(s); }
         void _reset();
         void _init_next_chunk();
         void _dump_chunk(const int complete = 0);
