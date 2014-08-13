@@ -152,13 +152,12 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
         cudaGetDeviceProperties(&prop, dev);
 
         printf("=====================================================================\n");
-        printf("[GPU ALLOCATION FOR %s]\n", prop.name);
-        printf("[%5.1f MB (input GPU)]\n", VSIZE*(SLICE_GPU*(nslices+6))*sizeof(Real) / 1024. / 1024);
-        printf("[%5.1f MB (tmp)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
-        printf("[%5.1f MB (rhs)]\n", VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
-        printf("[%5.1f MB (flux storage)]\n", VSIZE*(xflxSize + yflxSize + zflxSize)*sizeof(Real) / 1024. / 1024);
-        printf("[%5.1f MB (x/yghosts)]\n", VSIZE*(xgSize + ygSize)*2*sizeof(Real) / 1024. / 1024);
-        printf("[%5.1f MB (extraterm)]\n", (5*maxflxSize + 3*outputSize)*sizeof(Real) / 1024. / 1024);
+        printf("[GPU ALLOCATION FOR %s]\n",   prop.name);
+        printf("[%5.1f MB (GPU input)]\n",    VSIZE*(SLICE_GPU*(nslices+6))*sizeof(Real) / 1024. / 1024);
+        printf("[%5.1f MB (GPU output)]\n",   VSIZE*outputSize*sizeof(Real) / 1024. / 1024);
+        printf("[%5.1f MB (flux storage)]\n", VSIZE*maxflxSize*sizeof(Real) / 1024. / 1024);
+        printf("[%5.1f MB (x/yghosts)]\n",    VSIZE*(xgSize + ygSize)*2*sizeof(Real) / 1024. / 1024);
+        printf("[%5.1f MB (extraterm)]\n",    (5*maxflxSize + 3*outputSize)*sizeof(Real) / 1024. / 1024);
         GPU::tell_memUsage_GPU();
         printf("=====================================================================\n");
     }
