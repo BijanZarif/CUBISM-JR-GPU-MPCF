@@ -10,11 +10,7 @@
 #include "Convection_CUDA.h"
 #include "GPU.h"
 
-void Convection_CUDA::compute(const uint_t nslices, const uint_t global_iz, const int s_id)
+void Convection_CUDA::compute(const uint_t nslices, const uint_t global_iz, const uint_t gbuf_id, const int chunk_id)
 {
-    GPU::bind_textures();
-    GPU::xflux(nslices, global_iz, s_id);
-    GPU::yflux(nslices, global_iz, s_id);
-    GPU::zflux(nslices, s_id);
-    GPU::unbind_textures();
+    GPU::compute_pipe_divF(nslices, global_iz, gbuf_id, chunk_id);
 }

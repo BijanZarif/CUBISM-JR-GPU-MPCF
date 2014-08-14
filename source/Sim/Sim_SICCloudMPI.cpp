@@ -5,6 +5,8 @@
  * Copyright 2014 ETH Zurich. All rights reserved.
  * */
 #include "Sim_SICCloudMPI.h"
+#include "HDF5Dumper_MPI.h"
+#include "Types.h"
 
 #include <cassert>
 #include <fstream>
@@ -40,6 +42,18 @@ void Sim_SICCloudMPI::_allocGPU()
     myGPU = new GPUlabSICCloud(*mygrid, nslices, verbosity);
 }
 
+void Sim_SICCloudMPI::_dump(const string basename)
+{
+    const string dump_path = parser("-fpath").asString(".");
+
+    if (isroot) printf("Dumping data%04d at step %d, time %f\n", fcount, step, t);
+    sprintf(fname, "%s_%04d-p", basename.c_str(), fcount);
+    DumpHDF5_MPI<GridMPI, myPressureStreamer>(*mygrid, step, fname, dump_path);
+    sprintf(fname, "%s_%04d-G", basename.c_str(), fcount);
+    DumpHDF5_MPI<GridMPI, myGammaStreamer>(*mygrid, step, fname, dump_path);
+    ++fcount;
+}
+
 void Sim_SICCloudMPI::_ic()
 {
     if (isroot)
@@ -53,11 +67,11 @@ void Sim_SICCloudMPI::_ic()
     // liquid
     SICCloudData::rho0 = parser("-rho0").asDouble(1000);
     SICCloudData::u0   = parser("-u0").asDouble(0);
-    SICCloudData::p0   = parser("-p0").asDouble(1);
+    SICCloudData::p0   = parser("-p0").asDouble(101325);
     // bubbles
     SICCloudData::rhoB = parser("-rhoB").asDouble(1);
     SICCloudData::uB   = parser("-uB").asDouble(0);
-    SICCloudData::pB   = parser("-pB").asDouble(0.0234);
+    SICCloudData::pB   = parser("-pB").asDouble(101325);
     // pressure ratio over shock
     SICCloudData::pressureRatio = parser("-pressureratio").asDouble(40);
     /* parser.unset_strict_mode(); */
@@ -71,10 +85,10 @@ void Sim_SICCloudMPI::_ic()
     SICCloudData::Sy = parser("-shockSy").asDouble(0.0);
     SICCloudData::Sz = parser("-shockSz").asDouble(0.0);
 
-    SICCloudData::g1  = parser("-g1").asDouble(6.59);
+    SICCloudData::g1  = parser("-g1").asDouble(6.12);
     SICCloudData::g2  = parser("-g2").asDouble(1.4);
-    SICCloudData::pc1 = parser("-pc1").asDouble(4096.0);
-    SICCloudData::pc2 = parser("-pc2").asDouble(1.0);
+    SICCloudData::pc1 = parser("-pc1").asDouble(286954248.3660131);
+    SICCloudData::pc2 = parser("-pc2").asDouble(0.0);
 
     // normalize shock normal vector
     const Real mag = sqrt(pow(SICCloudData::nx, 2) + pow(SICCloudData::ny, 2) + pow(SICCloudData::nz, 2));

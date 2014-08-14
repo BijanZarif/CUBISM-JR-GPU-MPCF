@@ -107,7 +107,7 @@ int main(int argc, const char *argv[])
                 yg_R[6*Nxghosts + ghostmap::Y(ix,iy,iz)] = 0.0;
 #endif
             }
-    RealPtrVec_t xghost_l(7), xghost_r(7), yghost_l(7), yghost_r(7);
+    real_vector_t xghost_l(7), xghost_r(7), yghost_l(7), yghost_r(7);
     for (int i = 0; i < 7; ++i)
     {
         xghost_l[i] = &xg_L[i*Nxghosts];
@@ -115,7 +115,7 @@ int main(int argc, const char *argv[])
         yghost_l[i] = &yg_L[i*Nyghosts];
         yghost_r[i] = &yg_R[i*Nyghosts];
     }
-    GPU::upload_xy_ghosts(Nxghosts, xghost_l, xghost_r, Nyghosts, yghost_l, yghost_r);
+    GPU::upload_xy_ghosts(Nxghosts, xghost_l, xghost_r, Nyghosts, yghost_l, yghost_r, 0, 0);
     GPU::syncGPU();
 
     // make some interior
@@ -145,11 +145,11 @@ int main(int argc, const char *argv[])
                 interior[6*Ninput + idx] = 0.0;
 #endif
             }
-    RealPtrVec_t in3D(7);
+    real_vector_t in3D(7);
     for (int i = 0; i < 7; ++i)
         in3D[i] = &interior[i*Ninput];
-    GPU::h2d_3DArray(in3D, nslices+6);
-    GPU::h2d_3DArray_wait();
+    GPU::h2d_3DArray(in3D, nslices+6, 0, 0);
+    GPU::syncGPU();
 
     // run Forrest
     TestGPUKernel kernel;

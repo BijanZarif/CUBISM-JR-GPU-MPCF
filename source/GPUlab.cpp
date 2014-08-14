@@ -29,7 +29,7 @@ GPUlab::GPUlab(GridMPI& G, const uint_t nslices_, const int verbosity) :
     nslices(nslices_), nslices_last( sizeZ % nslices_ ), nchunks( (sizeZ + nslices_ - 1) / nslices_ ),
     cart_world(G.getCartComm()), request(6), status(6),
     BUFFER1(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 0), // per chunk
-    BUFFER2(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 0), // per chunk
+    BUFFER2(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 1), // per chunk
     grid(G),
     halox(3*sizeY*sizeZ), // all domain (buffer zone for halo extraction + MPI send/recv)
     haloy(sizeX*3*sizeZ), // all domain
@@ -141,7 +141,7 @@ void GPUlab::_reset()
         curr_slices = nslices;
     }
     curr_iz = 0;
-    curr_chunk_id = 1;
+    curr_chunk_id = 0;
 }
 
 
@@ -161,14 +161,14 @@ void GPUlab::_process_chunk_sos(const real_vector_t& src)
     ///////////////////////////////////////////////////////////////////////////
     // 1.)
     ///////////////////////////////////////////////////////////////////////////
-    GPU::h2d_3DArray(curr_buffer->GPUin, nslices, 0);
+    GPU::h2d_3DArray(curr_buffer->GPUin, nslices, 0, 0);
 
     ///////////////////////////////////////////////////////////////////////////
     // 2.)
     ///////////////////////////////////////////////////////////////////////////
     MaxSpeedOfSound_CUDA kernel;
     if (chatty) printf("\t[LAUNCH SOS KERNEL CHUNK %d]\n", curr_chunk_id);
-    kernel.compute(curr_slices, 0);
+    kernel.compute(curr_slices, 0, 0);
     if (chatty) _end_info_current_chunk();
 
     ///////////////////////////////////////////////////////////////////////////
@@ -218,7 +218,7 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
     Convection_CUDA convection;
 
     if (chatty) printf("\t[LAUNCH CONVECTION KERNEL CHUNK %d]\n", curr_chunk_id);
-    convection.compute(curr_slices, 0, curr_buffer->stream_id);
+    convection.compute(curr_slices, 0, curr_buffer->buf_id, curr_chunk_id);
 
     ///////////////////////////////////////////////////////////////////////////
     // 2.)
@@ -228,7 +228,7 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
         case INTERMEDIATE:
         case LAST:
             Update_CPP update(a, b, dtinvh);
-            GPU::wait_d2h(prev_buffer->stream_id);
+            GPU::wait_d2h(prev_chunk_id);
             update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
             break;
     }
@@ -286,7 +286,7 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
     ///////////////////////////////////////////////////////////////////////////
     // 5.)
     ///////////////////////////////////////////////////////////////////////////
-    GPU::d2h_divF(prev_buffer->GPUout, GPU_output_size, prev_buffer->stream_id);
+    GPU::d2h_divF(prev_buffer->GPUout, GPU_output_size, prev_buffer->buf_id, prev_chunk_id);
 
     ///////////////////////////////////////////////////////////////////////////
     // 6.)
@@ -298,11 +298,18 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
             assert(curr_buffer->Nxghost == 3 * sizeY * curr_slices);
             assert(curr_buffer->Nyghost == 3 * sizeX * curr_slices);
             _copy_xyghosts();
-            GPU::upload_xy_ghosts(curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r,
+            GPU::h2d_input(
+                    curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r,
                     curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r,
-                    curr_buffer->stream_id);
+                    curr_buffer->GPUin, nslices+6,
+                    curr_buffer->buf_id, curr_chunk_id);
 
-            GPU::h2d_3DArray(curr_buffer->GPUin, nslices+6, curr_buffer->stream_id);
+
+            /* GPU::upload_xy_ghosts(curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r, */
+            /*         curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r, */
+            /*         curr_buffer->buf_id, curr_chunk_id); */
+
+            /* GPU::h2d_3DArray(curr_buffer->GPUin, nslices+6, curr_buffer->buf_id, curr_chunk_id); */
 
             break;
     }
@@ -311,6 +318,7 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
 
 void GPUlab::_init_next_chunk()
 {
+    // TODO: the information below should be part of the buffer type
     prev_slices   = curr_slices;
     prev_iz       = curr_iz;
     prev_chunk_id = curr_chunk_id;
@@ -318,9 +326,9 @@ void GPUlab::_init_next_chunk()
     curr_iz += curr_slices;
     ++curr_chunk_id;
 
-    if (curr_chunk_id > nchunks)
+    if (curr_chunk_id > (nchunks-1))
         _reset();
-    else if (curr_chunk_id == nchunks)
+    else if (curr_chunk_id == (nchunks-1))
     {
         curr_slices = (1 - !nslices_last)*nslices_last + (!nslices_last)*nslices;
         chunk_state = LAST;
@@ -666,9 +674,6 @@ double GPUlab::process_all(const Real a, const Real b, const Real dtinvh)
     assert(curr_buffer->Nxghost == 3 * sizeY * curr_slices);
     assert(curr_buffer->Nyghost == 3 * sizeX * curr_slices);
     _copy_xyghosts();
-    GPU::upload_xy_ghosts(curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r,
-            curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r,
-            curr_buffer->stream_id);
 
     ///////////////////////////////////////////////////////////////
     // 2.)
@@ -676,7 +681,7 @@ double GPUlab::process_all(const Real a, const Real b, const Real dtinvh)
     Timer timer;
     uint_t Nelements = SLICE_GPU * curr_slices;
 
-    // copy left ghosts always (TODO: CAN BE DONE BY MPI RECV)
+    // copy left ghosts always
     _copy_range(curr_buffer->GPUin, 0, haloz.left, 0, haloz.Nhalo);
     switch (chunk_state) // right ghosts are conditional
     {
@@ -695,7 +700,11 @@ double GPUlab::process_all(const Real a, const Real b, const Real dtinvh)
     ///////////////////////////////////////////////////////////////
     // 3.)
     ///////////////////////////////////////////////////////////////
-    GPU::h2d_3DArray(curr_buffer->GPUin, nslices+6, curr_buffer->stream_id);
+    GPU::h2d_input(
+            curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r,
+            curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r,
+            curr_buffer->GPUin, nslices+6,
+            curr_buffer->buf_id, curr_chunk_id);
 
     ///////////////////////////////////////////////////////////////
     // 4.)
@@ -707,7 +716,7 @@ double GPUlab::process_all(const Real a, const Real b, const Real dtinvh)
     // 5.)
     ///////////////////////////////////////////////////////////////
     Update_CPP update(a, b, dtinvh);
-    GPU::wait_d2h(prev_buffer->stream_id);
+    GPU::wait_d2h(prev_chunk_id);
     update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
 
     if (chatty) _end_info_current_chunk();

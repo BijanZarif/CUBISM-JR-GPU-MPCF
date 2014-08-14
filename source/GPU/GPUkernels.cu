@@ -6,9 +6,8 @@
  * */
 #include <assert.h>
 #include <stdio.h>
-#include <vector>
 
-#include "GPU.h" // includes Types.h & wrapper declarations
+#include "GPU.cuh"
 
 #if _BLOCKSIZEX_ < 5
 #error Minimum _BLOCKSIZEX_ is 5
@@ -25,40 +24,12 @@
 #error _BLOCKSIZEY_ should be an integer multiple of _TILE_DIM_
 #endif
 
-#define NX _BLOCKSIZEX_
-#define NY _BLOCKSIZEY_
-#define NXP1 NX+1
-#define NYP1 NY+1
-
-struct DevicePointer // 7 fluid quantities
-{
-    // helper structure to pass compound flow variables as one kernel argument
-    Real * __restrict__ r;
-    Real * __restrict__ u;
-    Real * __restrict__ v;
-    Real * __restrict__ w;
-    Real * __restrict__ e;
-    Real * __restrict__ G;
-    Real * __restrict__ P;
-    DevicePointer(real_vector_t& c) : r(c[0]), u(c[1]), v(c[2]), w(c[3]), e(c[4]), G(c[5]), P(c[6]) { assert(c.size() == 7); }
-};
 
 ///////////////////////////////////////////////////////////////////////////////
 //                           GLOBAL VARIABLES                                //
 ///////////////////////////////////////////////////////////////////////////////
+// helper storage
 extern real_vector_t d_flux;
-extern real_vector_t d_xgl;
-extern real_vector_t d_xgr;
-extern real_vector_t d_ygl;
-extern real_vector_t d_ygr;
-
-// GPU output
-extern real_vector_t d_divF;
-
-// 3D arrays
-extern std::vector<cudaArray_t> d_GPUin;
-
-// extraterms for advection equations
 extern Real *d_Gm, *d_Gp;
 extern Real *d_Pm, *d_Pp;
 extern Real *d_hllc_vel;
@@ -67,17 +38,17 @@ extern Real *d_sumG, *d_sumP, *d_divU;
 // max SOS
 extern int *d_maxSOS;
 
+// GPU input/output
+extern struct GPU_COMM gpu_comm[_NUM_GPU_BUF_];
+
 // use non-null stream (async)
 extern cudaStream_t *stream;
 
+// compute events
+extern cudaEvent_t *event_compute;
+
 // texture references
-texture<float, 3, cudaReadModeElementType> texR;
-texture<float, 3, cudaReadModeElementType> texU;
-texture<float, 3, cudaReadModeElementType> texV;
-texture<float, 3, cudaReadModeElementType> texW;
-texture<float, 3, cudaReadModeElementType> texE;
-texture<float, 3, cudaReadModeElementType> texG;
-texture<float, 3, cudaReadModeElementType> texP;
+#include "Texture.cu"
 
 ///////////////////////////////////////////////////////////////////////////////
 //                             DEVICE FUNCTIONS                              //
@@ -466,754 +437,6 @@ inline Real _extraterm_hllc_vel(const Real um, const Real up,
 }
 
 
-// Stencil loaders
-__device__
-inline void _load_internal_X(const uint_t ix, const uint_t iy, const uint_t iz,
-        Real * const __restrict__ r,
-        Real * const __restrict__ u,
-        Real * const __restrict__ v,
-        Real * const __restrict__ w,
-        Real * const __restrict__ e,
-        Real * const __restrict__ G,
-        Real * const __restrict__ P,
-        const uint_t dummy1,
-        const DevicePointer * const dummy2)
-{
-    // texture only
-    r[0]  = tex3D(texR, ix-3, iy, iz);
-    r[1]  = tex3D(texR, ix-2, iy, iz);
-    r[2]  = tex3D(texR, ix-1, iy, iz);
-    r[3]  = tex3D(texR, ix,   iy, iz);
-    r[4]  = tex3D(texR, ix+1, iy, iz);
-    r[5]  = tex3D(texR, ix+2, iy, iz);
-
-    u[0]  = tex3D(texU, ix-3, iy, iz);
-    u[1]  = tex3D(texU, ix-2, iy, iz);
-    u[2]  = tex3D(texU, ix-1, iy, iz);
-    u[3]  = tex3D(texU, ix,   iy, iz);
-    u[4]  = tex3D(texU, ix+1, iy, iz);
-    u[5]  = tex3D(texU, ix+2, iy, iz);
-
-    v[0]  = tex3D(texV, ix-3, iy, iz);
-    v[1]  = tex3D(texV, ix-2, iy, iz);
-    v[2]  = tex3D(texV, ix-1, iy, iz);
-    v[3]  = tex3D(texV, ix,   iy, iz);
-    v[4]  = tex3D(texV, ix+1, iy, iz);
-    v[5]  = tex3D(texV, ix+2, iy, iz);
-
-    w[0]  = tex3D(texW, ix-3, iy, iz);
-    w[1]  = tex3D(texW, ix-2, iy, iz);
-    w[2]  = tex3D(texW, ix-1, iy, iz);
-    w[3]  = tex3D(texW, ix,   iy, iz);
-    w[4]  = tex3D(texW, ix+1, iy, iz);
-    w[5]  = tex3D(texW, ix+2, iy, iz);
-
-    e[0]  = tex3D(texE, ix-3, iy, iz);
-    e[1]  = tex3D(texE, ix-2, iy, iz);
-    e[2]  = tex3D(texE, ix-1, iy, iz);
-    e[3]  = tex3D(texE, ix,   iy, iz);
-    e[4]  = tex3D(texE, ix+1, iy, iz);
-    e[5]  = tex3D(texE, ix+2, iy, iz);
-
-    G[0]  = tex3D(texG, ix-3, iy, iz);
-    G[1]  = tex3D(texG, ix-2, iy, iz);
-    G[2]  = tex3D(texG, ix-1, iy, iz);
-    G[3]  = tex3D(texG, ix,   iy, iz);
-    G[4]  = tex3D(texG, ix+1, iy, iz);
-    G[5]  = tex3D(texG, ix+2, iy, iz);
-
-    P[0]  = tex3D(texP, ix-3, iy, iz);
-    P[1]  = tex3D(texP, ix-2, iy, iz);
-    P[2]  = tex3D(texP, ix-1, iy, iz);
-    P[3]  = tex3D(texP, ix,   iy, iz);
-    P[4]  = tex3D(texP, ix+1, iy, iz);
-    P[5]  = tex3D(texP, ix+2, iy, iz);
-
-#ifndef NDEBUG
-    for (uint_t i = 0; i < 6; ++i)
-    {
-        assert(r[i] >  0.0f);
-        assert(e[i] >  0.0f);
-        assert(G[i] >  0.0f);
-        assert(P[i] >= 0.0f);
-        assert(!isnan(u[i]));
-        assert(!isnan(v[i]));
-        assert(!isnan(w[i]));
-    }
-#endif
-}
-
-
-__device__
-inline void _load_internal_Y(const uint_t ix, const uint_t iy, const uint_t iz,
-        Real * const __restrict__ r,
-        Real * const __restrict__ u,
-        Real * const __restrict__ v,
-        Real * const __restrict__ w,
-        Real * const __restrict__ e,
-        Real * const __restrict__ G,
-        Real * const __restrict__ P,
-        const uint_t dummy1,
-        const DevicePointer * const dummy2)
-{
-    // texture only
-    r[0]  = tex3D(texR, ix, iy-3, iz);
-    r[1]  = tex3D(texR, ix, iy-2, iz);
-    r[2]  = tex3D(texR, ix, iy-1, iz);
-    r[3]  = tex3D(texR, ix, iy,   iz);
-    r[4]  = tex3D(texR, ix, iy+1, iz);
-    r[5]  = tex3D(texR, ix, iy+2, iz);
-
-    u[0]  = tex3D(texU, ix, iy-3, iz);
-    u[1]  = tex3D(texU, ix, iy-2, iz);
-    u[2]  = tex3D(texU, ix, iy-1, iz);
-    u[3]  = tex3D(texU, ix, iy,   iz);
-    u[4]  = tex3D(texU, ix, iy+1, iz);
-    u[5]  = tex3D(texU, ix, iy+2, iz);
-
-    v[0]  = tex3D(texV, ix, iy-3, iz);
-    v[1]  = tex3D(texV, ix, iy-2, iz);
-    v[2]  = tex3D(texV, ix, iy-1, iz);
-    v[3]  = tex3D(texV, ix, iy,   iz);
-    v[4]  = tex3D(texV, ix, iy+1, iz);
-    v[5]  = tex3D(texV, ix, iy+2, iz);
-
-    w[0]  = tex3D(texW, ix, iy-3, iz);
-    w[1]  = tex3D(texW, ix, iy-2, iz);
-    w[2]  = tex3D(texW, ix, iy-1, iz);
-    w[3]  = tex3D(texW, ix, iy,   iz);
-    w[4]  = tex3D(texW, ix, iy+1, iz);
-    w[5]  = tex3D(texW, ix, iy+2, iz);
-
-    e[0]  = tex3D(texE, ix, iy-3, iz);
-    e[1]  = tex3D(texE, ix, iy-2, iz);
-    e[2]  = tex3D(texE, ix, iy-1, iz);
-    e[3]  = tex3D(texE, ix, iy,   iz);
-    e[4]  = tex3D(texE, ix, iy+1, iz);
-    e[5]  = tex3D(texE, ix, iy+2, iz);
-
-    G[0]  = tex3D(texG, ix, iy-3, iz);
-    G[1]  = tex3D(texG, ix, iy-2, iz);
-    G[2]  = tex3D(texG, ix, iy-1, iz);
-    G[3]  = tex3D(texG, ix, iy,   iz);
-    G[4]  = tex3D(texG, ix, iy+1, iz);
-    G[5]  = tex3D(texG, ix, iy+2, iz);
-
-    P[0]  = tex3D(texP, ix, iy-3, iz);
-    P[1]  = tex3D(texP, ix, iy-2, iz);
-    P[2]  = tex3D(texP, ix, iy-1, iz);
-    P[3]  = tex3D(texP, ix, iy,   iz);
-    P[4]  = tex3D(texP, ix, iy+1, iz);
-    P[5]  = tex3D(texP, ix, iy+2, iz);
-
-#ifndef NDEBUG
-    for (uint_t i = 0; i < 6; ++i)
-    {
-        assert(r[i] >  0.0f);
-        assert(e[i] >  0.0f);
-        assert(G[i] >  0.0f);
-        assert(P[i] >= 0.0f);
-        assert(!isnan(u[i]));
-        assert(!isnan(v[i]));
-        assert(!isnan(w[i]));
-    }
-#endif
-}
-
-
-__device__
-inline void _load_internal_Z(const uint_t ix, const uint_t iy, const uint_t iz,
-        Real * const __restrict__ r,
-        Real * const __restrict__ u,
-        Real * const __restrict__ v,
-        Real * const __restrict__ w,
-        Real * const __restrict__ e,
-        Real * const __restrict__ G,
-        Real * const __restrict__ P,
-        const uint_t dummy1,
-        const DevicePointer * const dummy2)
-{
-    // texture only
-    r[0]  = tex3D(texR, ix, iy, iz-3);
-    r[1]  = tex3D(texR, ix, iy, iz-2);
-    r[2]  = tex3D(texR, ix, iy, iz-1);
-    r[3]  = tex3D(texR, ix, iy, iz);
-    r[4]  = tex3D(texR, ix, iy, iz+1);
-    r[5]  = tex3D(texR, ix, iy, iz+2);
-
-    u[0]  = tex3D(texU, ix, iy, iz-3);
-    u[1]  = tex3D(texU, ix, iy, iz-2);
-    u[2]  = tex3D(texU, ix, iy, iz-1);
-    u[3]  = tex3D(texU, ix, iy, iz);
-    u[4]  = tex3D(texU, ix, iy, iz+1);
-    u[5]  = tex3D(texU, ix, iy, iz+2);
-
-    v[0]  = tex3D(texV, ix, iy, iz-3);
-    v[1]  = tex3D(texV, ix, iy, iz-2);
-    v[2]  = tex3D(texV, ix, iy, iz-1);
-    v[3]  = tex3D(texV, ix, iy, iz);
-    v[4]  = tex3D(texV, ix, iy, iz+1);
-    v[5]  = tex3D(texV, ix, iy, iz+2);
-
-    w[0]  = tex3D(texW, ix, iy, iz-3);
-    w[1]  = tex3D(texW, ix, iy, iz-2);
-    w[2]  = tex3D(texW, ix, iy, iz-1);
-    w[3]  = tex3D(texW, ix, iy, iz);
-    w[4]  = tex3D(texW, ix, iy, iz+1);
-    w[5]  = tex3D(texW, ix, iy, iz+2);
-
-    e[0]  = tex3D(texE, ix, iy, iz-3);
-    e[1]  = tex3D(texE, ix, iy, iz-2);
-    e[2]  = tex3D(texE, ix, iy, iz-1);
-    e[3]  = tex3D(texE, ix, iy, iz);
-    e[4]  = tex3D(texE, ix, iy, iz+1);
-    e[5]  = tex3D(texE, ix, iy, iz+2);
-
-    G[0]  = tex3D(texG, ix, iy, iz-3);
-    G[1]  = tex3D(texG, ix, iy, iz-2);
-    G[2]  = tex3D(texG, ix, iy, iz-1);
-    G[3]  = tex3D(texG, ix, iy, iz);
-    G[4]  = tex3D(texG, ix, iy, iz+1);
-    G[5]  = tex3D(texG, ix, iy, iz+2);
-
-    P[0]  = tex3D(texP, ix, iy, iz-3);
-    P[1]  = tex3D(texP, ix, iy, iz-2);
-    P[2]  = tex3D(texP, ix, iy, iz-1);
-    P[3]  = tex3D(texP, ix, iy, iz);
-    P[4]  = tex3D(texP, ix, iy, iz+1);
-    P[5]  = tex3D(texP, ix, iy, iz+2);
-
-#ifndef NDEBUG
-    for (uint_t i = 0; i < 6; ++i)
-    {
-        assert(r[i] >  0.0f);
-        assert(e[i] >  0.0f);
-        assert(G[i] >  0.0f);
-        assert(P[i] >= 0.0f);
-        assert(!isnan(u[i]));
-        assert(!isnan(v[i]));
-        assert(!isnan(w[i]));
-    }
-#endif
-}
-
-
-template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
-__device__ inline void _load_1X(const uint_t dummy, const uint_t iy, const uint_t iz,
-        Real * const __restrict__ r,
-        Real * const __restrict__ u,
-        Real * const __restrict__ v,
-        Real * const __restrict__ w,
-        Real * const __restrict__ e,
-        Real * const __restrict__ G,
-        Real * const __restrict__ P,
-        const uint_t global_iz,
-        const DevicePointer * const __restrict__ ghost)
-{
-    // GMEM
-    const uint_t id0 = GHOSTMAPX(ghostStart, iy, iz-3+global_iz);
-
-    r[haloStart] = ghost->r[id0];
-    u[haloStart] = ghost->u[id0];
-    v[haloStart] = ghost->v[id0];
-    w[haloStart] = ghost->w[id0];
-    e[haloStart] = ghost->e[id0];
-    G[haloStart] = ghost->G[id0];
-    P[haloStart] = ghost->P[id0];
-
-    // texture
-    r[texStart+0]  = tex3D(texR, ix0+0, iy, iz);
-    r[texStart+1]  = tex3D(texR, ix0+1, iy, iz);
-    r[texStart+2]  = tex3D(texR, ix0+2, iy, iz);
-    r[texStart+3]  = tex3D(texR, ix0+3, iy, iz);
-    r[texStart+4]  = tex3D(texR, ix0+4, iy, iz);
-
-    u[texStart+0]  = tex3D(texU, ix0+0, iy, iz);
-    u[texStart+1]  = tex3D(texU, ix0+1, iy, iz);
-    u[texStart+2]  = tex3D(texU, ix0+2, iy, iz);
-    u[texStart+3]  = tex3D(texU, ix0+3, iy, iz);
-    u[texStart+4]  = tex3D(texU, ix0+4, iy, iz);
-
-    v[texStart+0]  = tex3D(texV, ix0+0, iy, iz);
-    v[texStart+1]  = tex3D(texV, ix0+1, iy, iz);
-    v[texStart+2]  = tex3D(texV, ix0+2, iy, iz);
-    v[texStart+3]  = tex3D(texV, ix0+3, iy, iz);
-    v[texStart+4]  = tex3D(texV, ix0+4, iy, iz);
-
-    w[texStart+0]  = tex3D(texW, ix0+0, iy, iz);
-    w[texStart+1]  = tex3D(texW, ix0+1, iy, iz);
-    w[texStart+2]  = tex3D(texW, ix0+2, iy, iz);
-    w[texStart+3]  = tex3D(texW, ix0+3, iy, iz);
-    w[texStart+4]  = tex3D(texW, ix0+4, iy, iz);
-
-    e[texStart+0]  = tex3D(texE, ix0+0, iy, iz);
-    e[texStart+1]  = tex3D(texE, ix0+1, iy, iz);
-    e[texStart+2]  = tex3D(texE, ix0+2, iy, iz);
-    e[texStart+3]  = tex3D(texE, ix0+3, iy, iz);
-    e[texStart+4]  = tex3D(texE, ix0+4, iy, iz);
-
-    G[texStart+0]  = tex3D(texG, ix0+0, iy, iz);
-    G[texStart+1]  = tex3D(texG, ix0+1, iy, iz);
-    G[texStart+2]  = tex3D(texG, ix0+2, iy, iz);
-    G[texStart+3]  = tex3D(texG, ix0+3, iy, iz);
-    G[texStart+4]  = tex3D(texG, ix0+4, iy, iz);
-
-    P[texStart+0]  = tex3D(texP, ix0+0, iy, iz);
-    P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
-    P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
-    P[texStart+3]  = tex3D(texP, ix0+3, iy, iz);
-    P[texStart+4]  = tex3D(texP, ix0+4, iy, iz);
-
-#ifndef NDEBUG
-    for (uint_t i = 0; i < 6; ++i)
-    {
-        assert(r[i] >  0.0f);
-        assert(e[i] >  0.0f);
-        assert(G[i] >  0.0f);
-        assert(P[i] >= 0.0f);
-        assert(!isnan(u[i]));
-        assert(!isnan(v[i]));
-        assert(!isnan(w[i]));
-    }
-#endif
-}
-
-
-template <uint_t iy0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
-__device__ inline void _load_1Y(const uint_t ix, const uint_t dummy, const uint_t iz,
-        Real * const __restrict__ r,
-        Real * const __restrict__ u,
-        Real * const __restrict__ v,
-        Real * const __restrict__ w,
-        Real * const __restrict__ e,
-        Real * const __restrict__ G,
-        Real * const __restrict__ P,
-        const uint_t global_iz,
-        const DevicePointer * const __restrict__ ghost)
-{
-    // GMEM
-    const uint_t id0 = GHOSTMAPY(ix, ghostStart, iz-3+global_iz);
-
-    r[haloStart] = ghost->r[id0];
-    u[haloStart] = ghost->u[id0];
-    v[haloStart] = ghost->v[id0];
-    w[haloStart] = ghost->w[id0];
-    e[haloStart] = ghost->e[id0];
-    G[haloStart] = ghost->G[id0];
-    P[haloStart] = ghost->P[id0];
-
-    // texture
-    r[texStart+0]  = tex3D(texR, ix, iy0+0, iz);
-    r[texStart+1]  = tex3D(texR, ix, iy0+1, iz);
-    r[texStart+2]  = tex3D(texR, ix, iy0+2, iz);
-    r[texStart+3]  = tex3D(texR, ix, iy0+3, iz);
-    r[texStart+4]  = tex3D(texR, ix, iy0+4, iz);
-
-    u[texStart+0]  = tex3D(texU, ix, iy0+0, iz);
-    u[texStart+1]  = tex3D(texU, ix, iy0+1, iz);
-    u[texStart+2]  = tex3D(texU, ix, iy0+2, iz);
-    u[texStart+3]  = tex3D(texU, ix, iy0+3, iz);
-    u[texStart+4]  = tex3D(texU, ix, iy0+4, iz);
-
-    v[texStart+0]  = tex3D(texV, ix, iy0+0, iz);
-    v[texStart+1]  = tex3D(texV, ix, iy0+1, iz);
-    v[texStart+2]  = tex3D(texV, ix, iy0+2, iz);
-    v[texStart+3]  = tex3D(texV, ix, iy0+3, iz);
-    v[texStart+4]  = tex3D(texV, ix, iy0+4, iz);
-
-    w[texStart+0]  = tex3D(texW, ix, iy0+0, iz);
-    w[texStart+1]  = tex3D(texW, ix, iy0+1, iz);
-    w[texStart+2]  = tex3D(texW, ix, iy0+2, iz);
-    w[texStart+3]  = tex3D(texW, ix, iy0+3, iz);
-    w[texStart+4]  = tex3D(texW, ix, iy0+4, iz);
-
-    e[texStart+0]  = tex3D(texE, ix, iy0+0, iz);
-    e[texStart+1]  = tex3D(texE, ix, iy0+1, iz);
-    e[texStart+2]  = tex3D(texE, ix, iy0+2, iz);
-    e[texStart+3]  = tex3D(texE, ix, iy0+3, iz);
-    e[texStart+4]  = tex3D(texE, ix, iy0+4, iz);
-
-    G[texStart+0]  = tex3D(texG, ix, iy0+0, iz);
-    G[texStart+1]  = tex3D(texG, ix, iy0+1, iz);
-    G[texStart+2]  = tex3D(texG, ix, iy0+2, iz);
-    G[texStart+3]  = tex3D(texG, ix, iy0+3, iz);
-    G[texStart+4]  = tex3D(texG, ix, iy0+4, iz);
-
-    P[texStart+0]  = tex3D(texP, ix, iy0+0, iz);
-    P[texStart+1]  = tex3D(texP, ix, iy0+1, iz);
-    P[texStart+2]  = tex3D(texP, ix, iy0+2, iz);
-    P[texStart+3]  = tex3D(texP, ix, iy0+3, iz);
-    P[texStart+4]  = tex3D(texP, ix, iy0+4, iz);
-
-#ifndef NDEBUG
-    for (uint_t i = 0; i < 6; ++i)
-    {
-        assert(r[i] >  0.0f);
-        assert(e[i] >  0.0f);
-        assert(G[i] >  0.0f);
-        assert(P[i] >= 0.0f);
-        assert(!isnan(u[i]));
-        assert(!isnan(v[i]));
-        assert(!isnan(w[i]));
-    }
-#endif
-}
-
-
-template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
-__device__ inline void _load_2X(const uint_t dummy, const uint_t iy, const uint_t iz,
-        Real * const __restrict__ r,
-        Real * const __restrict__ u,
-        Real * const __restrict__ v,
-        Real * const __restrict__ w,
-        Real * const __restrict__ e,
-        Real * const __restrict__ G,
-        Real * const __restrict__ P,
-        const uint_t global_iz,
-        const DevicePointer * const __restrict__ ghost)
-{
-    // GMEM
-    const uint_t id0 = GHOSTMAPX(ghostStart+0, iy, iz-3+global_iz);
-    const uint_t id1 = GHOSTMAPX(ghostStart+1, iy, iz-3+global_iz);
-
-    r[haloStart+0] = ghost->r[id0];
-    r[haloStart+1] = ghost->r[id1];
-
-    u[haloStart+0] = ghost->u[id0];
-    u[haloStart+1] = ghost->u[id1];
-
-    v[haloStart+0] = ghost->v[id0];
-    v[haloStart+1] = ghost->v[id1];
-
-    w[haloStart+0] = ghost->w[id0];
-    w[haloStart+1] = ghost->w[id1];
-
-    e[haloStart+0] = ghost->e[id0];
-    e[haloStart+1] = ghost->e[id1];
-
-    G[haloStart+0] = ghost->G[id0];
-    G[haloStart+1] = ghost->G[id1];
-
-    P[haloStart+0] = ghost->P[id0];
-    P[haloStart+1] = ghost->P[id1];
-
-    // texture
-    r[texStart+0]  = tex3D(texR, ix0+0, iy, iz);
-    r[texStart+1]  = tex3D(texR, ix0+1, iy, iz);
-    r[texStart+2]  = tex3D(texR, ix0+2, iy, iz);
-    r[texStart+3]  = tex3D(texR, ix0+3, iy, iz);
-
-    u[texStart+0]  = tex3D(texU, ix0+0, iy, iz);
-    u[texStart+1]  = tex3D(texU, ix0+1, iy, iz);
-    u[texStart+2]  = tex3D(texU, ix0+2, iy, iz);
-    u[texStart+3]  = tex3D(texU, ix0+3, iy, iz);
-
-    v[texStart+0]  = tex3D(texV, ix0+0, iy, iz);
-    v[texStart+1]  = tex3D(texV, ix0+1, iy, iz);
-    v[texStart+2]  = tex3D(texV, ix0+2, iy, iz);
-    v[texStart+3]  = tex3D(texV, ix0+3, iy, iz);
-
-    w[texStart+0]  = tex3D(texW, ix0+0, iy, iz);
-    w[texStart+1]  = tex3D(texW, ix0+1, iy, iz);
-    w[texStart+2]  = tex3D(texW, ix0+2, iy, iz);
-    w[texStart+3]  = tex3D(texW, ix0+3, iy, iz);
-
-    e[texStart+0]  = tex3D(texE, ix0+0, iy, iz);
-    e[texStart+1]  = tex3D(texE, ix0+1, iy, iz);
-    e[texStart+2]  = tex3D(texE, ix0+2, iy, iz);
-    e[texStart+3]  = tex3D(texE, ix0+3, iy, iz);
-
-    G[texStart+0]  = tex3D(texG, ix0+0, iy, iz);
-    G[texStart+1]  = tex3D(texG, ix0+1, iy, iz);
-    G[texStart+2]  = tex3D(texG, ix0+2, iy, iz);
-    G[texStart+3]  = tex3D(texG, ix0+3, iy, iz);
-
-    P[texStart+0]  = tex3D(texP, ix0+0, iy, iz);
-    P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
-    P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
-    P[texStart+3]  = tex3D(texP, ix0+3, iy, iz);
-
-#ifndef NDEBUG
-    for (uint_t i = 0; i < 6; ++i)
-    {
-        assert(r[i] >  0.0f);
-        assert(e[i] >  0.0f);
-        assert(G[i] >  0.0f);
-        assert(P[i] >= 0.0f);
-        assert(!isnan(u[i]));
-        assert(!isnan(v[i]));
-        assert(!isnan(w[i]));
-    }
-#endif
-}
-
-
-template <uint_t iy0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
-__device__ inline void _load_2Y(const uint_t ix, const uint_t dummy, const uint_t iz,
-        Real * const __restrict__ r,
-        Real * const __restrict__ u,
-        Real * const __restrict__ v,
-        Real * const __restrict__ w,
-        Real * const __restrict__ e,
-        Real * const __restrict__ G,
-        Real * const __restrict__ P,
-        const uint_t global_iz,
-        const DevicePointer * const __restrict__ ghost)
-{
-    // GMEM
-    const uint_t id0 = GHOSTMAPY(ix, ghostStart+0, iz-3+global_iz);
-    const uint_t id1 = GHOSTMAPY(ix, ghostStart+1, iz-3+global_iz);
-
-    r[haloStart+0] = ghost->r[id0];
-    r[haloStart+1] = ghost->r[id1];
-
-    u[haloStart+0] = ghost->u[id0];
-    u[haloStart+1] = ghost->u[id1];
-
-    v[haloStart+0] = ghost->v[id0];
-    v[haloStart+1] = ghost->v[id1];
-
-    w[haloStart+0] = ghost->w[id0];
-    w[haloStart+1] = ghost->w[id1];
-
-    e[haloStart+0] = ghost->e[id0];
-    e[haloStart+1] = ghost->e[id1];
-
-    G[haloStart+0] = ghost->G[id0];
-    G[haloStart+1] = ghost->G[id1];
-
-    P[haloStart+0] = ghost->P[id0];
-    P[haloStart+1] = ghost->P[id1];
-
-    // texture
-    r[texStart+0]  = tex3D(texR, ix, iy0+0, iz);
-    r[texStart+1]  = tex3D(texR, ix, iy0+1, iz);
-    r[texStart+2]  = tex3D(texR, ix, iy0+2, iz);
-    r[texStart+3]  = tex3D(texR, ix, iy0+3, iz);
-
-    u[texStart+0]  = tex3D(texU, ix, iy0+0, iz);
-    u[texStart+1]  = tex3D(texU, ix, iy0+1, iz);
-    u[texStart+2]  = tex3D(texU, ix, iy0+2, iz);
-    u[texStart+3]  = tex3D(texU, ix, iy0+3, iz);
-
-    v[texStart+0]  = tex3D(texV, ix, iy0+0, iz);
-    v[texStart+1]  = tex3D(texV, ix, iy0+1, iz);
-    v[texStart+2]  = tex3D(texV, ix, iy0+2, iz);
-    v[texStart+3]  = tex3D(texV, ix, iy0+3, iz);
-
-    w[texStart+0]  = tex3D(texW, ix, iy0+0, iz);
-    w[texStart+1]  = tex3D(texW, ix, iy0+1, iz);
-    w[texStart+2]  = tex3D(texW, ix, iy0+2, iz);
-    w[texStart+3]  = tex3D(texW, ix, iy0+3, iz);
-
-    e[texStart+0]  = tex3D(texE, ix, iy0+0, iz);
-    e[texStart+1]  = tex3D(texE, ix, iy0+1, iz);
-    e[texStart+2]  = tex3D(texE, ix, iy0+2, iz);
-    e[texStart+3]  = tex3D(texE, ix, iy0+3, iz);
-
-    G[texStart+0]  = tex3D(texG, ix, iy0+0, iz);
-    G[texStart+1]  = tex3D(texG, ix, iy0+1, iz);
-    G[texStart+2]  = tex3D(texG, ix, iy0+2, iz);
-    G[texStart+3]  = tex3D(texG, ix, iy0+3, iz);
-
-    P[texStart+0]  = tex3D(texP, ix, iy0+0, iz);
-    P[texStart+1]  = tex3D(texP, ix, iy0+1, iz);
-    P[texStart+2]  = tex3D(texP, ix, iy0+2, iz);
-    P[texStart+3]  = tex3D(texP, ix, iy0+3, iz);
-
-#ifndef NDEBUG
-    for (uint_t i = 0; i < 6; ++i)
-    {
-        assert(r[i] >  0.0f);
-        assert(e[i] >  0.0f);
-        assert(G[i] >  0.0f);
-        assert(P[i] >= 0.0f);
-        assert(!isnan(u[i]));
-        assert(!isnan(v[i]));
-        assert(!isnan(w[i]));
-    }
-#endif
-}
-
-
-template <uint_t ix0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
-__device__ inline void _load_3X(const uint_t dummy, const uint_t iy, const uint_t iz,
-        Real * const __restrict__ r,
-        Real * const __restrict__ u,
-        Real * const __restrict__ v,
-        Real * const __restrict__ w,
-        Real * const __restrict__ e,
-        Real * const __restrict__ G,
-        Real * const __restrict__ P,
-        const uint_t global_iz,
-        const DevicePointer * const __restrict__ ghost)
-{
-    // GMEM
-    const uint_t id0 = GHOSTMAPX(ghostStart+0, iy, iz-3+global_iz);
-    const uint_t id1 = GHOSTMAPX(ghostStart+1, iy, iz-3+global_iz);
-    const uint_t id2 = GHOSTMAPX(ghostStart+2, iy, iz-3+global_iz);
-
-    r[haloStart+0] = ghost->r[id0];
-    r[haloStart+1] = ghost->r[id1];
-    r[haloStart+2] = ghost->r[id2];
-
-    u[haloStart+0] = ghost->u[id0];
-    u[haloStart+1] = ghost->u[id1];
-    u[haloStart+2] = ghost->u[id2];
-
-    v[haloStart+0] = ghost->v[id0];
-    v[haloStart+1] = ghost->v[id1];
-    v[haloStart+2] = ghost->v[id2];
-
-    w[haloStart+0] = ghost->w[id0];
-    w[haloStart+1] = ghost->w[id1];
-    w[haloStart+2] = ghost->w[id2];
-
-    e[haloStart+0] = ghost->e[id0];
-    e[haloStart+1] = ghost->e[id1];
-    e[haloStart+2] = ghost->e[id2];
-
-    G[haloStart+0] = ghost->G[id0];
-    G[haloStart+1] = ghost->G[id1];
-    G[haloStart+2] = ghost->G[id2];
-
-    P[haloStart+0] = ghost->P[id0];
-    P[haloStart+1] = ghost->P[id1];
-    P[haloStart+2] = ghost->P[id2];
-
-    // texture
-    r[texStart+0]  = tex3D(texR, ix0+0, iy, iz);
-    r[texStart+1]  = tex3D(texR, ix0+1, iy, iz);
-    r[texStart+2]  = tex3D(texR, ix0+2, iy, iz);
-
-    u[texStart+0]  = tex3D(texU, ix0+0, iy, iz);
-    u[texStart+1]  = tex3D(texU, ix0+1, iy, iz);
-    u[texStart+2]  = tex3D(texU, ix0+2, iy, iz);
-
-    v[texStart+0]  = tex3D(texV, ix0+0, iy, iz);
-    v[texStart+1]  = tex3D(texV, ix0+1, iy, iz);
-    v[texStart+2]  = tex3D(texV, ix0+2, iy, iz);
-
-    w[texStart+0]  = tex3D(texW, ix0+0, iy, iz);
-    w[texStart+1]  = tex3D(texW, ix0+1, iy, iz);
-    w[texStart+2]  = tex3D(texW, ix0+2, iy, iz);
-
-    e[texStart+0]  = tex3D(texE, ix0+0, iy, iz);
-    e[texStart+1]  = tex3D(texE, ix0+1, iy, iz);
-    e[texStart+2]  = tex3D(texE, ix0+2, iy, iz);
-
-    G[texStart+0]  = tex3D(texG, ix0+0, iy, iz);
-    G[texStart+1]  = tex3D(texG, ix0+1, iy, iz);
-    G[texStart+2]  = tex3D(texG, ix0+2, iy, iz);
-
-    P[texStart+0]  = tex3D(texP, ix0+0, iy, iz);
-    P[texStart+1]  = tex3D(texP, ix0+1, iy, iz);
-    P[texStart+2]  = tex3D(texP, ix0+2, iy, iz);
-
-#ifndef NDEBUG
-    for (uint_t i = 0; i < 6; ++i)
-    {
-        assert(r[i] >  0.0f);
-        assert(e[i] >  0.0f);
-        assert(G[i] >  0.0f);
-        assert(P[i] >= 0.0f);
-        assert(!isnan(u[i]));
-        assert(!isnan(v[i]));
-        assert(!isnan(w[i]));
-    }
-#endif
-}
-
-
-template <uint_t iy0, uint_t haloStart, uint_t texStart, uint_t ghostStart>
-__device__ inline void _load_3Y(const uint_t ix, const uint_t dummy, const uint_t iz,
-        Real * const __restrict__ r,
-        Real * const __restrict__ u,
-        Real * const __restrict__ v,
-        Real * const __restrict__ w,
-        Real * const __restrict__ e,
-        Real * const __restrict__ G,
-        Real * const __restrict__ P,
-        const uint_t global_iz,
-        const DevicePointer * const __restrict__ ghost)
-{
-    // GMEM
-    const uint_t id0 = GHOSTMAPY(ix, ghostStart+0, iz-3+global_iz);
-    const uint_t id1 = GHOSTMAPY(ix, ghostStart+1, iz-3+global_iz);
-    const uint_t id2 = GHOSTMAPY(ix, ghostStart+2, iz-3+global_iz);
-
-    r[haloStart+0] = ghost->r[id0];
-    r[haloStart+1] = ghost->r[id1];
-    r[haloStart+2] = ghost->r[id2];
-
-    u[haloStart+0] = ghost->u[id0];
-    u[haloStart+1] = ghost->u[id1];
-    u[haloStart+2] = ghost->u[id2];
-
-    v[haloStart+0] = ghost->v[id0];
-    v[haloStart+1] = ghost->v[id1];
-    v[haloStart+2] = ghost->v[id2];
-
-    w[haloStart+0] = ghost->w[id0];
-    w[haloStart+1] = ghost->w[id1];
-    w[haloStart+2] = ghost->w[id2];
-
-    e[haloStart+0] = ghost->e[id0];
-    e[haloStart+1] = ghost->e[id1];
-    e[haloStart+2] = ghost->e[id2];
-
-    G[haloStart+0] = ghost->G[id0];
-    G[haloStart+1] = ghost->G[id1];
-    G[haloStart+2] = ghost->G[id2];
-
-    P[haloStart+0] = ghost->P[id0];
-    P[haloStart+1] = ghost->P[id1];
-    P[haloStart+2] = ghost->P[id2];
-
-    // texture
-    r[texStart+0]  = tex3D(texR, ix, iy0+0, iz);
-    r[texStart+1]  = tex3D(texR, ix, iy0+1, iz);
-    r[texStart+2]  = tex3D(texR, ix, iy0+2, iz);
-
-    u[texStart+0]  = tex3D(texU, ix, iy0+0, iz);
-    u[texStart+1]  = tex3D(texU, ix, iy0+1, iz);
-    u[texStart+2]  = tex3D(texU, ix, iy0+2, iz);
-
-    v[texStart+0]  = tex3D(texV, ix, iy0+0, iz);
-    v[texStart+1]  = tex3D(texV, ix, iy0+1, iz);
-    v[texStart+2]  = tex3D(texV, ix, iy0+2, iz);
-
-    w[texStart+0]  = tex3D(texW, ix, iy0+0, iz);
-    w[texStart+1]  = tex3D(texW, ix, iy0+1, iz);
-    w[texStart+2]  = tex3D(texW, ix, iy0+2, iz);
-
-    e[texStart+0]  = tex3D(texE, ix, iy0+0, iz);
-    e[texStart+1]  = tex3D(texE, ix, iy0+1, iz);
-    e[texStart+2]  = tex3D(texE, ix, iy0+2, iz);
-
-    G[texStart+0]  = tex3D(texG, ix, iy0+0, iz);
-    G[texStart+1]  = tex3D(texG, ix, iy0+1, iz);
-    G[texStart+2]  = tex3D(texG, ix, iy0+2, iz);
-
-    P[texStart+0]  = tex3D(texP, ix, iy0+0, iz);
-    P[texStart+1]  = tex3D(texP, ix, iy0+1, iz);
-    P[texStart+2]  = tex3D(texP, ix, iy0+2, iz);
-
-#ifndef NDEBUG
-    for (uint_t i = 0; i < 6; ++i)
-    {
-        assert(r[i] >  0.0f);
-        assert(e[i] >  0.0f);
-        assert(G[i] >  0.0f);
-        assert(P[i] >= 0.0f);
-        assert(!isnan(u[i]));
-        assert(!isnan(v[i]));
-        assert(!isnan(w[i]));
-    }
-#endif
-}
-
-
 ///////////////////////////////////////////////////////////////////////////////
 //                                  KERNELS                                  //
 ///////////////////////////////////////////////////////////////////////////////
@@ -1455,7 +678,7 @@ void _zextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer fl
 
 
 __global__
-void _xflux(const uint_t nslices, const uint_t global_iz,
+void _xflux00(const uint_t nslices, const uint_t global_iz,
         const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
         Real * const __restrict__ xtra_vel,
         Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
@@ -1473,6 +696,7 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
      *     all of the x-/yghosts are uploaded to the GPU prior to processing
      *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
      *     are uploaded per chunk.
+     * 6.) Reads textures 00
      * */
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1505,76 +729,22 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             // GMEM transactions are cached, effective GMEM accesses are 7*3
             // (according to nvvp)
             if (0 == ix)
-                _load_3X<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*TEX)
+                _load_3X00<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*tex_start)
             else if (1 == ix)
-                _load_2X<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*TEX)
+                _load_2X00<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*tex_start)
             else if (2 == ix)
-                _load_1X<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*TEX)
+                _load_1X00<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*tex_start)
             else if (NXP1-3 == ix)
-                _load_1X<NXP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+                _load_1X00<NXP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else if (NXP1-2 == ix)
-                _load_2X<NXP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+                _load_2X00<NXP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else if (NXP1-1 == ix)
-                _load_3X<NXP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+                _load_3X00<NXP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else
-                _load_internal_X(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
+                _load_internal_X00(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*tex_start)
 
-            // 2.)
-            // convert to primitive variables
-#pragma unroll 6
-            for (uint_t i = 0; i < 6; ++i)
-            {
-                e[i] = (e[i] - 0.5f*(u[i]*u[i] + v[i]*v[i] + w[i]*w[i])/r[i] - P[i]) / G[i];
-                u[i] = u[i]/r[i];
-                v[i] = v[i]/r[i];
-                w[i] = w[i]/r[i];
-            } // 6 x (8 MUL/ADD/SUB + 5 DIV) = 78 FLOPS
-
-            const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]); // 96 FLOP (6 DIV)
-            const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(rp)); assert(!isnan(rm));
-
-            const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]); // 96 FLOP (6 DIV)
-            const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(Gp)); assert(!isnan(Gm));
-
-            const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]); // 96 FLOP (6 DIV)
-            const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(Pp)); assert(!isnan(Pm));
-
-            const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]); // 96 FLOP (6 DIV)
-            const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(pp)); assert(!isnan(pm));
-
-            const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]); // 96 FLOP (6 DIV)
-            const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(up)); assert(!isnan(um));
-
-            const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]); // 96 FLOP (6 DIV)
-            const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(vp)); assert(!isnan(vm));
-
-            const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]); // 96 FLOP (6 DIV)
-            const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(wp)); assert(!isnan(wm));
-
-            // 3.)
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
-            const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp); // 11 FLOP (1 DIV)
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
-
-            // 4.)
-            const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
-            const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
-            const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss); // 25 FLOP (2 DIV)
-            const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss); // 25 FLOP (2 DIV)
-            const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
-            const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
-            const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
-            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
-
-            const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
+            // compute body
+#           include "xflux_body.cu"
 
             /* if (global_iz) */
             /* { */
@@ -1624,9 +794,97 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
 }
 
 
+__global__
+void _xflux01(const uint_t nslices, const uint_t global_iz,
+        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
+        Real * const __restrict__ xtra_vel,
+        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
+        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
+{
+    /* *
+     * Notes:
+     * ======
+     * 1.) NXP1 = NX + 1
+     * 2.) NX = NodeBlock::sizeX
+     * 3.) NY = NodeBlock::sizeY
+     * 4.) nslices = number of slices for currently processed chunk
+     * 5.) global_iz is the iz-coordinate in index space of the NodeBlock for
+     *     the first slice of the currently processed chunk.  It is needed if
+     *     all of the x-/yghosts are uploaded to the GPU prior to processing
+     *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
+     *     are uploaded per chunk.
+     * 6.) Reads textures 01
+     * */
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    assert(NXP1 > 5);
+
+    if (ix < NXP1 && iy < NY)
+    {
+        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
+        {
+            /* *
+             * The general task order is (for each chunk slice along NZ):
+             * 1.) Load stencils
+             * 2.) Reconstruct primitive values using WENO5/WENO3
+             * 3.) Compute characteristic velocities
+             * 4.) Compute fluxes
+             * 5.) Compute RHS for advection of G and P
+             * */
+
+            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
+            Real r[6];
+            Real u[6];
+            Real v[6];
+            Real w[6];
+            Real e[6];
+            Real G[6];
+            Real P[6];
+
+            // 1.)
+            // GMEM transactions are cached, effective GMEM accesses are 7*3
+            // (according to nvvp)
+            if (0 == ix)
+                _load_3X01<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*tex_start)
+            else if (1 == ix)
+                _load_2X01<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*tex_start)
+            else if (2 == ix)
+                _load_1X01<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*tex_start)
+            else if (NXP1-3 == ix)
+                _load_1X01<NXP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NXP1-2 == ix)
+                _load_2X01<NXP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NXP1-1 == ix)
+                _load_3X01<NXP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else
+                _load_internal_X01(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*tex_start)
+
+            // compute body
+#           include "xflux_body.cu"
+
+            const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
+            flux.r[idx] = fr;
+            flux.u[idx] = fu;
+            flux.v[idx] = fv;
+            flux.w[idx] = fw;
+            flux.e[idx] = fe;
+            flux.G[idx] = fG;
+            flux.P[idx] = fP;
+
+            // 5.)
+            xtra_vel[idx] = hllc_vel;
+            xtra_Gm[idx]  = Gm;
+            xtra_Gp[idx]  = Gp;
+            xtra_Pm[idx]  = Pm;
+            xtra_Pp[idx]  = Pp;
+        }
+    }
+}
+
 
 __global__
-void _yflux(const uint_t nslices, const uint_t global_iz,
+void _yflux00(const uint_t nslices, const uint_t global_iz,
         const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
         Real * const __restrict__ xtra_vel,
         Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
@@ -1644,6 +902,7 @@ void _yflux(const uint_t nslices, const uint_t global_iz,
      *     all of the x-/yghosts are uploaded to the GPU prior to processing
      *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
      *     are uploaded per chunk.
+     * 6.) Reads texture 00
      * */
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1676,76 +935,22 @@ void _yflux(const uint_t nslices, const uint_t global_iz,
             // GMEM transactions are cached, effective GMEM accesses are 7*3
             // (according to nvvp)
             if (0 == iy)
-                _load_3Y<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*TEX)
+                _load_3Y00<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*TEX)
             else if (1 == iy)
-                _load_2Y<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*TEX)
+                _load_2Y00<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*TEX)
             else if (2 == iy)
-                _load_1Y<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*TEX)
+                _load_1Y00<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*TEX)
             else if (NYP1-3 == iy)
-                _load_1Y<NYP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+                _load_1Y00<NYP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else if (NYP1-2 == iy)
-                _load_2Y<NYP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+                _load_2Y00<NYP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else if (NYP1-1 == iy)
-                _load_3Y<NYP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+                _load_3Y00<NYP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
             else
-                _load_internal_Y(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
+                _load_internal_Y00(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
 
-            // 2.)
-            // convert to primitive variables
-#pragma unroll 6
-            for (uint_t i = 0; i < 6; ++i)
-            {
-                e[i] = (e[i] - 0.5f*(u[i]*u[i] + v[i]*v[i] + w[i]*w[i])/r[i] - P[i]) / G[i];
-                u[i] = u[i]/r[i];
-                v[i] = v[i]/r[i];
-                w[i] = w[i]/r[i];
-            } // 6 x (8 MUL/ADD/SUB + 5 DIV) = 78 FLOPS
-
-            const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]); // 96 FLOP (6 DIV)
-            const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(rp)); assert(!isnan(rm));
-
-            const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]); // 96 FLOP (6 DIV)
-            const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(Gp)); assert(!isnan(Gm));
-
-            const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]); // 96 FLOP (6 DIV)
-            const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(Pp)); assert(!isnan(Pm));
-
-            const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]); // 96 FLOP (6 DIV)
-            const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(pp)); assert(!isnan(pm));
-
-            const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]); // 96 FLOP (6 DIV)
-            const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(vp)); assert(!isnan(vm));
-
-            const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]); // 96 FLOP (6 DIV)
-            const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(up)); assert(!isnan(um));
-
-            const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]); // 96 FLOP (6 DIV)
-            const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(wp)); assert(!isnan(wm));
-
-            // 3.)
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
-            const Real ss = _char_vel_star(rm, rp, vm, vp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
-
-            // 4.)
-            const Real fr = _hllc_rho(rm, rp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
-            const Real fu = _hllc_vel(rm, rp, um, up, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
-            const Real fv = _hllc_pvel(rm, rp, vm, vp, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
-            const Real fw = _hllc_vel(rm, rp, wm, wp, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
-            const Real fe = _hllc_e(rm, rp, vm, vp, um, up, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
-            const Real fG = _hllc_rho(Gm, Gp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
-            const Real fP = _hllc_rho(Pm, Pp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
-            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
-
-            const Real hllc_vel = _extraterm_hllc_vel(vm, vp, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
+            // compute body
+#           include "yflux_body.cu"
 
             /* if (global_iz) */
             /* { */
@@ -1795,13 +1000,100 @@ void _yflux(const uint_t nslices, const uint_t global_iz,
 }
 
 
-
 __global__
-void _zflux(const uint_t nslices, DevicePointer flux,
+void _yflux01(const uint_t nslices, const uint_t global_iz,
+        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
         Real * const __restrict__ xtra_vel,
         Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
-        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp,
-        const uint_t global_iz = 0)
+        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
+{
+    /* *
+     * Notes:
+     * ======
+     * 1.) NYP1 = NY + 1
+     * 2.) NX = NodeBlock::sizeX
+     * 3.) NY = NodeBlock::sizeY
+     * 4.) nslices = number of slices for currently processed chunk
+     * 5.) global_iz is the iz-coordinate in index space of the NodeBlock for
+     *     the first slice of the currently processed chunk.  It is needed if
+     *     all of the x-/yghosts are uploaded to the GPU prior to processing
+     *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
+     *     are uploaded per chunk.
+     * 6.) Reads texture 01
+     * */
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    assert(NYP1 > 5);
+
+    if (ix < NX && iy < NYP1)
+    {
+        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
+        {
+            /* *
+             * The general task order is (for each chunk slice along NZ):
+             * 1.) Load stencils
+             * 2.) Reconstruct primitive values using WENO5/WENO3
+             * 3.) Compute characteristic velocities
+             * 4.) Compute fluxes
+             * 5.) Compute RHS for advection of G and P
+             * */
+
+            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
+            Real r[6];
+            Real u[6];
+            Real v[6];
+            Real w[6];
+            Real e[6];
+            Real G[6];
+            Real P[6];
+
+            // 1.)
+            // GMEM transactions are cached, effective GMEM accesses are 7*3
+            // (according to nvvp)
+            if (0 == iy)
+                _load_3Y01<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*TEX)
+            else if (1 == iy)
+                _load_2Y01<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*TEX)
+            else if (2 == iy)
+                _load_1Y01<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*TEX)
+            else if (NYP1-3 == iy)
+                _load_1Y01<NYP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NYP1-2 == iy)
+                _load_2Y01<NYP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NYP1-1 == iy)
+                _load_3Y01<NYP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else
+                _load_internal_Y01(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
+
+            // compute body
+#           include "yflux_body.cu"
+
+            const uint_t idx = ID3(ix, iy, iz-3, NX, NYP1);
+            flux.r[idx] = fr;
+            flux.u[idx] = fu;
+            flux.v[idx] = fv;
+            flux.w[idx] = fw;
+            flux.e[idx] = fe;
+            flux.G[idx] = fG;
+            flux.P[idx] = fP;
+
+            // 5.)
+            xtra_vel[idx] = hllc_vel;
+            xtra_Gm[idx]  = Gm;
+            xtra_Gp[idx]  = Gp;
+            xtra_Pm[idx]  = Pm;
+            xtra_Pp[idx]  = Pp;
+        }
+    }
+}
+
+
+__global__
+void _zflux00(const uint_t nslices, DevicePointer flux,
+        Real * const __restrict__ xtra_vel,
+        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
+        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
 {
     /* *
      * Notes:
@@ -1810,6 +1102,7 @@ void _zflux(const uint_t nslices, DevicePointer flux,
      * 2.) NY = NodeBlock::sizeY
      * 3.) NZ = NodeBlock::sizeZ
      * 4.) nslices = number of slices for currently processed chunk
+     * 5.) Reads texture 00
      * */
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1840,63 +1133,10 @@ void _zflux(const uint_t nslices, DevicePointer flux,
             Real P[6];
 
             // 1.)
-            _load_internal_Z(ix, iy, iz, r, u, v, w, e, G, P, 0, NULL); // load 7*(6*TEX)
+            _load_internal_Z00(ix, iy, iz, r, u, v, w, e, G, P, 0, NULL); // load 7*(6*TEX)
 
-            // 2.)
-            // convert to primitive variables
-#pragma unroll 6
-            for (uint_t i = 0; i < 6; ++i)
-            {
-                e[i] = (e[i] - 0.5f*(u[i]*u[i] + v[i]*v[i] + w[i]*w[i])/r[i] - P[i]) / G[i];
-                u[i] = u[i]/r[i];
-                v[i] = v[i]/r[i];
-                w[i] = w[i]/r[i];
-            } // 6 x (8 MUL/ADD/SUB + 5 DIV) = 78 FLOPS
-
-            const Real rm = _weno_minus_clipped(r[0], r[1], r[2], r[3], r[4]); // 96 FLOP (6 DIV)
-            const Real rp = _weno_pluss_clipped(r[1], r[2], r[3], r[4], r[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(rp)); assert(!isnan(rm));
-
-            const Real Gm = _weno_minus_clipped(G[0], G[1], G[2], G[3], G[4]); // 96 FLOP (6 DIV)
-            const Real Gp = _weno_pluss_clipped(G[1], G[2], G[3], G[4], G[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(Gp)); assert(!isnan(Gm));
-
-            const Real Pm = _weno_minus_clipped(P[0], P[1], P[2], P[3], P[4]); // 96 FLOP (6 DIV)
-            const Real Pp = _weno_pluss_clipped(P[1], P[2], P[3], P[4], P[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(Pp)); assert(!isnan(Pm));
-
-            const Real pm = _weno_minus_clipped(e[0], e[1], e[2], e[3], e[4]); // 96 FLOP (6 DIV)
-            const Real pp = _weno_pluss_clipped(e[1], e[2], e[3], e[4], e[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(pp)); assert(!isnan(pm));
-
-            const Real wm = _weno_minus_clipped(w[0], w[1], w[2], w[3], w[4]); // 96 FLOP (6 DIV)
-            const Real wp = _weno_pluss_clipped(w[1], w[2], w[3], w[4], w[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(wp)); assert(!isnan(wm));
-
-            const Real um = _weno_minus_clipped(u[0], u[1], u[2], u[3], u[4]); // 96 FLOP (6 DIV)
-            const Real up = _weno_pluss_clipped(u[1], u[2], u[3], u[4], u[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(up)); assert(!isnan(um));
-
-            const Real vm = _weno_minus_clipped(v[0], v[1], v[2], v[3], v[4]); // 96 FLOP (6 DIV)
-            const Real vp = _weno_pluss_clipped(v[1], v[2], v[3], v[4], v[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(vp)); assert(!isnan(vm));
-
-            // 3.)
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
-            const Real ss = _char_vel_star(rm, rp, wm, wp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
-
-            // 4.)
-            const Real fr = _hllc_rho(rm, rp, wm, wp, sm, sp, ss); // 23 FLOP (2 DIV)
-            const Real fu = _hllc_vel(rm, rp, um, up, wm, wp, sm, sp, ss); // 25 FLOP (2 DIV)
-            const Real fv = _hllc_vel(rm, rp, vm, vp, wm, wp, sm, sp, ss); // 25 FLOP (2 DIV)
-            const Real fw = _hllc_pvel(rm, rp, wm, wp, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
-            const Real fe = _hllc_e(rm, rp, wm, wp, um, up, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
-            const Real fG = _hllc_rho(Gm, Gp, wm, wp, sm, sp, ss); // 23 FLOP (2 DIV)
-            const Real fP = _hllc_rho(Pm, Pp, wm, wp, sm, sp, ss); // 23 FLOP (2 DIV)
-
-            const Real hllc_vel = _extraterm_hllc_vel(wm, wp, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
+            // compute body
+#           include "zflux_body.cu"
 
             /* if (global_iz) */
             /* { */
@@ -1947,6 +1187,75 @@ void _zflux(const uint_t nslices, DevicePointer flux,
 
 
 __global__
+void _zflux01(const uint_t nslices, DevicePointer flux,
+        Real * const __restrict__ xtra_vel,
+        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
+        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
+{
+    /* *
+     * Notes:
+     * ======
+     * 1.) NX = NodeBlock::sizeX
+     * 2.) NY = NodeBlock::sizeY
+     * 3.) NZ = NodeBlock::sizeZ
+     * 4.) nslices = number of slices for currently processed chunk
+     * 5.) Reads texture 01
+     * */
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    // depends on boundary condition in z-direction
+    assert(NodeBlock::sizeZ > 0);
+
+    if (ix < NX && iy < NY)
+    {
+        for (uint_t iz = 3; iz < (nslices+1)+3; ++iz) // first and last 3 slices are zghosts; need to compute nslices+1 fluxes in z-direction
+        {
+            /* *
+             * The general task order is (for each chunk slice along NZ):
+             * 1.) Load stencils
+             * 2.) Reconstruct primitive values using WENO5/WENO3
+             * 3.) Compute characteristic velocities
+             * 4.) Compute fluxes
+             * 5.) Compute RHS for advection of G and P
+             * */
+
+            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
+            Real r[6];
+            Real u[6];
+            Real v[6];
+            Real w[6];
+            Real e[6];
+            Real G[6];
+            Real P[6];
+
+            // 1.)
+            _load_internal_Z01(ix, iy, iz, r, u, v, w, e, G, P, 0, NULL); // load 7*(6*TEX)
+
+            // compute body
+#           include "zflux_body.cu"
+
+            const uint_t idx = ID3(ix, iy, iz-3, NX, NY);
+            flux.r[idx] = fr;
+            flux.u[idx] = fu;
+            flux.v[idx] = fv;
+            flux.w[idx] = fw;
+            flux.e[idx] = fe;
+            flux.G[idx] = fG;
+            flux.P[idx] = fP;
+
+            // 5.)
+            xtra_vel[idx] = hllc_vel;
+            xtra_Gm[idx]  = Gm;
+            xtra_Gp[idx]  = Gp;
+            xtra_Pm[idx]  = Pm;
+            xtra_Pp[idx]  = Pp;
+        }
+    }
+}
+
+
+__global__
 void _maxSOS(const uint_t nslices, int* g_maxSOS)
 {
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1962,13 +1271,14 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
-            const Real r = tex3D(texR, ix, iy, iz);
-            const Real u = tex3D(texU, ix, iy, iz);
-            const Real v = tex3D(texV, ix, iy, iz);
-            const Real w = tex3D(texW, ix, iy, iz);
-            const Real e = tex3D(texE, ix, iy, iz);
-            const Real G = tex3D(texG, ix, iy, iz);
-            const Real P = tex3D(texP, ix, iy, iz);
+            // TODO: used both buffers here
+            const Real r = tex3D(texR00, ix, iy, iz);
+            const Real u = tex3D(texU00, ix, iy, iz);
+            const Real v = tex3D(texV00, ix, iy, iz);
+            const Real w = tex3D(texW00, ix, iy, iz);
+            const Real e = tex3D(texE00, ix, iy, iz);
+            const Real G = tex3D(texG00, ix, iy, iz);
+            const Real P = tex3D(texP00, ix, iy, iz);
 
             const Real p = (e - (u*u + v*v + w*w)*(0.5f/r) - P) / G;
             const Real c = sqrtf(((p + P) / G + p) / r);
@@ -1982,7 +1292,7 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
         {
             for (int i = 1; i < _NTHREADS_; ++i)
                 sos = fmaxf(sos, block_sos[i]);
-            assert(sos > 0);
+            assert(sos > 0.0f);
             atomicMax(g_maxSOS, __float_as_int(sos));
         }
     }
@@ -1991,88 +1301,183 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 ///////////////////////////////////////////////////////////////////////////////
 //                              KERNEL WRAPPERS                              //
 ///////////////////////////////////////////////////////////////////////////////
-void GPU::xflux(const uint_t nslices, const uint_t global_iz, const int s_id)
+static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex, cudaArray_t d_ptr)
+{
+    cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
+    tex->addressMode[0]       = cudaAddressModeClamp;
+    tex->addressMode[1]       = cudaAddressModeClamp;
+    tex->addressMode[2]       = cudaAddressModeClamp;
+    tex->channelDesc          = fmt;
+    tex->filterMode           = cudaFilterModePoint;
+    tex->mipmapFilterMode     = cudaFilterModePoint;
+    tex->normalized           = false;
+
+    cudaBindTextureToArray(tex, d_ptr, &fmt);
+}
+
+
+void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
+        const uint_t gbuf_id, const int chunk_id)
 {
 #ifndef _MUTE_GPU_
-    DevicePointer xghostL(d_xgl);
-    DevicePointer xghostR(d_xgr);
-    DevicePointer xflux(d_flux);
-    DevicePointer divF(d_divF);
+    assert(gbuf_id < _NUM_GPU_BUF_);
 
-    const dim3 blocks(1, _NTHREADS_, 1);
-    const dim3 grid(NXP1, (NY + _NTHREADS_ -1)/_NTHREADS_, 1);
-    const dim3 xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
-    const dim3 xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
+    /* *
+     * Compute div(F)
+     * */
+
+    // my stream
+    const uint_t s_id = chunk_id % _NUM_STREAMS_;
+
+    // my data
+    GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
+
+    // my ghosts
+    DevicePointer xghostL(mybuf->d_xgl);
+    DevicePointer xghostR(mybuf->d_xgr);
+    DevicePointer yghostL(mybuf->d_ygl);
+    DevicePointer yghostR(mybuf->d_ygr);
+
+    // my output
+    DevicePointer divF(mybuf->d_divF);
+
+    // my tmp storage
+    DevicePointer flux(d_flux);
+
+    // my launch config
+    const dim3 X_blocks(1, _NTHREADS_, 1);
+    const dim3 X_grid(NXP1, (NY + _NTHREADS_ -1)/_NTHREADS_, 1);
+    const dim3 X_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
+    const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
+
+    const dim3 Y_blocks(_NTHREADS_, 1, 1);
+    const dim3 Y_grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1);
+    const dim3 Y_xtraGrid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+
+    const dim3 Z_blocks(_NTHREADS_, 1, 1);
+    const dim3 Z_grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+
+    // previous stream has priority. Since resources are limited, concurrent
+    // kernels make less sense
+    const uint_t s_idm1 = ((chunk_id-1) + _NUM_STREAMS_) % _NUM_STREAMS_;
+    assert(s_idm1 < _NUM_STREAMS_);
+    cudaStreamWaitEvent(stream[s_id], event_compute[s_idm1], 0);
 
     char prof_item[256];
 
-    sprintf(prof_item, "_XFLUX (s_id=%d)", s_id);
-    GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-    _xflux<<<grid, blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-    GPU::profiler.pop_stopCUDA();
+    // queue kernels in pipe
+    switch (gbuf_id)
+    {
+        case 0:
+            _bindTexture(&texR00, mybuf->d_GPUin[0]);
+            _bindTexture(&texU00, mybuf->d_GPUin[1]);
+            _bindTexture(&texV00, mybuf->d_GPUin[2]);
+            _bindTexture(&texW00, mybuf->d_GPUin[3]);
+            _bindTexture(&texE00, mybuf->d_GPUin[4]);
+            _bindTexture(&texG00, mybuf->d_GPUin[5]);
+            _bindTexture(&texP00, mybuf->d_GPUin[6]);
+            // --- X ---
+            sprintf(prof_item, "_XFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _xflux00<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
 
-    sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id);
-    GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-    _xextraterm_hllc<<<xtraGrid, xtraBlocks, 0, stream[s_id]>>>(nslices, divF, xflux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-    GPU::profiler.pop_stopCUDA();
+            sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+
+            // --- Y ---
+            sprintf(prof_item, "_YFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _yflux00<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _yextraterm_hllc<<<Y_xtraGrid, Y_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+
+            // --- Z ---
+            sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _zflux00<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _zextraterm_hllc<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+            break;
+
+        case 1:
+            _bindTexture(&texR01, mybuf->d_GPUin[0]);
+            _bindTexture(&texU01, mybuf->d_GPUin[1]);
+            _bindTexture(&texV01, mybuf->d_GPUin[2]);
+            _bindTexture(&texW01, mybuf->d_GPUin[3]);
+            _bindTexture(&texE01, mybuf->d_GPUin[4]);
+            _bindTexture(&texG01, mybuf->d_GPUin[5]);
+            _bindTexture(&texP01, mybuf->d_GPUin[6]);
+            // --- X ---
+            sprintf(prof_item, "_XFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _xflux01<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+
+            // --- Y ---
+            sprintf(prof_item, "_YFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _yflux01<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _yextraterm_hllc<<<Y_xtraGrid, Y_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+
+            // --- Z ---
+            sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _zflux01<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _zextraterm_hllc<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+            break;
+    }
+
+    cudaEventRecord(event_compute[s_id], stream[s_id]);
 #endif
 }
 
 
-void GPU::yflux(const uint_t nslices, const uint_t global_iz, const int s_id)
+void GPU::MaxSpeedOfSound(const uint_t nslices, const uint_t gbuf_id, const int chunk_id)
 {
 #ifndef _MUTE_GPU_
-    DevicePointer yghostL(d_ygl);
-    DevicePointer yghostR(d_ygr);
-    DevicePointer yflux(d_flux);
-    DevicePointer divF(d_divF);
+    assert(gbuf_id < _NUM_GPU_BUF_);
 
-    const dim3 blocks(_NTHREADS_, 1, 1);
-    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1);
-    const dim3 xtraGrid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+    // my stream
+    const uint_t s_id = chunk_id % _NUM_STREAMS_;
 
-    char prof_item[256];
+    // my data
+    GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
 
-    sprintf(prof_item, "_YFLUX (s_id=%d)", s_id);
-    GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-    _yflux<<<grid, blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-    GPU::profiler.pop_stopCUDA();
+    _bindTexture(&texR00, mybuf->d_GPUin[0]);
+    _bindTexture(&texU00, mybuf->d_GPUin[1]);
+    _bindTexture(&texV00, mybuf->d_GPUin[2]);
+    _bindTexture(&texW00, mybuf->d_GPUin[3]);
+    _bindTexture(&texE00, mybuf->d_GPUin[4]);
+    _bindTexture(&texG00, mybuf->d_GPUin[5]);
+    _bindTexture(&texP00, mybuf->d_GPUin[6]);
 
-    sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id);
-    GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-    _yextraterm_hllc<<<xtraGrid, blocks, 0, stream[s_id]>>>(nslices, divF, yflux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-    GPU::profiler.pop_stopCUDA();
-#endif
-}
-
-
-void GPU::zflux(const uint_t nslices, const int s_id)
-{
-#ifndef _MUTE_GPU_
-    DevicePointer zflux(d_flux);
-    DevicePointer divF(d_divF);
-
-    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-    const dim3 blocks(_NTHREADS_, 1, 1);
-
-    char prof_item[256];
-
-    sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id);
-    GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-    _zflux<<<grid, blocks, 0, stream[s_id]>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-    GPU::profiler.pop_stopCUDA();
-
-    sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id);
-    GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-    _zextraterm_hllc<<<grid, blocks, 0, stream[s_id]>>>(nslices, divF, zflux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-    GPU::profiler.pop_stopCUDA();
-#endif
-}
-
-
-void GPU::MaxSpeedOfSound(const uint_t nslices, const int s_id)
-{
-#ifndef _MUTE_GPU_
+    // my launch config
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
     const dim3 blocks(_NTHREADS_, 1, 1);
 
@@ -2090,12 +1495,30 @@ void GPU::MaxSpeedOfSound(const uint_t nslices, const int s_id)
 ///////////////////////////////////////////////////////////////////////////
 void GPU::TestKernel()
 {
-    DevicePointer xghostL(d_xgl);
-    DevicePointer xghostR(d_xgr);
+    const uint_t gbuf_id = 0;
+    const uint_t s_id = 0;
 
-    DevicePointer yghostL(d_ygl);
-    DevicePointer yghostR(d_ygr);
+    // my data
+    GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
 
+    _bindTexture(&texR00, mybuf->d_GPUin[0]);
+    _bindTexture(&texU00, mybuf->d_GPUin[1]);
+    _bindTexture(&texV00, mybuf->d_GPUin[2]);
+    _bindTexture(&texW00, mybuf->d_GPUin[3]);
+    _bindTexture(&texE00, mybuf->d_GPUin[4]);
+    _bindTexture(&texG00, mybuf->d_GPUin[5]);
+    _bindTexture(&texP00, mybuf->d_GPUin[6]);
+
+    // my ghosts
+    DevicePointer xghostL(mybuf->d_xgl);
+    DevicePointer xghostR(mybuf->d_xgr);
+    DevicePointer yghostL(mybuf->d_ygl);
+    DevicePointer yghostR(mybuf->d_ygr);
+
+    // my output
+    DevicePointer divF(mybuf->d_divF);
+
+    // my tmp storage
     DevicePointer flux(d_flux);
 
     cudaFree(d_Gm);
@@ -2133,75 +1556,22 @@ void GPU::TestKernel()
         const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1);
         const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
 
-        cudaStream_t *_s = (cudaStream_t *) malloc(3*sizeof(cudaStream_t));
-        for (int i = 0; i < 3; ++i)
-            cudaStreamCreate(&(_s[i]));
-
-        GPU::profiler.push_startCUDA("_XFLUX", &_s[0]);
-        _xflux<<<xgrid, xblocks, 0, _s[0]>>>(nslices, 0, xghostL, xghostR, flux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]);
+        GPU::profiler.push_startCUDA("_XFLUX", &stream[s_id]);
+        _xflux00<<<xgrid, xblocks, 0, stream[s_id]>>>(nslices, 0, xghostL, xghostR, flux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]);
         GPU::profiler.pop_stopCUDA();
 
-        GPU::profiler.push_startCUDA("_YFLUX", &_s[0]);
-        _yflux<<<ygrid, yblocks, 0, _s[0]>>>(nslices, 0, yghostL, yghostR, flux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]);
-        GPU::profiler.pop_stopCUDA();
+        /* GPU::profiler.push_startCUDA("_YFLUX", &_s[0]); */
+        /* _yflux<<<ygrid, yblocks, 0, _s[0]>>>(nslices, 0, yghostL, yghostR, flux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]); */
+        /* GPU::profiler.pop_stopCUDA(); */
 
-        GPU::profiler.push_startCUDA("_ZFLUX", &_s[0]);
-        _zflux<<<zgrid, zblocks, 0, _s[0]>>>(nslices, flux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]);
-        GPU::profiler.pop_stopCUDA();
+        /* GPU::profiler.push_startCUDA("_ZFLUX", &_s[0]); */
+        /* _zflux<<<zgrid, zblocks, 0, _s[0]>>>(nslices, flux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]); */
+        /* GPU::profiler.pop_stopCUDA(); */
 
         /* _xflux<<<xgrid, xblocks, 0, _s[0]>>>(nslices, 0, xghostL, xghostR, flux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]); */
         /* _yflux<<<ygrid, yblocks, 0, _s[1]>>>(nslices, 0, yghostL, yghostR, flux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]); */
         /* _zflux<<<zgrid, zblocks, 0, _s[2]>>>(nslices, flux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]); */
 
         cudaDeviceSynchronize();
-
-        for (int i = 0; i < 3; ++i)
-            cudaStreamDestroy(_s[i]);
     }
-}
-
-
-///////////////////////////////////////////////////////////////////////////////
-//                                   UTILS                                   //
-///////////////////////////////////////////////////////////////////////////////
-static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex, cudaArray_t d_ptr)
-{
-    cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
-    tex->addressMode[0]       = cudaAddressModeClamp;
-    tex->addressMode[1]       = cudaAddressModeClamp;
-    tex->addressMode[2]       = cudaAddressModeClamp;
-    tex->channelDesc          = fmt;
-    tex->filterMode           = cudaFilterModePoint;
-    tex->mipmapFilterMode     = cudaFilterModePoint;
-    tex->normalized           = false;
-
-    cudaBindTextureToArray(tex, d_ptr, &fmt);
-}
-
-
-void GPU::bind_textures()
-{
-#ifndef _MUTE_GPU_
-    _bindTexture(&texR, d_GPUin[0]);
-    _bindTexture(&texU, d_GPUin[1]);
-    _bindTexture(&texV, d_GPUin[2]);
-    _bindTexture(&texW, d_GPUin[3]);
-    _bindTexture(&texE, d_GPUin[4]);
-    _bindTexture(&texG, d_GPUin[5]);
-    _bindTexture(&texP, d_GPUin[6]);
-#endif
-}
-
-
-void GPU::unbind_textures()
-{
-#ifndef _MUTE_GPU_
-    cudaUnbindTexture(&texR);
-    cudaUnbindTexture(&texU);
-    cudaUnbindTexture(&texV);
-    cudaUnbindTexture(&texW);
-    cudaUnbindTexture(&texE);
-    cudaUnbindTexture(&texG);
-    cudaUnbindTexture(&texP);
-#endif
 }

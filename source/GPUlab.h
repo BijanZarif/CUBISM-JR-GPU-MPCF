@@ -118,7 +118,7 @@ class GPUlab
         {
             static const uint_t NVAR = GridMPI::NVAR; // number of variables in set
             const uint_t _sizeIn, _sizeOut;
-            const int stream_id;
+            const int buf_id;
             uint_t Nxghost, Nyghost; // may change depending on last chunk
 
             // Tmp storage for GPU input data
@@ -133,8 +133,8 @@ class GPUlab
             cuda_vector_t xyghost_all;
             real_vector_t xghost_l, xghost_r, yghost_l, yghost_r;
 
-            HostBuffer(const uint_t sizeIn, const uint_t sizeOut, const uint_t sizeXghost, const uint_t sizeYghost, const int s_ID = -1) :
-                _sizeIn(sizeIn), _sizeOut(sizeOut), stream_id(s_ID),
+            HostBuffer(const uint_t sizeIn, const uint_t sizeOut, const uint_t sizeXghost, const uint_t sizeYghost, const int b_ID=0) :
+                _sizeIn(sizeIn), _sizeOut(sizeOut), buf_id(b_ID),
                 Nxghost(sizeXghost), Nyghost(sizeYghost),
                 GPUin_all(NVAR*sizeIn, 0.0), GPUin(NVAR, NULL),
                 GPUout_all(NVAR*sizeOut, 0.0), GPUout(NVAR, NULL),
@@ -188,7 +188,7 @@ class GPUlab
         void _alloc_GPU();
         void _free_GPU();
         inline void _syncGPU() { GPU::syncGPU(); }
-        inline void _syncStream(const int s) { GPU::syncStream(s); }
+        inline void _syncStream(const int chunk_id) { GPU::syncStream(chunk_id); }
         void _reset();
         void _init_next_chunk();
         void _dump_chunk(const int complete = 0);

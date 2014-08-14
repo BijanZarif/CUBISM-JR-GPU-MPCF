@@ -43,16 +43,22 @@ namespace GPU
     void dealloc(const bool isroot = true);
 
     // PCIe transfers
-    void upload_xy_ghosts(const uint_t Nxghost, const real_vector_t& xghost_l, const real_vector_t& xghost_r,
-            const uint_t Nyghost, const real_vector_t& yghost_l, const real_vector_t& yghost_r, const int s_id);
-    void h2d_3DArray(const real_vector_t& src, const uint_t nslices, const int s_id);
-    void d2h_divF(real_vector_t& dst, const uint_t N, const int s_id);
+    void h2d_input(
+            const uint_t Nxghost, const real_vector_t& xghost_l, const real_vector_t& xghost_r,
+            const uint_t Nyghost, const real_vector_t& yghost_l, const real_vector_t& yghost_r,
+            const real_vector_t& src, const uint_t nslices,
+            const uint_t gbuf_id, const int chunk_id);
+    /* void upload_xy_ghosts(const uint_t Nxghost, const real_vector_t& xghost_l, const real_vector_t& xghost_r, */
+    /*         const uint_t Nyghost, const real_vector_t& yghost_l, const real_vector_t& yghost_r, */
+    /*         const uint_t gbuf_id=0, const int chunk_id=0); */
+    void h2d_3DArray(const real_vector_t& src, const uint_t nslices, const uint_t gbuf_id=0, const int chunk_id=0);
+    void d2h_divF(real_vector_t& dst, const uint_t N, const uint_t gbuf_t=0, const int chunk_id=0);
 
     // sync
-    void wait_h2d(const int e_id);
-    void wait_d2h(const int e_id);
+    void wait_h2d(const int chunk_id);
+    void wait_d2h(const int chunk_id);
     void syncGPU();
-    void syncStream(const int s_id);
+    void syncStream(const int chunk_id);
 
     // stats
     void tell_memUsage_GPU();
@@ -62,12 +68,8 @@ namespace GPU
     // GPU kernel wrappers
     // Implementation: GPUkernels.cu
     ///////////////////////////////////////////////////////////////////////////
-    void bind_textures();
-    void unbind_textures();
-    void xflux(const uint_t nslices, const uint_t global_iz, const int s_id);
-    void yflux(const uint_t nslices, const uint_t global_iz, const int s_id);
-    void zflux(const uint_t nslices, const int s_id);
-    void MaxSpeedOfSound(const uint_t nslices, const int s_id);
+    void compute_pipe_divF(const uint_t nslices, const uint_t global_iz, const uint_t gbuf_id=0, const int chunk_id=0);
+    void MaxSpeedOfSound(const uint_t nslices, const uint_t gbuf_id=0, const int chunk_id=0);
 
     // Test Kernel wrapper
     void TestKernel();
