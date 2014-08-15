@@ -62,8 +62,9 @@ void Sim_SICCloudMPI::_ic()
         printf("                     Shock Induced Cloud Collapse                    \n");
         printf("=====================================================================\n");
     }
+    // initial values correspond to sec 4.7 of "Finite-volume WENO scheme for
+    // viscous compressible multicomponent flows" V.Coralic, T.Colonius, 2014
 
-    /* parser.set_strict_mode(); */
     // liquid
     SICCloudData::rho0 = parser("-rho0").asDouble(1000);
     SICCloudData::u0   = parser("-u0").asDouble(0);
@@ -73,8 +74,7 @@ void Sim_SICCloudMPI::_ic()
     SICCloudData::uB   = parser("-uB").asDouble(0);
     SICCloudData::pB   = parser("-pB").asDouble(101325);
     // pressure ratio over shock
-    SICCloudData::pressureRatio = parser("-pressureratio").asDouble(40);
-    /* parser.unset_strict_mode(); */
+    SICCloudData::pressureRatio = parser("-pressureratio").asDouble(400);
 
     // shock orienation
     SICCloudData::nx = parser("-shockNx").asDouble(1.0);
@@ -87,7 +87,7 @@ void Sim_SICCloudMPI::_ic()
 
     SICCloudData::g1  = parser("-g1").asDouble(6.12);
     SICCloudData::g2  = parser("-g2").asDouble(1.4);
-    SICCloudData::pc1 = parser("-pc1").asDouble(286954248.3660131);
+    SICCloudData::pc1 = parser("-pc1").asDouble(3.43e8);
     SICCloudData::pc2 = parser("-pc2").asDouble(0.0);
 
     // normalize shock normal vector
@@ -117,7 +117,8 @@ void Sim_SICCloudMPI::_ic()
     SICCloudData::rho1 = rho0*(tmp1*tmp2 + 1.0)/(tmp1 + tmp2);
     SICCloudData::p1   = p1;
 
-    if (verbosity)
+    /* if (verbosity) */
+    if (true)
     {
         cout << "INITIAL SHOCK" << endl;
         cout << '\t' << "p-Ratio         = " << SICCloudData::pressureRatio << endl;
@@ -125,18 +126,21 @@ void Sim_SICCloudMPI::_ic()
         cout << '\t' << "Shock speed     = " << u0 + SICCloudData::c0*SICCloudData::mach<< endl;
         cout << '\t' << "Shock direction = (" << SICCloudData::nx << ", " << SICCloudData::ny << ", " << SICCloudData::nz << ")" << endl;
         cout << '\t' << "Point on shock  = (" << SICCloudData::Sx << ", " << SICCloudData::Sy << ", " << SICCloudData::Sz << ")" << endl << endl;
-        cout << "INITIAL CONDITION" << endl;
-        cout << '\t' << "Liquid:" << endl;
-        cout << "\t\t" << "rho0 = " << SICCloudData::rho0 << endl;
-        cout << "\t\t" << "u0   = " << SICCloudData::u0 << endl;
-        cout << "\t\t" << "p0   = " << SICCloudData::p0 << endl;
-        cout << "\t\t" << "rho1 = " << SICCloudData::rho1 << endl;
-        cout << "\t\t" << "u1   = " << SICCloudData::u1 << endl;
-        cout << "\t\t" << "p1   = " << SICCloudData::p1 << endl;
-        cout << '\t' << "Gas:" << endl;
-        cout << "\t\t" << "rhoB = " << SICCloudData::rhoB << endl;
-        cout << "\t\t" << "uB   = " << SICCloudData::uB << endl;
-        cout << "\t\t" << "pB   = " << SICCloudData::pB << endl << endl;
+        cout << "INITIAL MATERIALS" << endl;
+        cout << '\t' << "Material 0:" << endl;
+        cout << "\t\t" << "Pre-Shock:" << endl;
+        cout << "\t\t\t" << "rho = " << SICCloudData::rho0 << endl;
+        cout << "\t\t\t" << "u   = " << SICCloudData::u0 << endl;
+        cout << "\t\t\t" << "p   = " << SICCloudData::p0 << endl;
+        cout << "\t\t" << "Post-Shock:" << endl;
+        cout << "\t\t\t" << "rho = " << SICCloudData::rho1 << endl;
+        cout << "\t\t\t" << "u   = " << SICCloudData::u1 << endl;
+        cout << "\t\t\t" << "p   = " << SICCloudData::p1 << endl;
+        cout << '\t' << "Material 1:" << endl;
+        cout << "\t\t" << "In Pre-Shock region:" << endl;
+        cout << "\t\t\t" << "rho = " << SICCloudData::rhoB << endl;
+        cout << "\t\t\t" << "u   = " << SICCloudData::uB << endl;
+        cout << "\t\t\t" << "p   = " << SICCloudData::pB << endl << endl;
     }
 
     Seed<shape> *myseed = NULL;
@@ -271,6 +275,8 @@ static T set_IC(const Real shock, const Real bubble)
     const Real F1 = SICCloudData::g1*SICCloudData::pc1;
     const Real F2 = SICCloudData::g2*SICCloudData::pc2;
 
+    // WARNING: THIS ONLY WORKS IF THE NORMAL VECTOR OF THE PLANAR SHOK IS
+    // colinear WITH EITHER UNIT VECTOR OF THE GLOBAL COORDINATE SYSTEM!
     out.rho = shock*post_shock[0] + (1-shock)*(bubble_state[0]*bubble + pre_shock[0]*(1-bubble));
     out.u   = (shock*post_shock[1] + (1-shock)*(bubble_state[1]*bubble + pre_shock[1]*(1-bubble)))*out.rho;
     out.v   = 0.0;
@@ -358,7 +364,7 @@ void Sim_SICCloudMPI::_ic_quad(const Seed<shape> * const seed)
             {
                 double p[3];
                 grid.get_pos(ix, iy, iz, p);
-                FluidElement IC = integral<FluidElement>(p, h/2, &v_shapes);
+                FluidElement IC = integral<FluidElement>(p, 0.5*h, &v_shapes);
 
                 grid(ix, iy, iz, var::R) = IC.rho;
                 grid(ix, iy, iz, var::U) = IC.u;

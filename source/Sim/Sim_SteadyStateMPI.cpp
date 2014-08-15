@@ -27,6 +27,7 @@ void Sim_SteadyStateMPI::_setup()
 {
     dryrun = parser("-dryrun").asBool(false);
 
+    dumpinterval = HUGE_VAL;
     if (!dryrun)
     {
         // parse mandatory arguments
@@ -60,8 +61,10 @@ void Sim_SteadyStateMPI::_setup()
         if(_restart())
         {
             if (isroot) printf("Restarting at step %d, physical time %f\n", step, t);
+            --fcount; // last dump before restart condition incremented fcount.
+            // Decrement by one and dump restart IC, which increments fcount
+            // again to start with the correct count.
             _dump("restart_ic");
-            tnextdump = fcount*dumpinterval;
         }
         else
         {
@@ -139,9 +142,10 @@ void Sim_SteadyStateMPI::_dump(const string basename)
 {
     const string dump_path = parser("-fpath").asString(".");
 
-    sprintf(fname, "%s_%04d", basename.c_str(), fcount++);
+    sprintf(fname, "%s_%04d", basename.c_str(), fcount);
     if (isroot) printf("Dumping file %s at step %d, time %f\n", fname, step, t);
     DumpHDF5_MPI<GridMPI, myTensorialStreamer>(*mygrid, step, fname, dump_path);
+    ++fcount;
 }
 
 
@@ -152,9 +156,10 @@ void Sim_SteadyStateMPI::_save()
     if (isroot)
     {
         ofstream saveinfo("save.info");
-        saveinfo << setprecision(15) << t << endl;
+        saveinfo << setprecision(16) << scientific << t << endl;
         saveinfo << step << endl;
         saveinfo << fcount << endl;
+        saveinfo << setprecision(16) << scientific << (tnextdump - dumpinterval) << endl; // last dump time
         saveinfo.close();
     }
     DumpHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, step, "save.data", dump_path);
@@ -171,7 +176,13 @@ bool Sim_SteadyStateMPI::_restart()
         saveinfo >> t;
         saveinfo >> step;
         saveinfo >> fcount;
+        double last_dumptime;
+        saveinfo >> last_dumptime;
+        tnextdump = last_dumptime + dumpinterval;
         ReadHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, "save.data", dump_path);
+        // since t >= last_dumptime and dumpinterval might be anything new:
+        while (t > tnextdump)
+            tnextdump += dumpinterval;
         return true;
     }
     else
@@ -201,7 +212,7 @@ void Sim_SteadyStateMPI::run()
             t += dt;
             ++step;
 
-            if (isroot) printf("step id is %d, physical time %f (dt = %f)\n", step, t, dt);
+            if (isroot) printf("step id is %d, physical time %f (dt = %e)\n", step, t, dt);
 
             if ((float)t == (float)tnextdump)
             {
