@@ -137,7 +137,7 @@ void Sim_SICCloudMPI::_ic()
         cout << "\t\t\t" << "u   = " << SICCloudData::u1 << endl;
         cout << "\t\t\t" << "p   = " << SICCloudData::p1 << endl;
         cout << '\t' << "Material 1:" << endl;
-        cout << "\t\t" << "In Pre-Shock region:" << endl;
+        cout << "\t\t" << "Pre-Shock:" << endl;
         cout << "\t\t\t" << "rho = " << SICCloudData::rhoB << endl;
         cout << "\t\t\t" << "u   = " << SICCloudData::uB << endl;
         cout << "\t\t\t" << "p   = " << SICCloudData::pB << endl << endl;

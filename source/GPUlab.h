@@ -227,6 +227,7 @@ class GPUlab
         enum {SKIN, FLESH} myFeature[6];
         GridMPI& grid;
 
+        // TODO: This data should go into the host_buffer struct
         // CHUNK metrics
         uint_t curr_slices;
         uint_t curr_iz;

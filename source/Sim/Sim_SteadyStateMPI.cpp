@@ -204,6 +204,7 @@ void Sim_SteadyStateMPI::run()
         double dt, dt_max;
         LSRK3_IntegratorMPI * const stepper = new LSRK3_IntegratorMPI(mygrid, myGPU, CFL, parser);
 
+        const uint_t step_start = step; // such that -nsteps is a relative measure
         while (t < tend)
         {
             dt_max = (tend-t) < (tnextdump-t) ? (tend-t) : (tnextdump-t);
@@ -227,7 +228,7 @@ void Sim_SteadyStateMPI::run()
                 _save();
             }
 
-            if (step == nsteps) break;
+            if ((step-step_start) == nsteps) break;
         }
 
         profiler.printSummary();
