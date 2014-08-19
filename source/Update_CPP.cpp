@@ -9,6 +9,10 @@
 #include "Update_CPP.h"
 #include <cassert>
 #include <omp.h>
+#include <cmath>
+using std::max;
+using std::min;
+using std::abs;
 
 void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N)
 {
@@ -40,36 +44,65 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         const Real fG = -m_dtinvh*divFG[i];
         const Real fP = -m_dtinvh*divFP[i];
 
-        Real rr = rhs_r[i];
-        Real ru = rhs_u[i];
-        Real rv = rhs_v[i];
-        Real rw = rhs_w[i];
-        Real re = rhs_e[i];
-        Real rG = rhs_G[i];
-        Real rP = rhs_P[i];
-        rr = m_a * rr + fr;
-        ru = m_a * ru + fu;
-        rv = m_a * rv + fv;
-        rw = m_a * rw + fw;
-        re = m_a * re + fe;
-        rG = m_a * rG + fG;
-        rP = m_a * rP + fP;
+        Real r_new = rhs_r[i];
+        Real u_new = rhs_u[i];
+        Real v_new = rhs_v[i];
+        Real w_new = rhs_w[i];
+        Real e_new = rhs_e[i];
+        Real G_new = rhs_G[i];
+        Real P_new = rhs_P[i];
+        r_new = m_a * r_new + fr;
+        u_new = m_a * u_new + fu;
+        v_new = m_a * v_new + fv;
+        w_new = m_a * w_new + fw;
+        e_new = m_a * e_new + fe;
+        G_new = m_a * G_new + fG;
+        P_new = m_a * P_new + fP;
+
+        rhs_r[i] = r_new;
+        rhs_u[i] = u_new;
+        rhs_v[i] = v_new;
+        rhs_w[i] = w_new;
+        rhs_e[i] = e_new;
+        rhs_G[i] = G_new;
+        rhs_P[i] = P_new;
 
         // 2.)
-        r[i] += m_b * rr;
-        u[i] += m_b * ru;
-        v[i] += m_b * rv;
-        w[i] += m_b * rw;
-        e[i] += m_b * re;
-        G[i] += m_b * rG;
-        P[i] += m_b * rP;
+#ifndef _STATE_
+        r[i] += m_b * r_new;
+        u[i] += m_b * u_new;
+        v[i] += m_b * v_new;
+        w[i] += m_b * w_new;
+        e[i] += m_b * e_new;
+        G[i] += m_b * G_new;
+        P[i] += m_b * P_new;
+#else
+        r_new = m_b * r_new + r[i];
+        u_new = m_b * u_new + u[i];
+        v_new = m_b * v_new + v[i];
+        w_new = m_b * w_new + w[i];
+        e_new = m_b * e_new + e[i];
+        G_new = m_b * G_new + G[i];
+        P_new = m_b * P_new + P[i];
 
-        rhs_r[i] = rr;
-        rhs_u[i] = ru;
-        rhs_v[i] = rv;
-        rhs_w[i] = rw;
-        rhs_e[i] = re;
-        rhs_G[i] = rG;
-        rhs_P[i] = rP;
+        // update state based on cubism Update_State kernel
+        r[i] = max(r_new, static_cast<Real>(1.0));    // change rho
+        G[i] = max(G_new, static_cast<Real>(m_min_G));// change G
+        P[i] = max(P_new, static_cast<Real>(m_min_P));// change P
+        u[i] = u_new;
+        v[i] = v_new;
+        w[i] = w_new;
+
+        const Real ke = 0.5*(u_new*u_new + v_new*v_new + w_new*w_new)/r_new; // whatever ke we had before
+        const Real pressure = (e_new - P_new - ke)/G_new; // whatever pressure we had before
+
+        if (P[i]/(static_cast<Real>(1.0) + G[i]) < -2.0*pressure) // if it was still bad with new P and new G
+        {
+            const Real difference = -100.0 * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
+            P[i] += abs(difference); // change P again
+        }
+
+        e[i] = pressure * G[i] + P[i] + ke; // update e
+#endif
     }
 }

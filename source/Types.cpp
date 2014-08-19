@@ -6,4 +6,9 @@
  * */
 #include "Types.h"
 
+Real MaterialDictionary::gamma1 = 1.4;
+Real MaterialDictionary::gamma2 = 1.4;
+Real MaterialDictionary::pc1 = 0.0;
+Real MaterialDictionary::pc2 = 0.0;
+
 double SimTools::EPSILON;

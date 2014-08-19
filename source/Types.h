@@ -68,6 +68,15 @@ struct flesh2ghost
     static inline uint_t Y_R(const int ix, const int iy, const int iz) { return ghostmap::Y(ix, iy-NodeBlock::sizeY+3, iz); }
 };
 
+// material dictionary
+class MaterialDictionary
+{
+    public:
+        static Real gamma1;
+        static Real gamma2;
+        static Real pc1;
+        static Real pc2;
+};
 
 // Simulation framework
 class Simulation

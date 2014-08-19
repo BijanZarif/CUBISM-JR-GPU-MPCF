@@ -35,6 +35,10 @@ void Sim_SodMPI::_ic()
     const double g2   = parser("-g2").asDouble(1.4);
     const double pc1  = parser("-pc1").asDouble(0.0);
     const double pc2  = parser("-pc2").asDouble(0.0);
+    MaterialDictionary::gamma1 = g1;
+    MaterialDictionary::gamma2 = g2;
+    MaterialDictionary::pc1 = pc1;
+    MaterialDictionary::pc2 = pc2;
 
     const bool reverse = parser("-reverse").asBool(false);
     const string dir   = parser("-config").asString("x");

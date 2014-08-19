@@ -104,6 +104,10 @@ void Sim_2DSBIMPI::_ic()
     const double pc2   = parser("-pc2").asDouble(0.0);
     const bool reverse = parser("-reverse").asBool(false);
     SimTools::EPSILON  = (Real)(parser("-mollfactor").asInt(1))*sqrt(3.)*mygrid->getH();
+    MaterialDictionary::gamma1 = g1;
+    MaterialDictionary::gamma2 = g2;
+    MaterialDictionary::pc1 = pc1;
+    MaterialDictionary::pc2 = pc2;
 
     const Real pre_shock[3] = {rho2, u2, p2};
     Real post_shock[3];

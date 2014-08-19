@@ -111,6 +111,8 @@ void Sim_SteadyStateMPI::_ic()
     const double p  = parser("-p").asDouble(1.0);
     const double g  = parser("-g").asDouble(1.4);
     const double pc = parser("-pc").asDouble(0.0);
+    MaterialDictionary::gamma1 = g;
+    MaterialDictionary::pc1 = pc;
 
     const double ru = r*u;
     const double rv = r*v;

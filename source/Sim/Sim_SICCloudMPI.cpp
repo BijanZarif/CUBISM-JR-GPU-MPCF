@@ -89,6 +89,10 @@ void Sim_SICCloudMPI::_ic()
     SICCloudData::g2  = parser("-g2").asDouble(1.4);
     SICCloudData::pc1 = parser("-pc1").asDouble(3.43e8);
     SICCloudData::pc2 = parser("-pc2").asDouble(0.0);
+    MaterialDictionary::gamma1 = SICCloudData::g1;
+    MaterialDictionary::gamma2 = SICCloudData::g2;
+    MaterialDictionary::pc1 = SICCloudData::pc1;
+    MaterialDictionary::pc2 = SICCloudData::pc2;
 
     // normalize shock normal vector
     const Real mag = sqrt(pow(SICCloudData::nx, 2) + pow(SICCloudData::ny, 2) + pow(SICCloudData::nz, 2));
@@ -128,6 +132,8 @@ void Sim_SICCloudMPI::_ic()
         cout << '\t' << "Point on shock  = (" << SICCloudData::Sx << ", " << SICCloudData::Sy << ", " << SICCloudData::Sz << ")" << endl << endl;
         cout << "INITIAL MATERIALS" << endl;
         cout << '\t' << "Material 0:" << endl;
+        cout << "\t\t" << "gamma = " << MaterialDictionary::gamma1 << endl;
+        cout << "\t\t" << "pc    = " << MaterialDictionary::pc1 << endl;
         cout << "\t\t" << "Pre-Shock:" << endl;
         cout << "\t\t\t" << "rho = " << SICCloudData::rho0 << endl;
         cout << "\t\t\t" << "u   = " << SICCloudData::u0 << endl;
@@ -137,6 +143,8 @@ void Sim_SICCloudMPI::_ic()
         cout << "\t\t\t" << "u   = " << SICCloudData::u1 << endl;
         cout << "\t\t\t" << "p   = " << SICCloudData::p1 << endl;
         cout << '\t' << "Material 1:" << endl;
+        cout << "\t\t" << "gamma = " << MaterialDictionary::gamma2 << endl;
+        cout << "\t\t" << "pc    = " << MaterialDictionary::pc2 << endl;
         cout << "\t\t" << "Pre-Shock:" << endl;
         cout << "\t\t\t" << "rho = " << SICCloudData::rhoB << endl;
         cout << "\t\t\t" << "u   = " << SICCloudData::uB << endl;
