@@ -87,8 +87,7 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
 
         // update state based on cubism Update_State kernel
         r[i] = max(r_new, static_cast<Real>(1.0));    // change rho
-        /* G[i] = max(G_new, static_cast<Real>(m_min_G));// change G */
-        G[i] = min(static_cast<Real>(2.5), max(G_new, static_cast<Real>(m_min_G)));// change G
+        G[i] = max(G_new, static_cast<Real>(m_min_G));// change G
         P[i] = max(P_new, static_cast<Real>(m_min_P));// change P
         u[i] = u_new;
         v[i] = v_new;
@@ -97,9 +96,9 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         const Real ke = 0.5*(u_new*u_new + v_new*v_new + w_new*w_new)/r_new; // whatever ke we had before
         const Real pressure = (e_new - P_new - ke)/G_new; // whatever pressure we had before
 
-        if (P[i]/(static_cast<Real>(1.0) + G[i]) < -1.0*pressure) // if it was still bad with new P and new G
+        if (P[i]/(static_cast<Real>(1.0) + G[i]) < -2.0*pressure) // if it was still bad with new P and new G
         {
-            const Real difference = -2.0 * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
+            const Real difference = -4.0 * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
             P[i] += abs(difference); // change P again
         }
 
