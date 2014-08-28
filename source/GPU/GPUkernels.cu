@@ -25,6 +25,12 @@
 #endif
 
 
+// DEBUG / CHECK
+#include <fstream>
+#include <sstream>
+#include <string>
+using namespace std;
+
 ///////////////////////////////////////////////////////////////////////////////
 //                           GLOBAL VARIABLES                                //
 ///////////////////////////////////////////////////////////////////////////////
@@ -676,6 +682,12 @@ void _HLLC_kernel_X(const uint_t nslices, DevicePointer recon_m, DevicePointer r
 
             const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
 
+            // this is crap!
+            recon_p.r[idx] = Gm;
+            recon_p.u[idx] = Gp;
+            recon_p.v[idx] = Pm;
+            recon_p.w[idx] = Pp;
+
             recon_m.r[idx] = fr;
             recon_m.u[idx] = fu;
             recon_m.v[idx] = fv;
@@ -684,7 +696,7 @@ void _HLLC_kernel_X(const uint_t nslices, DevicePointer recon_m, DevicePointer r
             recon_m.G[idx] = fG;
             recon_m.P[idx] = fP;
 
-            recon_p.r[idx] = hllc_vel;
+            recon_p.e[idx] = hllc_vel;
         }
     }
 }
@@ -1709,6 +1721,25 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 ///////////////////////////////////////////////////////////////////////////////
 //                              KERNEL WRAPPERS                              //
 ///////////////////////////////////////////////////////////////////////////////
+
+void _TEST_dump(const real_vector_t& d_data, const string basename = "data")
+{
+    cudaDeviceSynchronize();
+    const size_t bytes = NX * NY * NodeBlock::sizeZ * sizeof(Real);
+    for (int i = 0; i < VSIZE; ++i)
+    {
+        Real *h_data = (Real *)malloc(bytes);
+        cudaMemcpy(h_data, d_data[i], bytes, cudaMemcpyDeviceToHost);
+        ostringstream cbuf;
+        cbuf << i << ".bin";
+        const string fname = basename + cbuf.str();
+        ofstream out(fname.c_str(), std::ofstream::binary);
+        out.write((char *)h_data, bytes);
+        out.close();
+        free(h_data);
+    }
+}
+
 static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex, cudaArray_t d_ptr)
 {
     cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
@@ -1804,12 +1835,19 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     // hllc fluxes
     _HLLC_kernel_X<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, recon_m, recon_p);
 
+    // flux divegence X + extra term contribution
+    const dim3 X_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
+    const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
+    _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, inout, recon_m, recon_p.r, recon_p.u, recon_p.v, recon_p.w, recon_p.e,
+            d_sumG, d_sumP, d_divU);
+
     cudaDeviceSynchronize();
     /* std::exit(3); */
 
+    _TEST_dump(mybuf->d_inout, "split");
 
 
-    // my ghosts
+    // my ghosts TODO: don't need them
     DevicePointer xghostL(mybuf->d_xgl);
     DevicePointer xghostR(mybuf->d_xgr);
     DevicePointer yghostL(mybuf->d_ygl);
