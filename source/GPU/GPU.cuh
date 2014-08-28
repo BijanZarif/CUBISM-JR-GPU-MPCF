@@ -1,14 +1,14 @@
 /* File        : GPU.cuh */
 /* Creator     : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Thu 14 Aug 2014 09:06:16 AM CEST */
-/* Modified    : Thu 14 Aug 2014 02:49:04 PM CEST */
+/* Modified    : Tue 26 Aug 2014 09:30:15 AM CEST */
 /* Description : GPU only, shared */
 #pragma once
 
 #include "GPU.h" // includes Types.h
 #include <vector>
 
-#define _NUM_GPU_BUF_ 2
+#define _NUM_GPU_BUF_ 1
 #define _NUM_STREAMS_ 3
 
 #define NX _BLOCKSIZEX_
@@ -26,13 +26,13 @@ struct GPU_COMM
     real_vector_t d_ygl;
     real_vector_t d_ygr;
 
-    // GPU output
-    real_vector_t d_divF;
+    // GPU transition buffer
+    real_vector_t d_inout;
 
-    // GPU input (3D Arrays)
-    std::vector<cudaArray_t> d_GPUin;
+    // GPU texture buffer
+    std::vector<cudaArray_t> d_GPU3D;
 
-    GPU_COMM() : d_xgl(VSIZE,NULL), d_xgr(VSIZE,NULL), d_ygl(VSIZE,NULL), d_ygr(VSIZE,NULL), d_divF(VSIZE,NULL), d_GPUin(VSIZE,NULL) { }
+    GPU_COMM() : d_xgl(VSIZE,NULL), d_xgr(VSIZE,NULL), d_ygl(VSIZE,NULL), d_ygr(VSIZE,NULL), d_inout(VSIZE,NULL), d_GPU3D(VSIZE,NULL) { }
 };
 
 

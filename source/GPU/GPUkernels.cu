@@ -29,10 +29,8 @@
 //                           GLOBAL VARIABLES                                //
 ///////////////////////////////////////////////////////////////////////////////
 // helper storage
-extern real_vector_t d_flux;
-extern Real *d_Gm, *d_Gp;
-extern Real *d_Pm, *d_Pp;
-extern Real *d_hllc_vel;
+extern real_vector_t d_recon_p;
+extern real_vector_t d_recon_m;
 extern Real *d_sumG, *d_sumP, *d_divU;
 
 // max SOS
@@ -48,6 +46,15 @@ extern cudaStream_t *stream;
 extern cudaEvent_t *event_compute;
 
 // texture references
+texture<float, 3, cudaReadModeElementType> tex00;
+texture<float, 3, cudaReadModeElementType> tex01;
+texture<float, 3, cudaReadModeElementType> tex02;
+texture<float, 3, cudaReadModeElementType> tex03;
+texture<float, 3, cudaReadModeElementType> tex04;
+texture<float, 3, cudaReadModeElementType> tex05;
+texture<float, 3, cudaReadModeElementType> tex06;
+
+// TODO: REMOVE
 #include "Texture.cu"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -440,6 +447,407 @@ inline Real _extraterm_hllc_vel(const Real um, const Real up,
 ///////////////////////////////////////////////////////////////////////////////
 //                                  KERNELS                                  //
 ///////////////////////////////////////////////////////////////////////////////
+#define _STENCIL_WIDTH_ 6
+
+template <int texID> __device__ inline float myTex3D(const int ix, const int iy, const int iz);
+template <> __device__ inline float myTex3D<0>(const int ix, const int iy, const int iz) { return tex3D(tex00, ix, iy, iz); }
+template <> __device__ inline float myTex3D<1>(const int ix, const int iy, const int iz) { return tex3D(tex01, ix, iy, iz); }
+template <> __device__ inline float myTex3D<2>(const int ix, const int iy, const int iz) { return tex3D(tex02, ix, iy, iz); }
+template <> __device__ inline float myTex3D<3>(const int ix, const int iy, const int iz) { return tex3D(tex03, ix, iy, iz); }
+template <> __device__ inline float myTex3D<4>(const int ix, const int iy, const int iz) { return tex3D(tex04, ix, iy, iz); }
+template <> __device__ inline float myTex3D<5>(const int ix, const int iy, const int iz) { return tex3D(tex05, ix, iy, iz); }
+template <> __device__ inline float myTex3D<6>(const int ix, const int iy, const int iz) { return tex3D(tex06, ix, iy, iz); }
+
+template <int texID, int gid0, int tid0, int gmap0, int tmap0, int ng> __device__
+inline void _load_boundary_X(const uint_t iy, const uint_t iz,
+        Real * const __restrict__ stencil, const Real * const __restrict__ ghost)
+{
+    /* *
+     * load stencil data from texture and ghost mix.
+     * texID = texture reference to use
+     * gid0  = start index of first ghost value in stencil
+     * tid0  = start index of first texture value in stencil
+     * gmap0 = start index of first ghost value in ghost array
+     * tmap0 = start index of first tex value in 3DArray
+     * ng    = number of ghosts
+     *
+     * Assuming _STENCIL_WIDTH_ = 6, possible combinations are (x = ghost,
+     * o = texture), stencil is processed from left to right:
+     *
+     * gmap=0
+     * |     tmap=0
+     * |     |
+     * x x x o o o         tmap=NX-1 (gid0=0; tid0=3; gmap0=0; tmap0=0; ng=3)
+     *   x x o o o o       | gmap=0  (gid0=0; tid0=2; gmap0=1; tmap0=0; ng=2)
+     *     x o o o o o     | |       (gid0=0; tid0=1; gmap0=2; tmap0=0; ng=1)
+     *             o o o o o x       (gid0=5; tid0=0; gmap0=0; tmap0=NX-5; ng=1)
+     *               o o o o x x     (gid0=4; tid0=0; gmap0=0; tmap0=NX-4; ng=2)
+     *                 o o o x x x   (gid0=3; tid0=0; gmap0=0; tmap0=NX-3; ng=3)
+     * */
+    const int giz = iz-3; // iz starts at 3 due to zghosts in texture, but not in ghost array
+    for (int i = 0; i < ng; ++i)
+        stencil[gid0 + i] = ghost[GHOSTMAPX(gmap0+i, iy, giz)];
+
+    const int ntex = _STENCIL_WIDTH_ - ng;
+    for (int i = 0; i < ntex; ++i)
+        stencil[tid0 + i] = myTex3D<texID>(tmap0+i, iy, iz);
+}
+
+template <int texID> __device__
+inline void _load_internal_X(const uint_t ix, const uint_t iy, const uint_t iz, Real * __restrict__ stencil)
+{
+    // fixed stencil: - - - 0 + + + + + . . .
+    const int s_start = -3;
+    const int s_end   = _STENCIL_WIDTH_ + s_start;
+    for (int i=s_start; i < s_end; ++i)
+        *stencil++ = myTex3D<texID>(ix+i, iy, iz);
+}
+
+
+template <int texID> __global__
+void _WENO_kernel_X(const uint_t nslices, Real * const __restrict__ p_minus, Real * const __restrict__ p_plus,
+        const Real * const __restrict__ p_ghostL, const Real * const __restrict__ p_ghostR)
+{
+    // this ensures that a stencil can only contain either left ghosts or right
+    // ghosts, but not a mix of left AND right ghosts.  This minimizes
+    // if-conditionals below when reading the stencil. Therefore, minimum
+    // number of cells in X-direction is 5
+    assert(NXP1 > 5);
+
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (ix < NXP1 && iy < NY)
+    {
+        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
+        {
+            Real s[_STENCIL_WIDTH_]; // stencil
+
+            if (0 == ix)
+                _load_boundary_X<texID, 0, 3, 0, 0, 3>(iy, iz, s, p_ghostL);
+            else if (1 == ix)
+                _load_boundary_X<texID, 0, 2, 1, 0, 2>(iy, iz, s, p_ghostL);
+            else if (2 == ix)
+                _load_boundary_X<texID, 0, 1, 2, 0, 1>(iy, iz, s, p_ghostL);
+            else if (NXP1-3 == ix)
+                _load_boundary_X<texID, _STENCIL_WIDTH_-1, 0, 0, NX-(_STENCIL_WIDTH_-1), 1>(iy, iz, s, p_ghostR);
+            else if (NXP1-2 == ix)
+                _load_boundary_X<texID, _STENCIL_WIDTH_-2, 0, 0, NX-(_STENCIL_WIDTH_-2), 2>(iy, iz, s, p_ghostR);
+            else if (NXP1-1 == ix)
+                _load_boundary_X<texID, _STENCIL_WIDTH_-3, 0, 0, NX-(_STENCIL_WIDTH_-3), 3>(iy, iz, s, p_ghostR);
+            else
+                _load_internal_X<texID>(ix, iy, iz, s);
+
+            const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
+
+            const Real recon_m = _weno_minus_clipped(s[0], s[1], s[2], s[3], s[4]); // 96 FLOP (6 DIV)
+            const Real recon_p = _weno_pluss_clipped(s[1], s[2], s[3], s[4], s[5]); // 96 FLOP (6 DIV)
+            assert(!isnan(recon_m)); assert(!isnan(recon_p));
+
+            // write
+            p_minus[idx] = recon_m;
+            p_plus[idx]  = recon_p;
+        }
+    }
+}
+
+
+/* template <int texID> __global__ */
+/* void _WENO_kernel_X(const uint_t nslices, Real * const __restrict__ p_minus, Real * const __restrict__ p_plus, */
+/*         const Real * const __restrict__ p_ghostL, const Real * const __restrict__ p_ghostR) */
+/* { */
+/*     // this ensures that a stencil can only contain either left ghosts or right */
+/*     // ghosts, but not a mix of left AND right ghosts.  This minimizes */
+/*     // if-conditionals below when reading the stencil. Therefore, minimum */
+/*     // number of cells in X-direction is 5 */
+/*     assert(NXP1 > 5); */
+
+/*     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x; */
+/*     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y; */
+
+/*     if (ix < NXP1 && iy < NY) */
+/*     { */
+/*         Real s1[_STENCIL_WIDTH_]; // stencil 1 */
+/*         Real s2[_STENCIL_WIDTH_]; // stencil 2 */
+/*         Real *s = s1; */
+/*         Real *s_next = s2; */
+
+/*         if (0 == ix) */
+/*             _load_boundary_X<texID, 0, 3, 0, 0, 3>(iy, 3, s, p_ghostL); */
+/*         else if (1 == ix) */
+/*             _load_boundary_X<texID, 0, 2, 1, 0, 2>(iy, 3, s, p_ghostL); */
+/*         else if (2 == ix) */
+/*             _load_boundary_X<texID, 0, 1, 2, 0, 1>(iy, 3, s, p_ghostL); */
+/*         else if (NXP1-3 == ix) */
+/*             _load_boundary_X<texID, _STENCIL_WIDTH_-1, 0, 0, NX-(_STENCIL_WIDTH_-1), 1>(iy, 3, s, p_ghostR); */
+/*         else if (NXP1-2 == ix) */
+/*             _load_boundary_X<texID, _STENCIL_WIDTH_-2, 0, 0, NX-(_STENCIL_WIDTH_-2), 2>(iy, 3, s, p_ghostR); */
+/*         else if (NXP1-1 == ix) */
+/*             _load_boundary_X<texID, _STENCIL_WIDTH_-3, 0, 0, NX-(_STENCIL_WIDTH_-3), 3>(iy, 3, s, p_ghostR); */
+/*         else */
+/*             _load_internal_X<texID>(ix, iy, 3, s); */
+
+/*         for (uint_t iz = 4; iz < nslices+3; ++iz) // first and last 3 slices are zghosts */
+/*         { */
+/*             if (0 == ix) */
+/*                 _load_boundary_X<texID, 0, 3, 0, 0, 3>(iy, iz, s_next, p_ghostL); */
+/*             else if (1 == ix) */
+/*                 _load_boundary_X<texID, 0, 2, 1, 0, 2>(iy, iz, s_next, p_ghostL); */
+/*             else if (2 == ix) */
+/*                 _load_boundary_X<texID, 0, 1, 2, 0, 1>(iy, iz, s_next, p_ghostL); */
+/*             else if (NXP1-3 == ix) */
+/*                 _load_boundary_X<texID, _STENCIL_WIDTH_-1, 0, 0, NX-(_STENCIL_WIDTH_-1), 1>(iy, iz, s_next, p_ghostR); */
+/*             else if (NXP1-2 == ix) */
+/*                 _load_boundary_X<texID, _STENCIL_WIDTH_-2, 0, 0, NX-(_STENCIL_WIDTH_-2), 2>(iy, iz, s_next, p_ghostR); */
+/*             else if (NXP1-1 == ix) */
+/*                 _load_boundary_X<texID, _STENCIL_WIDTH_-3, 0, 0, NX-(_STENCIL_WIDTH_-3), 3>(iy, iz, s_next, p_ghostR); */
+/*             else */
+/*                 _load_internal_X<texID>(ix, iy, iz, s_next); */
+
+/*             const uint_t idx = ID3(iy, ix, iz-4, NY, NXP1); */
+
+/*             const Real recon_m = _weno_minus_clipped(s[0], s[1], s[2], s[3], s[4]); // 96 FLOP (6 DIV) */
+/*             const Real recon_p = _weno_pluss_clipped(s[1], s[2], s[3], s[4], s[5]); // 96 FLOP (6 DIV) */
+/*             assert(!isnan(recon_m)); assert(!isnan(recon_p)); */
+
+/*             // write */
+/*             p_minus[idx] = recon_m; */
+/*             p_plus[idx]  = recon_p; */
+
+/*             // swap */
+/*             Real * const tmp = s; */
+/*             s = s_next; */
+/*             s_next = tmp; */
+/*         } */
+/*     } */
+/* } */
+
+
+__global__
+void _HLLC_kernel_X(const uint_t nslices, DevicePointer recon_m, DevicePointer recon_p)
+{
+    // this ensures that a stencil can only contain either left ghosts or right
+    // ghosts, but not a mix of left AND right ghosts.  This minimizes
+    // if-conditionals below when reading the stencil. Therefore, minimum
+    // number of cells in X-direction is 5
+    assert(NXP1 > 5);
+
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (ix < NXP1 && iy < NY)
+    {
+        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
+        {
+            const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
+
+            const Real rm = recon_m.r[idx];
+            const Real rp = recon_p.r[idx];
+            const Real um = recon_m.u[idx];
+            const Real up = recon_p.u[idx];
+            const Real pm = recon_m.e[idx];
+            const Real pp = recon_p.e[idx];
+            const Real Gm = recon_m.G[idx];
+            const Real Gp = recon_p.G[idx];
+            const Real Pm = recon_m.P[idx];
+            const Real Pp = recon_p.P[idx];
+            const Real vm = recon_m.v[idx];
+            const Real vp = recon_p.v[idx];
+            const Real wm = recon_m.w[idx];
+            const Real wp = recon_p.w[idx];
+            assert(rm > 0.0f); assert(rp > 0.0f);
+            assert(pm > 0.0f); assert(pp > 0.0f);
+            assert(Gm > 0.0f); assert(Gp > 0.0f);
+            assert(Pm >= 0.0f); assert(Pp >= 0.0f);
+
+            Real sm, sp;
+            _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+            const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp); // 11 FLOP (1 DIV)
+            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
+
+            const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
+            const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
+            const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss); // 25 FLOP (2 DIV)
+            const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss); // 25 FLOP (2 DIV)
+            const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
+            const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
+            const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
+            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+
+            const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
+
+            recon_m.r[idx] = fr;
+            recon_m.u[idx] = fu;
+            recon_m.v[idx] = fv;
+            recon_m.w[idx] = fw;
+            recon_m.e[idx] = fe;
+            recon_m.G[idx] = fG;
+            recon_m.P[idx] = fP;
+
+            recon_p.r[idx] = hllc_vel;
+        }
+    }
+}
+
+
+
+__global__
+void _TEST_CONV(DevicePointer inout,
+        DevicePointer xgL, DevicePointer xgR,
+        DevicePointer ygL, DevicePointer ygR)
+{
+    const Real r_ref = 1.5f;
+    const Real u_ref = 1.0f;
+    const Real v_ref = 1.0f;
+    const Real w_ref = 1.0f;
+    const Real e_ref = 1.0f;
+    const Real G_ref = 2.0f;
+    const Real P_ref = 3.0f;
+
+    // test main body
+    const uint_t Ninout = NX * NY * (NodeBlock::sizeZ + 6);
+    for (int i = 0; i < Ninout; ++i)
+    {
+        /* printf("%f\n", inout.w[i]); */
+        assert(inout.r[i] == r_ref);
+        assert(inout.u[i] == u_ref);
+        assert(inout.v[i] == v_ref);
+        assert(inout.w[i] == w_ref);
+        assert(inout.e[i] == e_ref);
+        assert(inout.G[i] == G_ref);
+        assert(inout.P[i] == P_ref);
+    }
+
+    // test xghosts
+    const uint_t Nxghost = 3*NY*(NodeBlock::sizeZ);
+    for (int i = 0; i < Nxghost; ++i)
+    {
+        assert(xgR.r[i] == r_ref);
+        assert(xgR.u[i] == u_ref);
+        assert(xgR.v[i] == v_ref);
+        assert(xgR.w[i] == w_ref);
+        assert(xgR.e[i] == e_ref);
+        assert(xgR.G[i] == G_ref);
+        assert(xgR.P[i] == P_ref);
+
+        assert(xgL.r[i] == r_ref);
+        assert(xgL.u[i] == u_ref);
+        assert(xgL.v[i] == v_ref);
+        assert(xgL.w[i] == w_ref);
+        assert(xgL.e[i] == e_ref);
+        assert(xgL.G[i] == G_ref);
+        assert(xgL.P[i] == P_ref);
+    }
+
+    // test yghosts
+    const uint_t Nyghost = NX*3*(NodeBlock::sizeZ);
+    for (int i = 0; i < Nyghost; ++i)
+    {
+        assert(ygR.r[i] == r_ref);
+        assert(ygR.u[i] == u_ref);
+        assert(ygR.v[i] == v_ref);
+        assert(ygR.w[i] == w_ref);
+        assert(ygR.e[i] == e_ref);
+        assert(ygR.G[i] == G_ref);
+        assert(ygR.P[i] == P_ref);
+
+        assert(ygL.r[i] == r_ref);
+        assert(ygL.u[i] == u_ref);
+        assert(ygL.v[i] == v_ref);
+        assert(ygL.w[i] == w_ref);
+        assert(ygL.e[i] == e_ref);
+        assert(ygL.G[i] == G_ref);
+        assert(ygL.P[i] == P_ref);
+    }
+}
+
+
+/* __global__ */
+/* void _CONV_kernel(const uint_t nslices, DevicePointer data) */
+/* { */
+/*     const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x; */
+/*     const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y; */
+/*     const uint_t offset = _BLOCK_ROWS_ * NX; */
+
+/*     if (ix < NX && iy < NY) */
+/*     { */
+/*         for (uint_t iz = 0; iz < nslices; ++iz) // zghosts inclusive */
+/*         { */
+/*             uint_t i0 = ID3(ix,iy,iz,NX,NY); */
+/*             Real *pr = &data.r[i0]; */
+/*             Real *pu = &data.u[i0]; */
+/*             Real *pv = &data.v[i0]; */
+/*             Real *pw = &data.w[i0]; */
+/*             Real *pe = &data.e[i0]; */
+/*             Real *pG = &data.G[i0]; */
+/*             Real *pP = &data.P[i0]; */
+/*             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
+/*             { */
+/*                 /1* const uint_t myidx = ID3(ix,iy+i,iz,NX,NY); *1/ */
+/*                 const Real r = *pr; */
+/*                 const Real u = *pu; */
+/*                 const Real v = *pv; */
+/*                 const Real w = *pw; */
+/*                 const Real e = *pe; */
+/*                 const Real G = *pG; */
+/*                 const Real P = *pP; */
+
+/*                 // convert */
+/*                 const Real rinv = 1.0f/r; */
+/*                 *pu = u*rinv; */
+/*                 *pv = v*rinv; */
+/*                 *pw = w*rinv; */
+/*                 *pe = (e - 0.5f*(u*u + v*v + w*w)*rinv - P) / G; */
+
+/*                 pr += offset; */
+/*                 pu += offset; */
+/*                 pv += offset; */
+/*                 pw += offset; */
+/*                 pe += offset; */
+/*                 pG += offset; */
+/*                 pP += offset; */
+/*             } */
+/*         } */
+/*     } */
+/* } */
+
+
+__global__
+void _CONV_kernel(const uint_t nslices, DevicePointer data)
+{
+    const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x;
+    const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y;
+    const uint_t offset = _BLOCK_ROWS_ * NX;
+
+    if (ix < NX && iy < NY)
+    {
+        for (uint_t iz = 0; iz < nslices; ++iz) // zghosts inclusive
+        {
+            uint_t i0 = ID3(ix,iy,iz,NX,NY);
+            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
+            {
+                const Real r = data.r[i0];
+                const Real u = data.u[i0];
+                const Real v = data.v[i0];
+                const Real w = data.w[i0];
+                const Real e = data.e[i0];
+                const Real G = data.G[i0];
+                const Real P = data.P[i0];
+
+                // convert
+                const Real rinv = 1.0f/r;
+                data.u[i0] = u*rinv;
+                data.v[i0] = v*rinv;
+                data.w[i0] = w*rinv;
+                data.e[i0] = (e - 0.5f*(u*u + v*v + w*w)*rinv - P) / G;
+
+                i0 += offset;
+            }
+        }
+    }
+}
+
+
 __global__
 void _xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
@@ -1311,7 +1719,6 @@ static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex,
     tex->filterMode           = cudaFilterModePoint;
     tex->mipmapFilterMode     = cudaFilterModePoint;
     tex->normalized           = false;
-
     cudaBindTextureToArray(tex, d_ptr, &fmt);
 }
 
@@ -1319,7 +1726,6 @@ static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex,
 void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
         const uint_t gbuf_id, const int chunk_id)
 {
-#ifndef _MUTE_GPU_
     assert(gbuf_id < _NUM_GPU_BUF_);
 
     /* *
@@ -1332,135 +1738,194 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     // my data
     GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
 
-    // my ghosts
-    DevicePointer xghostL(mybuf->d_xgl);
-    DevicePointer xghostR(mybuf->d_xgr);
-    DevicePointer yghostL(mybuf->d_ygl);
-    DevicePointer yghostR(mybuf->d_ygr);
+    // my input/output
+    DevicePointer inout(mybuf->d_inout);
 
-    // my output
-    DevicePointer divF(mybuf->d_divF);
-
-    // my tmp storage
-    DevicePointer flux(d_flux);
-
-    // my launch config
-    const dim3 X_blocks(1, _NTHREADS_, 1);
-    const dim3 X_grid(NXP1, (NY + _NTHREADS_ -1)/_NTHREADS_, 1);
-    const dim3 X_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
-    const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
-
-    const dim3 Y_blocks(_NTHREADS_, 1, 1);
-    const dim3 Y_grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1);
-    const dim3 Y_xtraGrid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-
-    const dim3 Z_blocks(_NTHREADS_, 1, 1);
-    const dim3 Z_grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-
-    // previous stream has priority. Since resources are limited, concurrent
-    // kernels make less sense
+    // previous stream has priority
     const uint_t s_idm1 = ((chunk_id-1) + _NUM_STREAMS_) % _NUM_STREAMS_;
     assert(s_idm1 < _NUM_STREAMS_);
     cudaStreamWaitEvent(stream[s_id], event_compute[s_idm1], 0);
 
     char prof_item[256];
 
-    // queue kernels in pipe
-    switch (gbuf_id)
+    // before we do anything, we convert to primitive variables and prepare
+    // texture buffers
+    const dim3 CONV_blocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
+    const dim3 CONV_grid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
+
+    sprintf(prof_item, "_CONV (%d)", s_id);
+    GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+    _CONV_kernel<<<CONV_grid, CONV_blocks, 0, stream[s_id]>>>(nslices+6, inout);
+    GPU::profiler.pop_stopCUDA();
+
+    // TODO: REMOVE THIS
+    /* sprintf(prof_item, "_TEST_CONV (%d)", s_id); */
+    /* GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /* _TEST_CONV<<<1,1,0,stream[s_id]>>>(inout, xghostL, xghostR, yghostL, yghostR); */
+    /* GPU::profiler.pop_stopCUDA(); */
+
+    // copy to tex buffers
+    for (uint_t i = 0; i < VSIZE; ++i)
     {
-        case 0:
-            _bindTexture(&texR00, mybuf->d_GPUin[0]);
-            _bindTexture(&texU00, mybuf->d_GPUin[1]);
-            _bindTexture(&texV00, mybuf->d_GPUin[2]);
-            _bindTexture(&texW00, mybuf->d_GPUin[3]);
-            _bindTexture(&texE00, mybuf->d_GPUin[4]);
-            _bindTexture(&texG00, mybuf->d_GPUin[5]);
-            _bindTexture(&texP00, mybuf->d_GPUin[6]);
-            // --- X ---
-            sprintf(prof_item, "_XFLUX (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _xflux00<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-            GPU::profiler.pop_stopCUDA();
-
-            sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-            GPU::profiler.pop_stopCUDA();
-
-            // --- Y ---
-            sprintf(prof_item, "_YFLUX (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _yflux00<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-            GPU::profiler.pop_stopCUDA();
-
-            sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _yextraterm_hllc<<<Y_xtraGrid, Y_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-            GPU::profiler.pop_stopCUDA();
-
-            // --- Z ---
-            sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _zflux00<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-            GPU::profiler.pop_stopCUDA();
-
-            sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _zextraterm_hllc<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-            GPU::profiler.pop_stopCUDA();
-            break;
-
-        case 1:
-            _bindTexture(&texR01, mybuf->d_GPUin[0]);
-            _bindTexture(&texU01, mybuf->d_GPUin[1]);
-            _bindTexture(&texV01, mybuf->d_GPUin[2]);
-            _bindTexture(&texW01, mybuf->d_GPUin[3]);
-            _bindTexture(&texE01, mybuf->d_GPUin[4]);
-            _bindTexture(&texG01, mybuf->d_GPUin[5]);
-            _bindTexture(&texP01, mybuf->d_GPUin[6]);
-            // --- X ---
-            sprintf(prof_item, "_XFLUX (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _xflux01<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-            GPU::profiler.pop_stopCUDA();
-
-            sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-            GPU::profiler.pop_stopCUDA();
-
-            // --- Y ---
-            sprintf(prof_item, "_YFLUX (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _yflux01<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-            GPU::profiler.pop_stopCUDA();
-
-            sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _yextraterm_hllc<<<Y_xtraGrid, Y_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-            GPU::profiler.pop_stopCUDA();
-
-            // --- Z ---
-            sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _zflux01<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-            GPU::profiler.pop_stopCUDA();
-
-            sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id);
-            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-            _zextraterm_hllc<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-            GPU::profiler.pop_stopCUDA();
-            break;
+        cudaMemcpy3DParms copyParams = {0};
+        copyParams.extent            = make_cudaExtent(NX, NY, nslices+6);
+        copyParams.kind              = cudaMemcpyDeviceToDevice;
+        copyParams.srcPtr            = make_cudaPitchedPtr((void *)mybuf->d_inout[i], NX * sizeof(Real), NX, NY);
+        copyParams.dstArray          = mybuf->d_GPU3D[i];
+        cudaMemcpy3DAsync(&copyParams, stream[s_id]);
     }
+    _bindTexture(&tex00, mybuf->d_GPU3D[0]);
+    _bindTexture(&tex01, mybuf->d_GPU3D[1]);
+    _bindTexture(&tex02, mybuf->d_GPU3D[2]);
+    _bindTexture(&tex03, mybuf->d_GPU3D[3]);
+    _bindTexture(&tex04, mybuf->d_GPU3D[4]);
+    _bindTexture(&tex05, mybuf->d_GPU3D[5]);
+    _bindTexture(&tex06, mybuf->d_GPU3D[6]);
 
-    cudaEventRecord(event_compute[s_id], stream[s_id]);
-#endif
+    // my reconstruction
+    DevicePointer recon_m(d_recon_m);
+    DevicePointer recon_p(d_recon_p);
+
+    // ========================================================================
+    // X
+    // ========================================================================
+    const dim3 X_blocks(1, _NTHREADS_, 1);
+    const dim3 X_grid(NXP1, (NY + _NTHREADS_ - 1)/_NTHREADS_, 1);
+
+    // reconstruct
+    _WENO_kernel_X<0><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[0], d_recon_p[0], mybuf->d_xgl[0], mybuf->d_xgr[0]);
+    _WENO_kernel_X<1><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[1], d_recon_p[1], mybuf->d_xgl[1], mybuf->d_xgr[1]);
+    _WENO_kernel_X<2><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[2], d_recon_p[2], mybuf->d_xgl[2], mybuf->d_xgr[2]);
+    _WENO_kernel_X<3><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[3], d_recon_p[3], mybuf->d_xgl[3], mybuf->d_xgr[3]);
+    _WENO_kernel_X<4><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[4], d_recon_p[4], mybuf->d_xgl[4], mybuf->d_xgr[4]);
+    _WENO_kernel_X<5><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[5], d_recon_p[5], mybuf->d_xgl[5], mybuf->d_xgr[5]);
+    _WENO_kernel_X<6><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[6], d_recon_p[6], mybuf->d_xgl[6], mybuf->d_xgr[6]);
+
+    // hllc fluxes
+    _HLLC_kernel_X<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, recon_m, recon_p);
+
+    cudaDeviceSynchronize();
+    /* std::exit(3); */
+
+
+
+    // my ghosts
+    DevicePointer xghostL(mybuf->d_xgl);
+    DevicePointer xghostR(mybuf->d_xgr);
+    DevicePointer yghostL(mybuf->d_ygl);
+    DevicePointer yghostR(mybuf->d_ygr);
+
+
+
+    /* // my launch config */
+    /* const dim3 X_blocks(1, _NTHREADS_, 1); */
+    /* const dim3 X_grid(NXP1, (NY + _NTHREADS_ -1)/_NTHREADS_, 1); */
+    /* const dim3 X_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1); */
+    /* const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1); */
+
+    /* const dim3 Y_blocks(_NTHREADS_, 1, 1); */
+    /* const dim3 Y_grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1); */
+    /* const dim3 Y_xtraGrid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1); */
+
+    /* const dim3 Z_blocks(_NTHREADS_, 1, 1); */
+    /* const dim3 Z_grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1); */
+
+
+
+    /* // queue kernels in pipe */
+    /* switch (gbuf_id) */
+    /* { */
+    /*     case 0: */
+    /*         _bindTexture(&texR00, mybuf->d_GPUin[0]); */
+    /*         _bindTexture(&texU00, mybuf->d_GPUin[1]); */
+    /*         _bindTexture(&texV00, mybuf->d_GPUin[2]); */
+    /*         _bindTexture(&texW00, mybuf->d_GPUin[3]); */
+    /*         _bindTexture(&texE00, mybuf->d_GPUin[4]); */
+    /*         _bindTexture(&texG00, mybuf->d_GPUin[5]); */
+    /*         _bindTexture(&texP00, mybuf->d_GPUin[6]); */
+    /*         // --- X --- */
+    /*         sprintf(prof_item, "_XFLUX (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _xflux00<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+
+    /*         sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+
+    /*         // --- Y --- */
+    /*         sprintf(prof_item, "_YFLUX (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _yflux00<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+
+    /*         sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _yextraterm_hllc<<<Y_xtraGrid, Y_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+
+    /*         // --- Z --- */
+    /*         sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _zflux00<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+
+    /*         sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _zextraterm_hllc<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+    /*         break; */
+
+    /*     case 1: */
+    /*         _bindTexture(&texR01, mybuf->d_GPUin[0]); */
+    /*         _bindTexture(&texU01, mybuf->d_GPUin[1]); */
+    /*         _bindTexture(&texV01, mybuf->d_GPUin[2]); */
+    /*         _bindTexture(&texW01, mybuf->d_GPUin[3]); */
+    /*         _bindTexture(&texE01, mybuf->d_GPUin[4]); */
+    /*         _bindTexture(&texG01, mybuf->d_GPUin[5]); */
+    /*         _bindTexture(&texP01, mybuf->d_GPUin[6]); */
+    /*         // --- X --- */
+    /*         sprintf(prof_item, "_XFLUX (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _xflux01<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+
+    /*         sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+
+    /*         // --- Y --- */
+    /*         sprintf(prof_item, "_YFLUX (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _yflux01<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+
+    /*         sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _yextraterm_hllc<<<Y_xtraGrid, Y_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+
+    /*         // --- Z --- */
+    /*         sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _zflux01<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+
+    /*         sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id); */
+    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
+    /*         _zextraterm_hllc<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
+    /*         GPU::profiler.pop_stopCUDA(); */
+    /*         break; */
+    /* } */
+
+    /* cudaEventRecord(event_compute[s_id], stream[s_id]); */
 }
 
 
 void GPU::MaxSpeedOfSound(const uint_t nslices, const uint_t gbuf_id, const int chunk_id)
 {
-#ifndef _MUTE_GPU_
     assert(gbuf_id < _NUM_GPU_BUF_);
 
     // my stream
@@ -1469,13 +1934,13 @@ void GPU::MaxSpeedOfSound(const uint_t nslices, const uint_t gbuf_id, const int 
     // my data
     GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
 
-    _bindTexture(&texR00, mybuf->d_GPUin[0]);
-    _bindTexture(&texU00, mybuf->d_GPUin[1]);
-    _bindTexture(&texV00, mybuf->d_GPUin[2]);
-    _bindTexture(&texW00, mybuf->d_GPUin[3]);
-    _bindTexture(&texE00, mybuf->d_GPUin[4]);
-    _bindTexture(&texG00, mybuf->d_GPUin[5]);
-    _bindTexture(&texP00, mybuf->d_GPUin[6]);
+    _bindTexture(&texR00, mybuf->d_GPU3D[0]);
+    _bindTexture(&texU00, mybuf->d_GPU3D[1]);
+    _bindTexture(&texV00, mybuf->d_GPU3D[2]);
+    _bindTexture(&texW00, mybuf->d_GPU3D[3]);
+    _bindTexture(&texE00, mybuf->d_GPU3D[4]);
+    _bindTexture(&texG00, mybuf->d_GPU3D[5]);
+    _bindTexture(&texP00, mybuf->d_GPU3D[6]);
 
     // my launch config
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
@@ -1483,11 +1948,10 @@ void GPU::MaxSpeedOfSound(const uint_t nslices, const uint_t gbuf_id, const int 
 
     char prof_item[256];
 
-    sprintf(prof_item, "_MAXSOS (s_id=%d)", s_id);
+    sprintf(prof_item, "_MAXSOS (%d)", s_id);
     GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
     _maxSOS<<<grid, blocks, 0, stream[s_id]>>>(nslices, d_maxSOS);
     GPU::profiler.pop_stopCUDA();
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -1501,77 +1965,72 @@ void GPU::TestKernel()
     // my data
     GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
 
-    _bindTexture(&texR00, mybuf->d_GPUin[0]);
-    _bindTexture(&texU00, mybuf->d_GPUin[1]);
-    _bindTexture(&texV00, mybuf->d_GPUin[2]);
-    _bindTexture(&texW00, mybuf->d_GPUin[3]);
-    _bindTexture(&texE00, mybuf->d_GPUin[4]);
-    _bindTexture(&texG00, mybuf->d_GPUin[5]);
-    _bindTexture(&texP00, mybuf->d_GPUin[6]);
+    _bindTexture(&texR00, mybuf->d_GPU3D[0]);
+    _bindTexture(&texU00, mybuf->d_GPU3D[1]);
+    _bindTexture(&texV00, mybuf->d_GPU3D[2]);
+    _bindTexture(&texW00, mybuf->d_GPU3D[3]);
+    _bindTexture(&texE00, mybuf->d_GPU3D[4]);
+    _bindTexture(&texG00, mybuf->d_GPU3D[5]);
+    _bindTexture(&texP00, mybuf->d_GPU3D[6]);
 
-    // my ghosts
-    DevicePointer xghostL(mybuf->d_xgl);
-    DevicePointer xghostR(mybuf->d_xgr);
-    DevicePointer yghostL(mybuf->d_ygl);
-    DevicePointer yghostR(mybuf->d_ygr);
+    /* // my ghosts */
+    /* DevicePointer xghostL(mybuf->d_xgl); */
+    /* DevicePointer xghostR(mybuf->d_xgr); */
+    /* DevicePointer yghostL(mybuf->d_ygl); */
+    /* DevicePointer yghostR(mybuf->d_ygr); */
 
-    // my output
-    DevicePointer divF(mybuf->d_divF);
+    /* // my output */
+    /* DevicePointer divF(mybuf->d_divF); */
 
-    // my tmp storage
-    DevicePointer flux(d_flux);
+    /* // my tmp storage */
+    /* DevicePointer flux(d_flux); */
 
-    cudaFree(d_Gm);
-    cudaFree(d_Gp);
-    cudaFree(d_Pm);
-    cudaFree(d_Pp);
-    cudaFree(d_hllc_vel);
-    cudaFree(d_sumG);
-    cudaFree(d_sumP);
-    cudaFree(d_divU);
+    /* cudaFree(d_sumG); */
+    /* cudaFree(d_sumP); */
+    /* cudaFree(d_divU); */
 
-    const uint_t nslices = NodeBlock::sizeZ;
-    const uint_t xflxSize = (NodeBlock::sizeX+1)*NodeBlock::sizeY*nslices;
-    const uint_t yflxSize = NodeBlock::sizeX*(NodeBlock::sizeY+1)*nslices;
-    const uint_t zflxSize = NodeBlock::sizeX*NodeBlock::sizeY*(nslices+1);
+    /* const uint_t nslices = NodeBlock::sizeZ; */
+    /* const uint_t xflxSize = (NodeBlock::sizeX+1)*NodeBlock::sizeY*nslices; */
+    /* const uint_t yflxSize = NodeBlock::sizeX*(NodeBlock::sizeY+1)*nslices; */
+    /* const uint_t zflxSize = NodeBlock::sizeX*NodeBlock::sizeY*(nslices+1); */
 
-    Real *d_extra_X[5];
-    Real *d_extra_Y[5];
-    Real *d_extra_Z[5];
-    for (int i = 0; i < 5; ++i)
-    {
-        cudaMalloc(&(d_extra_X[i]), xflxSize * sizeof(Real));
-        cudaMalloc(&(d_extra_Y[i]), yflxSize * sizeof(Real));
-        cudaMalloc(&(d_extra_Z[i]), zflxSize * sizeof(Real));
-    }
-    GPU::tell_memUsage_GPU();
+    /* Real *d_extra_X[5]; */
+    /* Real *d_extra_Y[5]; */
+    /* Real *d_extra_Z[5]; */
+    /* for (int i = 0; i < 5; ++i) */
+    /* { */
+    /*     cudaMalloc(&(d_extra_X[i]), xflxSize * sizeof(Real)); */
+    /*     cudaMalloc(&(d_extra_Y[i]), yflxSize * sizeof(Real)); */
+    /*     cudaMalloc(&(d_extra_Z[i]), zflxSize * sizeof(Real)); */
+    /* } */
+    /* GPU::tell_memUsage_GPU(); */
 
 
-    {
+    /* { */
 
-        const dim3 xblocks(1, _NTHREADS_, 1);
-        const dim3 yblocks(_NTHREADS_, 1, 1);
-        const dim3 zblocks(_NTHREADS_, 1, 1);
-        const dim3 xgrid(NXP1, (NY + _NTHREADS_ - 1) / _NTHREADS_,   1);
-        const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1);
-        const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
+    /*     const dim3 xblocks(1, _NTHREADS_, 1); */
+    /*     const dim3 yblocks(_NTHREADS_, 1, 1); */
+    /*     const dim3 zblocks(_NTHREADS_, 1, 1); */
+    /*     const dim3 xgrid(NXP1, (NY + _NTHREADS_ - 1) / _NTHREADS_,   1); */
+    /*     const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1); */
+    /*     const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1); */
 
-        GPU::profiler.push_startCUDA("_XFLUX", &stream[s_id]);
-        _xflux00<<<xgrid, xblocks, 0, stream[s_id]>>>(nslices, 0, xghostL, xghostR, flux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]);
-        GPU::profiler.pop_stopCUDA();
+    /*     GPU::profiler.push_startCUDA("_XFLUX", &stream[s_id]); */
+    /*     _xflux00<<<xgrid, xblocks, 0, stream[s_id]>>>(nslices, 0, xghostL, xghostR, flux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]); */
+    /*     GPU::profiler.pop_stopCUDA(); */
 
-        /* GPU::profiler.push_startCUDA("_YFLUX", &_s[0]); */
-        /* _yflux<<<ygrid, yblocks, 0, _s[0]>>>(nslices, 0, yghostL, yghostR, flux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]); */
-        /* GPU::profiler.pop_stopCUDA(); */
+    /*     /1* GPU::profiler.push_startCUDA("_YFLUX", &_s[0]); *1/ */
+    /*     /1* _yflux<<<ygrid, yblocks, 0, _s[0]>>>(nslices, 0, yghostL, yghostR, flux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]); *1/ */
+    /*     /1* GPU::profiler.pop_stopCUDA(); *1/ */
 
-        /* GPU::profiler.push_startCUDA("_ZFLUX", &_s[0]); */
-        /* _zflux<<<zgrid, zblocks, 0, _s[0]>>>(nslices, flux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]); */
-        /* GPU::profiler.pop_stopCUDA(); */
+    /*     /1* GPU::profiler.push_startCUDA("_ZFLUX", &_s[0]); *1/ */
+    /*     /1* _zflux<<<zgrid, zblocks, 0, _s[0]>>>(nslices, flux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]); *1/ */
+    /*     /1* GPU::profiler.pop_stopCUDA(); *1/ */
 
-        /* _xflux<<<xgrid, xblocks, 0, _s[0]>>>(nslices, 0, xghostL, xghostR, flux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]); */
-        /* _yflux<<<ygrid, yblocks, 0, _s[1]>>>(nslices, 0, yghostL, yghostR, flux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]); */
-        /* _zflux<<<zgrid, zblocks, 0, _s[2]>>>(nslices, flux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]); */
+    /*     /1* _xflux<<<xgrid, xblocks, 0, _s[0]>>>(nslices, 0, xghostL, xghostR, flux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]); *1/ */
+    /*     /1* _yflux<<<ygrid, yblocks, 0, _s[1]>>>(nslices, 0, yghostL, yghostR, flux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]); *1/ */
+    /*     /1* _zflux<<<zgrid, zblocks, 0, _s[2]>>>(nslices, flux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]); *1/ */
 
-        cudaDeviceSynchronize();
-    }
+    /*     cudaDeviceSynchronize(); */
+    /* } */
 }

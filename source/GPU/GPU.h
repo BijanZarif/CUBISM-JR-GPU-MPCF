@@ -12,7 +12,7 @@
 
 // flux kernels
 #ifndef _NTHREADS_
-#define _NTHREADS_ 64
+#define _NTHREADS_ 128
 #endif
 
 // extra-term kernels (for x-direction only)

@@ -199,6 +199,48 @@ class GPUlab
                 memcpy(dst[i] + dstOFFSET, src[i] + srcOFFSET, Nelements*sizeof(Real));
         }
 
+        inline void _CONV_copy_range(real_vector_t& dst, const uint_t dstOFFSET, const real_vector_t& src, const uint_t srcOFFSET, const uint_t Nelements)
+        {
+            // primitive dest
+            Real * const p_r = &(dst[0])[dstOFFSET];
+            Real * const p_u = &(dst[1])[dstOFFSET];
+            Real * const p_v = &(dst[2])[dstOFFSET];
+            Real * const p_w = &(dst[3])[dstOFFSET];
+            Real * const p_e = &(dst[4])[dstOFFSET];
+            Real * const p_G = &(dst[5])[dstOFFSET];
+            Real * const p_P = &(dst[6])[dstOFFSET];
+
+            // conservative source
+            const Real * const c_r = &(src[0])[srcOFFSET];
+            const Real * const c_u = &(src[1])[srcOFFSET];
+            const Real * const c_v = &(src[2])[srcOFFSET];
+            const Real * const c_w = &(src[3])[srcOFFSET];
+            const Real * const c_e = &(src[4])[srcOFFSET];
+            const Real * const c_G = &(src[5])[srcOFFSET];
+            const Real * const c_P = &(src[6])[srcOFFSET];
+
+            memcpy(p_r, c_r, Nelements*sizeof(Real));
+            memcpy(p_G, c_G, Nelements*sizeof(Real));
+            memcpy(p_P, c_P, Nelements*sizeof(Real));
+
+            for (int i = 0; i < Nelements; ++i)
+            {
+                const Real r = c_r[i];
+                const Real u = c_u[i];
+                const Real v = c_v[i];
+                const Real w = c_w[i];
+                const Real e = c_e[i];
+                const Real G = c_G[i];
+                const Real P = c_P[i];
+
+                // convert
+                p_u[i] = u/r;
+                p_v[i] = v/r;
+                p_w[i] = w/r;
+                p_e[i] = (e - static_cast<Real>(0.5)*(u*u + v*v + w*w)/r - P) / G;
+            }
+        }
+
         inline void _copy_xyghosts() // alternatively, copy ALL x/yghosts at beginning
         {
             // copy from the halos into the ghost buffer of the current chunk
@@ -206,6 +248,14 @@ class GPUlab
             _copy_range(curr_buffer->xghost_r, 0, halox.right, 3*sizeY*curr_iz, curr_buffer->Nxghost);
             _copy_range(curr_buffer->yghost_l, 0, haloy.left,  3*sizeX*curr_iz, curr_buffer->Nyghost);
             _copy_range(curr_buffer->yghost_r, 0, haloy.right, 3*sizeX*curr_iz, curr_buffer->Nyghost);
+        }
+
+        inline void _CONV_copy_xyghosts() // convert to primitive vars and copy xyghosts
+        {
+            _CONV_copy_range(curr_buffer->xghost_l, 0, halox.left,  3*sizeY*curr_iz, curr_buffer->Nxghost);
+            _CONV_copy_range(curr_buffer->xghost_r, 0, halox.right, 3*sizeY*curr_iz, curr_buffer->Nxghost);
+            _CONV_copy_range(curr_buffer->yghost_l, 0, haloy.left,  3*sizeX*curr_iz, curr_buffer->Nyghost);
+            _CONV_copy_range(curr_buffer->yghost_r, 0, haloy.right, 3*sizeX*curr_iz, curr_buffer->Nyghost);
         }
 
         // execution helper
