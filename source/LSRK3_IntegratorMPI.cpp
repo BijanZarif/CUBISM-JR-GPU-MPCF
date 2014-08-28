@@ -32,7 +32,8 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
     else if (SOSkernel == "cpp")
         tsos = _maxSOS<MaxSpeedOfSound_CPP>(grid, sos);
     assert(sos > 0);
-    if (verbosity) printf("sos = %f (took %f sec)\n", sos, tsos);
+    /* if (verbosity) printf("sos = %f (took %f sec)\n", sos, tsos); */
+    printf("sos = %f (took %f sec)\n", sos, tsos);
 
     dt = CFL*h/sos;
     dt = dt_max < dt ? dt_max : dt;
@@ -56,7 +57,8 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
         trk3 = GPU->process_all(-32./27, 3./4, dt/h);
         if (verbosity) printf("RK stage 3 takes %f sec\n", trk3);
     }
-    if (verbosity) printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
+    /* if (verbosity) printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3); */
+    printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
 
     return dt;
 }

@@ -6,10 +6,8 @@
  * */
 #include <assert.h>
 #include <stdio.h>
-#include <vector>
 
-#include "GPU.h" // includes Types.h & wrapper declarations
-#include "GPUonly.cuh"
+#include "GPU.cuh"
 
 #if _BLOCKSIZEX_ < 5
 #error Minimum _BLOCKSIZEX_ is 5
@@ -26,28 +24,439 @@
 #error _BLOCKSIZEY_ should be an integer multiple of _TILE_DIM_
 #endif
 
+
+///////////////////////////////////////////////////////////////////////////////
+//                           GLOBAL VARIABLES                                //
+///////////////////////////////////////////////////////////////////////////////
+// helper storage
+extern real_vector_t d_flux;
+extern Real *d_Gm, *d_Gp;
+extern Real *d_Pm, *d_Pp;
+extern Real *d_hllc_vel;
+extern Real *d_sumG, *d_sumP, *d_divU;
+
+// max SOS
+extern int *d_maxSOS;
+
+// GPU input/output
+extern struct GPU_COMM gpu_comm[_NUM_GPU_BUF_];
+
+// use non-null stream (async)
+extern cudaStream_t *stream;
+
+// compute events
+extern cudaEvent_t *event_compute;
+
+// texture references
+#include "Texture.cu"
+
 ///////////////////////////////////////////////////////////////////////////////
 //                             DEVICE FUNCTIONS                              //
 ///////////////////////////////////////////////////////////////////////////////
+__device__
+inline Real _weno_pluss(const Real b, const Real c, const Real d, const Real e, const Real f)
+{
+    const Real wenoeps_f = (Real)WENOEPS;
+#ifndef _WENO3_
+    // (90 MUL/ADD/SUB + 6 DIV) = 96 FLOP
+    const Real inv6 = 1.0f/6.0f;
+    const Real inv3 = 1.0f/3.0f;
+    const Real q1 =  10.0f*inv3;
+    const Real q2 =  31.0f*inv3;
+    const Real q3 =  11.0f*inv3;
+    const Real q4 =  25.0f*inv3;
+    const Real q5 =  19.0f*inv3;
+    const Real q6 =   4.0f*inv3;
+    const Real q7 =  13.0f*inv3;
+    const Real q8 =   5.0f*inv3;
+
+    const Real sum0 =  inv3*f - 7.0f*inv6*e + 11.0f*inv6*d;
+    const Real sum1 = -inv6*e + 5.0f*inv6*d + inv3*c;
+    const Real sum2 =  inv3*d + 5.0f*inv6*c - inv6*b;
+
+    const Real is0 = d*(d*q1 - e*q2 + f*q3) + e*(e*q4 - f*q5) + f*f*q6;
+    const Real is1 = c*(c*q6 - d*q7 + e*q8) + d*(d*q7 - e*q7) + e*e*q6;
+    const Real is2 = b*(b*q6 - c*q5 + d*q3) + c*(c*q4 - d*q2) + d*d*q1;
+
+    const Real is0plus = is0 + wenoeps_f;
+    const Real is1plus = is1 + wenoeps_f;
+    const Real is2plus = is2 + wenoeps_f;
+
+    const Real alpha0 = 1.0f / (10.0f*is0plus*is0plus);
+    const Real alpha1 = 6.0f * (1.0f / (10.0f*is1plus*is1plus));
+    const Real alpha2 = 3.0f * (1.0f / (10.0f*is2plus*is2plus));
+    const Real alphasumInv = 1.0f / (alpha0+alpha1+alpha2);
+
+    const Real omega0 = alpha0 * alphasumInv;
+    const Real omega1 = alpha1 * alphasumInv;
+    const Real omega2 = 1.0f - omega0 - omega1;
+
+    return omega0*sum0 + omega1*sum1 + omega2*sum2;
+
+#else
+    // 28 FLOP
+    const Real sum0 = 1.5f*d - 0.5f*e;
+    const Real sum1 = 0.5f*(d + c);
+
+    const Real is0 = (d-e)*(d-e);
+    const Real is1 = (d-c)*(d-c);
+
+    const Real alpha0 = 1.0f / (3.0f * (is0+wenoeps_f)*(is0+wenoeps_f));
+    const Real alpha1 = 2.0f * (1.0f / (3.0f * (is1+wenoeps_f)*(is1+wenoeps_f)));
+
+    const Real omega0 = alpha0 / (alpha0+alpha1);
+    const Real omega1 = 1.0f - omega0;
+
+    return omega0*sum0 + omega1*sum1;
+
+#endif
+}
+
+
+__device__
+inline Real _weno_minus(const Real a, const Real b, const Real c, const Real d, const Real e)
+{
+    const Real wenoeps_f = (Real)WENOEPS;
+#ifndef _WENO3_
+    // (90 MUL/ADD/SUB + 6 DIV) = 96 FLOP
+    const Real inv6 = 1.0f/6.0f;
+    const Real inv3 = 1.0f/3.0f;
+    const Real q1 =   4.0f*inv3;
+    const Real q2 =  19.0f*inv3;
+    const Real q3 =  11.0f*inv3;
+    const Real q4 =  25.0f*inv3;
+    const Real q5 =  31.0f*inv3;
+    const Real q6 =  10.0f*inv3;
+    const Real q7 =  13.0f*inv3;
+    const Real q8 =   5.0f*inv3;
+
+    const Real sum0 =  inv3*a - 7.0f*inv6*b + 11.0f*inv6*c;
+    const Real sum1 = -inv6*b + 5.0f*inv6*c + inv3*d;
+    const Real sum2 =  inv3*c + 5.0f*inv6*d - inv6*e;
+
+    const Real is0 = a*(a*q1 - b*q2 + c*q3) + b*(b*q4 - c*q5) + c*c*q6;
+    const Real is1 = b*(b*q1 - c*q7 + d*q8) + c*(c*q7 - d*q7) + d*d*q1;
+    const Real is2 = c*(c*q6 - d*q5 + e*q3) + d*(d*q4 - e*q2) + e*e*q1;
+
+    const Real is0plus = is0 + wenoeps_f;
+    const Real is1plus = is1 + wenoeps_f;
+    const Real is2plus = is2 + wenoeps_f;
+
+    const Real alpha0 = 1.0f / (10.0f*is0plus*is0plus);
+    const Real alpha1 = 6.0f * (1.0f / (10.0f*is1plus*is1plus));
+    const Real alpha2 = 3.0f * (1.0f / (10.0f*is2plus*is2plus));
+    const Real alphasumInv = 1.0f / (alpha0+alpha1+alpha2);
+
+    const Real omega0 = alpha0 * alphasumInv;
+    const Real omega1 = alpha1 * alphasumInv;
+    const Real omega2 = 1.0f - omega0 - omega1;
+
+    return omega0*sum0 + omega1*sum1 + omega2*sum2;
+
+#else
+    // 28 FLOP
+    const Real sum0 = 1.5f*c - 0.5f*b;
+    const Real sum1 = 0.5f*(c + d);
+
+    const Real is0 = (c-b)*(c-b);
+    const Real is1 = (d-c)*(d-c);
+
+    const Real alpha0 = 1.0f / (3.0f * (is0+wenoeps_f)*(is0+wenoeps_f));
+    const Real alpha1 = 2.0f * (1.0f / (3.0f * (is1+wenoeps_f)*(is1+wenoeps_f)));
+
+    const Real omega0 = alpha0 / (alpha0+alpha1);
+    const Real omega1 = 1.0f - omega0;
+
+    return omega0*sum0 + omega1*sum1;
+
+#endif
+}
+
+
+__device__
+inline Real _weno_pluss_clipped(const Real b, const Real c, const Real d, const Real e, const Real f)
+{
+    const Real retval = _weno_pluss(b,c,d,e,f);
+    const Real min_in = fminf( fminf(c,d), e );
+    const Real max_in = fmaxf( fmaxf(c,d), e );
+    return fminf(fmaxf(retval, min_in), max_in);
+}
+
+
+__device__
+inline Real _weno_minus_clipped(const Real a, const Real b, const Real c, const Real d, const Real e)
+{
+    const Real retval = _weno_minus(a,b,c,d,e);
+    const Real min_in = fminf( fminf(b,c), d );
+    const Real max_in = fmaxf( fmaxf(b,c), d );
+    return fminf(fmaxf(retval, min_in), max_in);
+}
+
+
+__device__
+inline void _char_vel_einfeldt(const Real rm, const Real rp,
+        const Real vm, const Real vp,
+        const Real pm, const Real pp,
+        const Real Gm, const Real Gp,
+        const Real Pm, const Real Pp,
+        Real& outm, Real& outp) // (23 MUL/ADD/SUB + 6 DIV) = 29 FLOP
+{
+    /* *
+     * Compute upper and lower bounds of signal velocities for the Riemann
+     * problem according to Einfeldt:
+     *
+     * 1.) Compute Rr needed for Roe averages
+     * 2.) Compute speed of sound in left and right state
+     * 3.) Compute speed of sound according to Einfeldt and Rr
+     * 4.) Compute upper and lower signal velocities
+     * */
+
+    // 1.)
+    assert(rm > 0.0f);
+    assert(rp > 0.0f);
+    const Real Rr   = sqrtf(rp / rm);
+    const Real Rinv = 1.0f / (1.0f + Rr);
+
+    // 2.)
+    const Real cm2 = ((pm + Pm)/Gm + pm) / rm;
+    const Real cp2 = ((pp + Pp)/Gp + pp) / rp;
+    const Real cm  = sqrtf(cm2);
+    const Real cp  = sqrtf(cp2);
+    assert(!isnan(cm));
+    assert(!isnan(cp));
+
+    // 3.)
+    const Real um    = vm;
+    const Real up    = vp;
+    const Real eta_2 = 0.5f*Rr*Rinv*Rinv;
+    const Real d2    = (cm2 + Rr*cp2)*Rinv + eta_2*(up - um)*(up - um);
+    const Real d     = sqrtf(d2);
+    const Real u     = (um + Rr*up)*Rinv;
+    assert(!isnan(d));
+    assert(!isnan(u));
+
+    // 4.)
+    outm = fminf(u - d, um - cm);
+    outp = fmaxf(u + d, up + cp);
+}
+
+
+/* *
+ * Compute characteristic velocity, s^star, of the intermediate wave.  The
+ * computation is based on the condition of uniform constant pressure in
+ * the star region.  See P. Batten et. al., "On the choice of wavespeeds
+ * for the HLLC Riemann solver", SIAM J. Sci. Comput. 18 (1997) 1553--1570
+ * It is assumed s^minus and s^plus are known.
+ * */
+__device__
+inline Real _char_vel_star(const Real rm, const Real rp,
+        const Real vm, const Real vp,
+        const Real pm, const Real pp,
+        const Real sm, const Real sp) // (10 MUL/ADD/SUB + 1 DIV) = 11 FLOP
+{
+    const Real facm = rm * (sm - vm);
+    const Real facp = rp * (sp - vp);
+    return (pp - pm + vm*facm - vp*facp) / (facm - facp);
+    /* return (pp + vm*facm - (pm + vp*facp)) / (facm - facp); */
+}
+
+
+__device__
+inline Real _hllc_rho(const Real rm, const Real rp,
+        const Real vm, const Real vp,
+        const Real sm, const Real sp, const Real ss) // (21 MUL/ADD/SUB + 2 DIV) = 23 FLOP
+{
+    /* *
+     * The flux computation is split into 4 parts:
+     * 1.) Compute signum of s^*, compute s^- and s^+
+     * 2.) Compute chi^* and delta of q^* and q
+     * 3.) Compute trivial flux
+     * 4.) Compute HLLC flux
+     * */
+
+    // 1.)
+    const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
+    const Real s_minus = fminf(0.0f, sm);
+    const Real s_pluss = fmaxf(0.0f, sp);
+
+    // 2.)
+    const Real chi_starm = (sm - vm) / (sm - ss);
+    const Real chi_starp = (sp - vp) / (sp - ss);
+    const Real qm        = rm;
+    const Real qp        = rp;
+    const Real q_deltam  = qm*chi_starm - qm;
+    const Real q_deltap  = qp*chi_starp - qp;
+
+    // 3.)
+    const Real fm = qm*vm;
+    const Real fp = qp*vp;
+
+    // 4.)
+    const Real flux = (0.5f*(1.0f + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1.0f - sign_star)) * (fp + s_pluss*q_deltap);
+    assert(!isnan(flux));
+    return flux;
+}
+
+
+__device__
+inline Real _hllc_vel(const Real rm,  const Real rp,
+        const Real vm,  const Real vp,
+        const Real vdm, const Real vdp,
+        const Real sm,  const Real sp,  const Real ss) // (23 MUL/ADD/SUB + 2 DIV) = 25 FLOP
+{
+    /* *
+     * The flux computation is split into 4 parts:
+     * 1.) Compute signum of s^*, compute s^- and s^+
+     * 2.) Compute chi^* and delta of q^* and q
+     * 3.) Compute trivial flux
+     * 4.) Compute HLLC flux
+     * */
+
+    // 1.)
+    const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
+    const Real s_minus  = fminf(0.0f, sm);
+    const Real s_pluss  = fmaxf(0.0f, sp);
+
+    // 2.)
+    const Real chi_starm = (sm - vdm) / (sm - ss);
+    const Real chi_starp = (sp - vdp) / (sp - ss);
+    const Real qm        = rm*vm;
+    const Real qp        = rp*vp;
+    const Real q_deltam  = qm*chi_starm - qm;
+    const Real q_deltap  = qp*chi_starp - qp;
+
+    // 3.)
+    const Real fm = qm*vdm;
+    const Real fp = qp*vdp;
+
+    // 4.)
+    const Real flux = (0.5f*(1.0f + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1.0f - sign_star)) * (fp + s_pluss*q_deltap);
+    assert(!isnan(flux));
+    assert(!isnan(ss));
+    assert(!isnan(sm));
+    assert(!isnan(sp));
+    return flux;
+}
+
+
+__device__
+inline Real _hllc_pvel(const Real rm, const Real rp,
+        const Real vm, const Real vp,
+        const Real pm, const Real pp,
+        const Real sm, const Real sp, const Real ss) // (27 MUL/ADD/SUB + 2 DIV) = 29 FLOP
+{
+    /* *
+     * The flux computation is split into 4 parts:
+     * 1.) Compute signum of s^*, compute s^- and s^+
+     * 2.) Compute chi^* and delta of q^* and q
+     * 3.) Compute trivial flux
+     * 4.) Compute HLLC flux
+     * */
+
+    // 1.)
+    const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
+    const Real s_minus  = fminf(0.0f, sm);
+    const Real s_pluss  = fmaxf(0.0f, sp);
+
+    // 2.)
+    const Real chi_starm = (sm - vm) / (sm - ss);
+    const Real chi_starp = (sp - vp) / (sp - ss);
+    const Real qm        = rm*vm;
+    const Real qp        = rp*vp;
+    const Real q_deltam  = rm*ss*chi_starm - qm;
+    const Real q_deltap  = rp*ss*chi_starp - qp;
+
+    // 3.)
+    const Real fm = qm*vm + pm;
+    const Real fp = qp*vp + pp;
+
+    // 4.)
+    const Real flux = (0.5f*(1.0f + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1.0f - sign_star)) * (fp + s_pluss*q_deltap);
+    assert(!isnan(flux));
+    assert(rm > 0);
+    assert(rp > 0);
+    return flux;
+}
+
+
+__device__
+inline Real _hllc_e(const Real rm,  const Real rp,
+        const Real vdm, const Real vdp,
+        const Real v1m, const Real v1p,
+        const Real v2m, const Real v2p,
+        const Real pm,  const Real pp,
+        const Real Gm,  const Real Gp,
+        const Real Pm,  const Real Pp,
+        const Real sm,  const Real sp,  const Real ss) // (55 MUL/ADD/SUB + 4 DIV) = 59 FLOP
+{
+    /* *
+     * The flux computation is split into 4 parts:
+     * 1.) Compute signum of s^*, compute s^- and s^+
+     * 2.) Compute chi^* and delta of q^* and q
+     * 3.) Compute trivial flux
+     * 4.) Compute HLLC flux
+     * */
+
+    // 1.)
+    const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
+    const Real s_minus  = fminf(0.0f, sm);
+    const Real s_pluss  = fmaxf(0.0f, sp);
+
+    // 2.)
+    const Real chi_starm = (sm - vdm) / (sm - ss);
+    const Real chi_starp = (sp - vdp) / (sp - ss);
+    const Real qm        = Gm*pm + Pm + 0.5f*rm*(vdm*vdm + v1m*v1m + v2m*v2m);
+    const Real qp        = Gp*pp + Pp + 0.5f*rp*(vdp*vdp + v1p*v1p + v2p*v2p);
+    const Real q_deltam  = chi_starm*(qm + (ss - vdm)*(rm*ss + pm/(sm - vdm))) - qm;
+    const Real q_deltap  = chi_starp*(qp + (ss - vdp)*(rp*ss + pp/(sp - vdp))) - qp;
+
+    // 3.)
+    const Real fm = vdm*(qm + pm);
+    const Real fp = vdp*(qp + pp);
+
+    // 4.)
+    const Real flux = (0.5f*(1.0f + sign_star)) * (fm + s_minus*q_deltam) + (0.5f*(1.0f - sign_star)) * (fp + s_pluss*q_deltap);
+    assert(!isnan(flux));
+    return flux;
+}
+
+
+__device__
+inline Real _extraterm_hllc_vel(const Real um, const Real up,
+        const Real Gm, const Real Gp,
+        const Real Pm, const Real Pp,
+        const Real sm, const Real sp, const Real ss) // (17 MUL/ADD/SUB + 2 DIV) = 19 FLOP
+{
+    const Real sign_star = (ss == 0.0f) ? 0.0f : ((ss < 0.0f) ? -1.0f : 1.0f);
+    const Real s_minus   = fminf(0.0f, sm);
+    const Real s_pluss   = fmaxf(0.0f, sp);
+    const Real chi_starm = (sm - um)/(sm - ss) - 1.0f;
+    const Real chi_starp = (sp - up)/(sp - ss) - 1.0f;
+
+    return (0.5f*(1.0f + sign_star))*(um + s_minus*chi_starm) + (0.5f*(1.0f - sign_star))*(up + s_pluss*chi_starp);
+}
 
 
 ///////////////////////////////////////////////////////////////////////////////
 //                                  KERNELS                                  //
 ///////////////////////////////////////////////////////////////////////////////
 __global__
-void _xextraterm_hllc(const uint_t nslices,
-        const Real * const Gm, const Real * const Gp,
-        const Real * const Pm, const Real * const Pp,
-        const Real * const vel,
-        Real * const sumG, Real * const sumP, Real * const divU)
+void _xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
+        const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
+        const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
+        const Real * const __restrict__ vel,
+        Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU)
 {
     const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x;
     const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y;
 
-    // limiting resource, but runs faster by using 3 buffers
+    // limiting resource
     __shared__ Real smem1[_TILE_DIM_][_TILE_DIM_+1];
     __shared__ Real smem2[_TILE_DIM_][_TILE_DIM_+1];
     __shared__ Real smem3[_TILE_DIM_][_TILE_DIM_+1];
+    __shared__ Real smem4[_TILE_DIM_][_TILE_DIM_+1];
+    __shared__ Real smem5[_TILE_DIM_][_TILE_DIM_+1];
+    __shared__ Real smem6[_TILE_DIM_][_TILE_DIM_+1];
 
     if (ix < NX && iy < NY)
     {
@@ -59,29 +468,108 @@ void _xextraterm_hllc(const uint_t nslices,
         {
             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
             {
-                smem1[threadIdx.x][threadIdx.y+i] = Gp[ID3(iyT,ixT+i,iz,NY,NXP1)] + Gm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)];
-                smem2[threadIdx.x][threadIdx.y+i] = Pp[ID3(iyT,ixT+i,iz,NY,NXP1)] + Pm[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)];
-                smem3[threadIdx.x][threadIdx.y+i] = vel[ID3(iyT,(ixT+1)+i,iz,NY,NXP1)] - vel[ID3(iyT,ixT+i,iz,NY,NXP1)];
+                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
+                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
+
+                // pre-fetch
+                Real _sumG = Gp[idxm];
+                Real _sumP = Pp[idxm];
+                Real _divU = vel[idxp];
+                _sumG = _sumG + Gm[idxp];
+                _sumP = _sumP + Pm[idxp];
+                _divU = _divU - vel[idxm];
+                // read first batch
+                smem1[threadIdx.x][threadIdx.y+i] = _sumG;
+                smem2[threadIdx.x][threadIdx.y+i] = _sumP;
+                smem3[threadIdx.x][threadIdx.y+i] = _divU;
             }
             __syncthreads();
+
             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
             {
-                sumG[ID3(ix,iy+i,iz,NX,NY)] = smem1[threadIdx.y+i][threadIdx.x];
-                sumP[ID3(ix,iy+i,iz,NX,NY)] = smem2[threadIdx.y+i][threadIdx.x];
-                divU[ID3(ix,iy+i,iz,NX,NY)] = smem3[threadIdx.y+i][threadIdx.x];
+                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
+                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
+                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
+
+                // pre-fetch
+                Real _divFr = flux.r[idxp];
+                Real _divFu = flux.u[idxp];
+                Real _divFv = flux.v[idxp];
+                _divFr = _divFr - flux.r[idxm];
+                _divFu = _divFu - flux.u[idxm];
+                _divFv = _divFv - flux.v[idxm];
+                // write first batch
+                sumG[idx] = smem1[threadIdx.y+i][threadIdx.x];
+                sumP[idx] = smem2[threadIdx.y+i][threadIdx.x];
+                divU[idx] = smem3[threadIdx.y+i][threadIdx.x];
+                // read second batch
+                smem4[threadIdx.x][threadIdx.y+i] = _divFr;
+                smem5[threadIdx.x][threadIdx.y+i] = _divFu;
+                smem6[threadIdx.x][threadIdx.y+i] = _divFv;
             }
             __syncthreads();
+
+            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
+            {
+                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
+                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
+                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
+
+                // pre-fetch
+                Real _divFw = flux.w[idxp];
+                Real _divFe = flux.e[idxp];
+                Real _divFG = flux.G[idxp];
+                _divFw = _divFw - flux.w[idxm];
+                _divFe = _divFe - flux.e[idxm];
+                _divFG = _divFG - flux.G[idxm];
+                // write second batch
+                divF.r[idx] = smem4[threadIdx.y+i][threadIdx.x];
+                divF.u[idx] = smem5[threadIdx.y+i][threadIdx.x];
+                divF.v[idx] = smem6[threadIdx.y+i][threadIdx.x];
+                // read third batch
+                smem1[threadIdx.x][threadIdx.y+i] = _divFw;
+                smem2[threadIdx.x][threadIdx.y+i] = _divFe;
+                smem3[threadIdx.x][threadIdx.y+i] = _divFG;
+            }
+            __syncthreads();
+
+            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
+            {
+                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
+                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
+                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
+
+                // pre-fetch
+                Real _divFP = flux.P[idxp];
+                _divFP = _divFP - flux.P[idxm];
+                // write third batch
+                divF.w[idx] = smem1[threadIdx.y+i][threadIdx.x];
+                divF.e[idx] = smem2[threadIdx.y+i][threadIdx.x];
+                divF.G[idx] = smem3[threadIdx.y+i][threadIdx.x];
+                // read fourth batch
+                smem4[threadIdx.x][threadIdx.y+i] = _divFP;
+            }
+            __syncthreads();
+
+            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
+            {
+                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
+                // write fourth batch
+                divF.P[idx] = smem4[threadIdx.y+i][threadIdx.x];
+            }
+            // NOTE: __syncthreads() can be omitted since it will not be
+            // touched until next synchronization point
         }
     }
 }
 
 
 __global__
-void _yextraterm_hllc(const uint_t nslices,
-        const Real * const Gm, const Real * const Gp,
-        const Real * const Pm, const Real * const Pp,
-        const Real * const vel,
-        Real * const sumG, Real * const sumP, Real * const divU)
+void _yextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
+        const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
+        const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
+        const Real * const __restrict__ vel,
+        Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU)
 {
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
@@ -93,20 +581,49 @@ void _yextraterm_hllc(const uint_t nslices,
             const uint_t idx  = ID3(ix,iy,iz,NX,NY);
             const uint_t idxm = ID3(ix,iy,iz,NX,NYP1);
             const uint_t idxp = ID3(ix,(iy+1),iz,NX,NYP1);
-            sumG[idx] += Gp[idxm] + Gm[idxp];
-            sumP[idx] += Pp[idxm] + Pm[idxp];
-            divU[idx] += vel[idxp] - vel[idxm];
+
+            Real _sumG = Gp[idxm];
+            Real _sumP = Pp[idxm];
+            Real _divU = vel[idxp];
+            Real _divFr = flux.r[idxp];
+            Real _divFu = flux.u[idxp];
+            Real _divFv = flux.v[idxp];
+            Real _divFw = flux.w[idxp];
+            Real _divFe = flux.e[idxp];
+            Real _divFG = flux.G[idxp];
+            Real _divFP = flux.P[idxp];
+            _sumG = _sumG + Gm[idxp];
+            _sumP = _sumP + Pm[idxp];
+            _divU = _divU - vel[idxm];
+            _divFr = _divFr - flux.r[idxm];
+            _divFu = _divFu - flux.u[idxm];
+            _divFv = _divFv - flux.v[idxm];
+            _divFw = _divFw - flux.w[idxm];
+            _divFe = _divFe - flux.e[idxm];
+            _divFG = _divFG - flux.G[idxm];
+            _divFP = _divFP - flux.P[idxm];
+
+            sumG[idx] += _sumG;
+            sumP[idx] += _sumP;
+            divU[idx] += _divU;
+            divF.r[idx] += _divFr;
+            divF.u[idx] += _divFu;
+            divF.v[idx] += _divFv;
+            divF.w[idx] += _divFw;
+            divF.e[idx] += _divFe;
+            divF.G[idx] += _divFG;
+            divF.P[idx] += _divFP;
         }
     }
 }
 
 
 __global__
-void _zextraterm_hllc(const uint_t nslices,
-        const Real * const Gm, const Real * const Gp,
-        const Real * const Pm, const Real * const Pp,
-        const Real * const vel,
-        Real * const sumG, Real * const sumP, Real * const divU)
+void _zextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
+        const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
+        const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
+        const Real * const __restrict__ vel,
+        Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU)
 {
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
@@ -117,21 +634,55 @@ void _zextraterm_hllc(const uint_t nslices,
         {
             const uint_t idx  = ID3(ix,iy,iz,NX,NY);
             const uint_t idxm = ID3(ix,iy,iz,NX,NY);
-            const uint_t idxp = ID3(ix,iy,iz+1,NX,NY);
-            sumG[idx] += Gp[idxm] + Gm[idxp];
-            sumP[idx] += Pp[idxm] + Pm[idxp];
-            divU[idx] += vel[idxp] - vel[idxm];
+            const uint_t idxp = ID3(ix,iy,(iz+1),NX,NY);
+
+            const Real inv6 = 1.0f/6.0f;
+
+            // cummulative sums of x and y
+            const Real cumm_sumG = sumG[idx];
+            const Real cumm_sumP = sumP[idx];
+            const Real cumm_divU = divU[idx];
+
+            Real _sumG = Gp[idxm];
+            Real _sumP = Pp[idxm];
+            Real _divU = vel[idxp];
+            Real _divFr = flux.r[idxp];
+            Real _divFu = flux.u[idxp];
+            Real _divFv = flux.v[idxp];
+            Real _divFw = flux.w[idxp];
+            Real _divFe = flux.e[idxp];
+            Real _divFG = flux.G[idxp];
+            Real _divFP = flux.P[idxp];
+            _sumG = _sumG + Gm[idxp] + cumm_sumG;
+            _sumP = _sumP + Pm[idxp] + cumm_sumP;
+            _divU = _divU - vel[idxm]+ cumm_divU;
+            _divFr = _divFr - flux.r[idxm];
+            _divFu = _divFu - flux.u[idxm];
+            _divFv = _divFv - flux.v[idxm];
+            _divFw = _divFw - flux.w[idxm];
+            _divFe = _divFe - flux.e[idxm];
+            _divFG = _divFG - flux.G[idxm];
+            _divFP = _divFP - flux.P[idxm];
+
+            // final divF
+            divF.r[idx] += _divFr;
+            divF.u[idx] += _divFu;
+            divF.v[idx] += _divFv;
+            divF.w[idx] += _divFw;
+            divF.e[idx] += _divFe;
+            divF.G[idx] += _divFG - inv6*_divU*_sumG;
+            divF.P[idx] += _divFP - inv6*_divU*_sumP;
         }
     }
 }
 
 
 __global__
-void _xflux(const uint_t nslices, const uint_t global_iz,
-        devPtrSet ghostL, devPtrSet ghostR, devPtrSet flux,
-        Real * const xtra_vel,
-        Real * const xtra_Gm, Real * const xtra_Gp,
-        Real * const xtra_Pm, Real * const xtra_Pp)
+void _xflux00(const uint_t nslices, const uint_t global_iz,
+        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
+        Real * const __restrict__ xtra_vel,
+        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
+        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
 {
     /* *
      * Notes:
@@ -145,194 +696,83 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
      *     all of the x-/yghosts are uploaded to the GPU prior to processing
      *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
      *     are uploaded per chunk.
+     * 6.) Reads textures 00
      * */
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
 
-    /* *
-     * The following code requires 1D thread blocks with dimension
-     * dim3(_NTHREADS_, 1, 1)
-     * on a 2D grid with dimension
-     * dim3((NXP1 + _NTHREADS_ - 1) / _NTHREADS_, NY, 1)
-     *
-     * The load of ghosts is organized into a switch block with 6 cases. Blocks
-     * affected by this are the first three on the left boundary and the last
-     * three on the right. Given the layout of thread blocks above, warps do
-     * not diverge because of the switch.
-     *
-     * NOTE: To minimize the switch cases to 6 (and simplify code) the
-     * following requires that NX >= 5
-     * */
     assert(NXP1 > 5);
 
-#if 1
     if (ix < NXP1 && iy < NY)
     {
-        Stencil r, u, v, w, e, G, P;
-        Stencil p; // for reconstruction
         for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
         {
             /* *
              * The general task order is (for each chunk slice along NZ):
-             * 1.) Load ghosts from GMEM or tex3D into stencil (do this 7x, for each
-             *     quantity)
+             * 1.) Load stencils
              * 2.) Reconstruct primitive values using WENO5/WENO3
              * 3.) Compute characteristic velocities
              * 4.) Compute fluxes
              * 5.) Compute RHS for advection of G and P
              * */
 
+            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
+            Real r[6];
+            Real u[6];
+            Real v[6];
+            Real w[6];
+            Real e[6];
+            Real G[6];
+            Real P[6];
+
             // 1.)
-#if 1
-            // more conditionals
-            _read_stencil_X(r, texR, ghostL.r, ghostR.r, ix, iy, iz, global_iz);
-            _read_stencil_X(u, texU, ghostL.u, ghostR.u, ix, iy, iz, global_iz);
-            _read_stencil_X(v, texV, ghostL.v, ghostR.v, ix, iy, iz, global_iz);
-            _read_stencil_X(w, texW, ghostL.w, ghostR.w, ix, iy, iz, global_iz);
-            _read_stencil_X(e, texE, ghostL.e, ghostR.e, ix, iy, iz, global_iz);
-            _read_stencil_X(G, texG, ghostL.G, ghostR.G, ix, iy, iz, global_iz);
-            _read_stencil_X(P, texP, ghostL.P, ghostR.P, ix, iy, iz, global_iz);
-#else
-            // less conditionals, additional tex3D fetches
-            _load_stencil_tex3D_X(r, texR, ix, iy, iz);
-            _load_stencil_tex3D_X(u, texU, ix, iy, iz);
-            _load_stencil_tex3D_X(v, texV, ix, iy, iz);
-            _load_stencil_tex3D_X(w, texW, ix, iy, iz);
-            _load_stencil_tex3D_X(e, texE, ix, iy, iz);
-            _load_stencil_tex3D_X(G, texG, ix, iy, iz);
-            _load_stencil_tex3D_X(P, texP, ix, iy, iz);
-            switch (ix)
-            {
-                case 0:
-                    _load_3ghosts_X(r.im3, r.im2, r.im1, ghostL.r, iy, iz-3+global_iz);
-                    _load_3ghosts_X(u.im3, u.im2, u.im1, ghostL.u, iy, iz-3+global_iz);
-                    _load_3ghosts_X(v.im3, v.im2, v.im1, ghostL.v, iy, iz-3+global_iz);
-                    _load_3ghosts_X(w.im3, w.im2, w.im1, ghostL.w, iy, iz-3+global_iz);
-                    _load_3ghosts_X(e.im3, e.im2, e.im1, ghostL.e, iy, iz-3+global_iz);
-                    _load_3ghosts_X(G.im3, G.im2, G.im1, ghostL.G, iy, iz-3+global_iz);
-                    _load_3ghosts_X(P.im3, P.im2, P.im1, ghostL.P, iy, iz-3+global_iz);
-                    break;
-                case 1:
-                    _load_2ghosts_X(r.im3, r.im2, 1, 2, ghostL.r, iy, iz-3+global_iz);
-                    _load_2ghosts_X(u.im3, u.im2, 1, 2, ghostL.u, iy, iz-3+global_iz);
-                    _load_2ghosts_X(v.im3, v.im2, 1, 2, ghostL.v, iy, iz-3+global_iz);
-                    _load_2ghosts_X(w.im3, w.im2, 1, 2, ghostL.w, iy, iz-3+global_iz);
-                    _load_2ghosts_X(e.im3, e.im2, 1, 2, ghostL.e, iy, iz-3+global_iz);
-                    _load_2ghosts_X(G.im3, G.im2, 1, 2, ghostL.G, iy, iz-3+global_iz);
-                    _load_2ghosts_X(P.im3, P.im2, 1, 2, ghostL.P, iy, iz-3+global_iz);
-                    break;
-                case 2:
-                    _load_1ghost_X(r.im3, 2, ghostL.r, iy, iz-3+global_iz);
-                    _load_1ghost_X(u.im3, 2, ghostL.u, iy, iz-3+global_iz);
-                    _load_1ghost_X(v.im3, 2, ghostL.v, iy, iz-3+global_iz);
-                    _load_1ghost_X(w.im3, 2, ghostL.w, iy, iz-3+global_iz);
-                    _load_1ghost_X(e.im3, 2, ghostL.e, iy, iz-3+global_iz);
-                    _load_1ghost_X(G.im3, 2, ghostL.G, iy, iz-3+global_iz);
-                    _load_1ghost_X(P.im3, 2, ghostL.P, iy, iz-3+global_iz);
-                    break;
-                case (NXP1-3):
-                    _load_1ghost_X(r.ip2, 0, ghostR.r, iy, iz-3+global_iz);
-                    _load_1ghost_X(u.ip2, 0, ghostR.u, iy, iz-3+global_iz);
-                    _load_1ghost_X(v.ip2, 0, ghostR.v, iy, iz-3+global_iz);
-                    _load_1ghost_X(w.ip2, 0, ghostR.w, iy, iz-3+global_iz);
-                    _load_1ghost_X(e.ip2, 0, ghostR.e, iy, iz-3+global_iz);
-                    _load_1ghost_X(G.ip2, 0, ghostR.G, iy, iz-3+global_iz);
-                    _load_1ghost_X(P.ip2, 0, ghostR.P, iy, iz-3+global_iz);
-                    break;
-                case (NXP1-2):
-                    _load_2ghosts_X(r.ip1, r.ip2, 0, 1, ghostR.r, iy, iz-3+global_iz);
-                    _load_2ghosts_X(u.ip1, u.ip2, 0, 1, ghostR.u, iy, iz-3+global_iz);
-                    _load_2ghosts_X(v.ip1, v.ip2, 0, 1, ghostR.v, iy, iz-3+global_iz);
-                    _load_2ghosts_X(w.ip1, w.ip2, 0, 1, ghostR.w, iy, iz-3+global_iz);
-                    _load_2ghosts_X(e.ip1, e.ip2, 0, 1, ghostR.e, iy, iz-3+global_iz);
-                    _load_2ghosts_X(G.ip1, G.ip2, 0, 1, ghostR.G, iy, iz-3+global_iz);
-                    _load_2ghosts_X(P.ip1, P.ip2, 0, 1, ghostR.P, iy, iz-3+global_iz);
-                    break;
-                case (NXP1-1):
-                    _load_3ghosts_X(r.i, r.ip1, r.ip2, ghostR.r, iy, iz-3+global_iz);
-                    _load_3ghosts_X(u.i, u.ip1, u.ip2, ghostR.u, iy, iz-3+global_iz);
-                    _load_3ghosts_X(v.i, v.ip1, v.ip2, ghostR.v, iy, iz-3+global_iz);
-                    _load_3ghosts_X(w.i, w.ip1, w.ip2, ghostR.w, iy, iz-3+global_iz);
-                    _load_3ghosts_X(e.i, e.ip1, e.ip2, ghostR.e, iy, iz-3+global_iz);
-                    _load_3ghosts_X(G.i, G.ip1, G.ip2, ghostR.G, iy, iz-3+global_iz);
-                    _load_3ghosts_X(P.i, P.ip1, P.ip2, ghostR.P, iy, iz-3+global_iz);
-                    break;
-            } // end switch
-#endif
-            assert(r > 0);
-            assert(e > 0);
-            assert(G > 0);
-            assert(P >= 0);
+            // GMEM transactions are cached, effective GMEM accesses are 7*3
+            // (according to nvvp)
+            if (0 == ix)
+                _load_3X00<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*tex_start)
+            else if (1 == ix)
+                _load_2X00<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*tex_start)
+            else if (2 == ix)
+                _load_1X00<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*tex_start)
+            else if (NXP1-3 == ix)
+                _load_1X00<NXP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NXP1-2 == ix)
+                _load_2X00<NXP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NXP1-1 == ix)
+                _load_3X00<NXP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else
+                _load_internal_X00(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*tex_start)
 
-            // 2.)
-            // rho
-            const Real rp = _weno_pluss_clipped(r.im2, r.im1, r.i, r.ip1, r.ip2);
-            const Real rm = _weno_minus_clipped(r.im3, r.im2, r.im1, r.i, r.ip1);
-            assert(!isnan(rp)); assert(!isnan(rm));
-            // u (convert primitive variable u = (rho*u) / rho)
-            u.im3 /= r.im3;
-            u.im2 /= r.im2;
-            u.im1 /= r.im1;
-            u.i   /= r.i;
-            u.ip1 /= r.ip1;
-            u.ip2 /= r.ip2;
-            const Real up = _weno_pluss_clipped(u.im2, u.im1, u.i, u.ip1, u.ip2);
-            const Real um = _weno_minus_clipped(u.im3, u.im2, u.im1, u.i, u.ip1);
-            assert(!isnan(up)); assert(!isnan(um));
-            // v (convert primitive variable v = (rho*v) / rho)
-            v.im3 /= r.im3;
-            v.im2 /= r.im2;
-            v.im1 /= r.im1;
-            v.i   /= r.i;
-            v.ip1 /= r.ip1;
-            v.ip2 /= r.ip2;
-            const Real vp = _weno_pluss_clipped(v.im2, v.im1, v.i, v.ip1, v.ip2);
-            const Real vm = _weno_minus_clipped(v.im3, v.im2, v.im1, v.i, v.ip1);
-            assert(!isnan(vp)); assert(!isnan(vm));
-            // w (convert primitive variable w = (rho*w) / rho)
-            w.im3 /= r.im3;
-            w.im2 /= r.im2;
-            w.im1 /= r.im1;
-            w.i   /= r.i;
-            w.ip1 /= r.ip1;
-            w.ip2 /= r.ip2;
-            const Real wp = _weno_pluss_clipped(w.im2, w.im1, w.i, w.ip1, w.ip2);
-            const Real wm = _weno_minus_clipped(w.im3, w.im2, w.im1, w.i, w.ip1);
-            assert(!isnan(wp)); assert(!isnan(wm));
-            // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
-            p.im3 = (e.im3 - 0.5f*r.im3*(u.im3*u.im3 + v.im3*v.im3 + w.im3*w.im3) - P.im3) / G.im3;
-            p.im2 = (e.im2 - 0.5f*r.im2*(u.im2*u.im2 + v.im2*v.im2 + w.im2*w.im2) - P.im2) / G.im2;
-            p.im1 = (e.im1 - 0.5f*r.im1*(u.im1*u.im1 + v.im1*v.im1 + w.im1*w.im1) - P.im1) / G.im1;
-            p.i   = (e.i   - 0.5f*r.i*(u.i*u.i       + v.i*v.i     + w.i*w.i)     - P.i)   / G.i;
-            p.ip1 = (e.ip1 - 0.5f*r.ip1*(u.ip1*u.ip1 + v.ip1*v.ip1 + w.ip1*w.ip1) - P.ip1) / G.ip1;
-            p.ip2 = (e.ip2 - 0.5f*r.ip2*(u.ip2*u.ip2 + v.ip2*v.ip2 + w.ip2*w.ip2) - P.ip2) / G.ip2;
-            const Real pp = _weno_pluss_clipped(p.im2, p.im1, p.i, p.ip1, p.ip2);
-            const Real pm = _weno_minus_clipped(p.im3, p.im2, p.im1, p.i, p.ip1);
-            assert(!isnan(pp)); assert(!isnan(pm));
-            // G
-            const Real Gp = _weno_pluss_clipped(G.im2, G.im1, G.i, G.ip1, G.ip2);
-            const Real Gm = _weno_minus_clipped(G.im3, G.im2, G.im1, G.i, G.ip1);
-            assert(!isnan(Gp)); assert(!isnan(Gm));
-            // P
-            const Real Pp = _weno_pluss_clipped(P.im2, P.im1, P.i, P.ip1, P.ip2);
-            const Real Pm = _weno_minus_clipped(P.im3, P.im2, P.im1, P.i, P.ip1);
-            assert(!isnan(Pp)); assert(!isnan(Pm));
+            // compute body
+#           include "xflux_body.cu"
 
-            // 3.)
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp);
-            const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp);
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
-
-            // 4.)
-            const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss);
-            const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss);
-            const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss);
-            const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss);
-            const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss);
-            const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss);
-            const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss);
-            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+            /* if (global_iz) */
+            /* { */
+/* #pragma unroll 6 */
+            /*     for (uint_t i = 0; i < 6; ++i) */
+            /*     { */
+            /*         r[0] += r[i]; */
+            /*         u[0] += u[i]; */
+            /*         v[0] += v[i]; */
+            /*         w[0] += w[i]; */
+            /*         e[0] += e[i]; */
+            /*         G[0] += G[i]; */
+            /*         P[0] += P[i]; */
+            /*     } */
+            /* } */
+            /* const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1); */
+            /* flux.r[idx] = r[0]; */
+            /* flux.u[idx] = u[0]; */
+            /* flux.v[idx] = v[0]; */
+            /* flux.w[idx] = w[0]; */
+            /* flux.e[idx] = e[0]; */
+            /* flux.G[idx] = G[0]; */
+            /* flux.P[idx] = P[0]; */
+            /* xtra_vel[idx] = r[0]; */
+            /* xtra_Gm[idx]  = w[0]; */
+            /* xtra_Gp[idx]  = e[0]; */
+            /* xtra_Pm[idx]  = P[0]; */
+            /* xtra_Pp[idx]  = u[0]; */
 
             const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
             flux.r[idx] = fr;
@@ -344,123 +784,86 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             flux.P[idx] = fP;
 
             // 5.)
-            xtra_vel[idx] = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss);
+            xtra_vel[idx] = hllc_vel;
             xtra_Gm[idx]  = Gm;
             xtra_Gp[idx]  = Gp;
             xtra_Pm[idx]  = Pm;
             xtra_Pp[idx]  = Pp;
         }
     }
-#endif
+}
 
 
-#if 0
+__global__
+void _xflux01(const uint_t nslices, const uint_t global_iz,
+        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
+        Real * const __restrict__ xtra_vel,
+        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
+        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
+{
+    /* *
+     * Notes:
+     * ======
+     * 1.) NXP1 = NX + 1
+     * 2.) NX = NodeBlock::sizeX
+     * 3.) NY = NodeBlock::sizeY
+     * 4.) nslices = number of slices for currently processed chunk
+     * 5.) global_iz is the iz-coordinate in index space of the NodeBlock for
+     *     the first slice of the currently processed chunk.  It is needed if
+     *     all of the x-/yghosts are uploaded to the GPU prior to processing
+     *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
+     *     are uploaded per chunk.
+     * 6.) Reads textures 01
+     * */
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    assert(NXP1 > 5);
+
     if (ix < NXP1 && iy < NY)
     {
-        // Process nslices of current chunk
-        // iz = 0, 1, 2: left zghost slices
-        // iz = nslices+3, nslices+4, nslices+5: right zghost slices
-        for (uint_t iz = 3; iz < nslices+3; ++iz)
+        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
         {
             /* *
-             * 1.) Get cell values
-             * 2.) Reconstruct face values (in primitive variables)
+             * The general task order is (for each chunk slice along NZ):
+             * 1.) Load stencils
+             * 2.) Reconstruct primitive values using WENO5/WENO3
              * 3.) Compute characteristic velocities
-             * 4.) Compute 7 flux contributions
-             * 5.) Compute right hand side for the advection equations
+             * 4.) Compute fluxes
+             * 5.) Compute RHS for advection of G and P
              * */
 
-            ///////////////////////////////////////////////////////////////////
-            // 1.) Load data
-            ///////////////////////////////////////////////////////////////////
-            Real rm3, rm2, rm1, rp1, rp2, rp3;
-            _xfetch_data(texR, ghostL.r, ghostR.r, ix, iy, iz, global_iz, NXP1, NY, rm3, rm2, rm1, rp1, rp2, rp3);
-            assert(rm3 > 0); assert(rm2 > 0); assert(rm1 > 0); assert(rp1 > 0); assert(rp2 > 0); assert(rp3 > 0);
+            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
+            Real r[6];
+            Real u[6];
+            Real v[6];
+            Real w[6];
+            Real e[6];
+            Real G[6];
+            Real P[6];
 
-            Real um3, um2, um1, up1, up2, up3;
-            _xfetch_data(texU, ghostL.u, ghostR.u, ix, iy, iz, global_iz, NXP1, NY, um3, um2, um1, up1, up2, up3);
+            // 1.)
+            // GMEM transactions are cached, effective GMEM accesses are 7*3
+            // (according to nvvp)
+            if (0 == ix)
+                _load_3X01<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*tex_start)
+            else if (1 == ix)
+                _load_2X01<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*tex_start)
+            else if (2 == ix)
+                _load_1X01<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*tex_start)
+            else if (NXP1-3 == ix)
+                _load_1X01<NXP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NXP1-2 == ix)
+                _load_2X01<NXP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NXP1-1 == ix)
+                _load_3X01<NXP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else
+                _load_internal_X01(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*tex_start)
 
-            Real vm3, vm2, vm1, vp1, vp2, vp3;
-            _xfetch_data(texV, ghostL.v, ghostR.v, ix, iy, iz, global_iz, NXP1, NY, vm3, vm2, vm1, vp1, vp2, vp3);
+            // compute body
+#           include "xflux_body.cu"
 
-            Real wm3, wm2, wm1, wp1, wp2, wp3;
-            _xfetch_data(texW, ghostL.w, ghostR.w, ix, iy, iz, global_iz, NXP1, NY, wm3, wm2, wm1, wp1, wp2, wp3);
-
-            Real em3, em2, em1, ep1, ep2, ep3;
-            _xfetch_data(texE, ghostL.e, ghostR.e, ix, iy, iz, global_iz, NXP1, NY, em3, em2, em1, ep1, ep2, ep3);
-            assert(em3 > 0); assert(em2 > 0); assert(em1 > 0); assert(ep1 > 0); assert(ep2 > 0); assert(ep3 > 0);
-
-            Real Gm3, Gm2, Gm1, Gp1, Gp2, Gp3;
-            _xfetch_data(texG, ghostL.G, ghostR.G, ix, iy, iz, global_iz, NXP1, NY, Gm3, Gm2, Gm1, Gp1, Gp2, Gp3);
-            assert(Gm3 > 0); assert(Gm2 > 0); assert(Gm1 > 0); assert(Gp1 > 0); assert(Gp2 > 0); assert(Gp3 > 0);
-
-            Real Pm3, Pm2, Pm1, Pp1, Pp2, Pp3;
-            _xfetch_data(texP, ghostL.P, ghostR.P, ix, iy, iz, global_iz, NXP1, NY, Pm3, Pm2, Pm1, Pp1, Pp2, Pp3);
-            assert(Pm3 >= 0); assert(Pm2 >= 0); assert(Pm1 >= 0); assert(Pp1 >= 0); assert(Pp2 >= 0); assert(Pp3 >= 0);
-
-            ///////////////////////////////////////////////////////////////////
-            // 2.) Reconstruction of primitive values, using WENO5/3
-            ///////////////////////////////////////////////////////////////////
-            // Reconstruct primitive value p at face f, using WENO5/3
-            // rho
-            const Real rp = _weno_pluss_clipped(rm2, rm1, rp1, rp2, rp3);
-            const Real rm = _weno_minus_clipped(rm3, rm2, rm1, rp1, rp2);
-            assert(!isnan(rp)); assert(!isnan(rm));
-            // u (convert primitive variable u = (rho*u) / rho)
-            um3 /= rm3; um2 /= rm2; um1 /= rm1; up1 /= rp1; up2 /= rp2; up3 /= rp3;
-            const Real up = _weno_pluss_clipped(um2, um1, up1, up2, up3);
-            const Real um = _weno_minus_clipped(um3, um2, um1, up1, up2);
-            assert(!isnan(up)); assert(!isnan(um));
-            // v (convert primitive variable v = (rho*v) / rho)
-            vm3 /= rm3; vm2 /= rm2; vm1 /= rm1; vp1 /= rp1; vp2 /= rp2; vp3 /= rp3;
-            const Real vp = _weno_pluss_clipped(vm2, vm1, vp1, vp2, vp3);
-            const Real vm = _weno_minus_clipped(vm3, vm2, vm1, vp1, vp2);
-            assert(!isnan(vp)); assert(!isnan(vm));
-            // w (convert primitive variable w = (rho*w) / rho)
-            wm3 /= rm3; wm2 /= rm2; wm1 /= rm1; wp1 /= rp1; wp2 /= rp2; wp3 /= rp3;
-            const Real wp = _weno_pluss_clipped(wm2, wm1, wp1, wp2, wp3);
-            const Real wm = _weno_minus_clipped(wm3, wm2, wm1, wp1, wp2);
-            assert(!isnan(wp)); assert(!isnan(wm));
-            // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
-            const Real pm3 = (em3 - 0.5f*rm3*(um3*um3 + vm3*vm3 + wm3*wm3) - Pm3) / Gm3;
-            const Real pm2 = (em2 - 0.5f*rm2*(um2*um2 + vm2*vm2 + wm2*wm2) - Pm2) / Gm2;
-            const Real pm1 = (em1 - 0.5f*rm1*(um1*um1 + vm1*vm1 + wm1*wm1) - Pm1) / Gm1;
-            const Real pp1 = (ep1 - 0.5f*rp1*(up1*up1 + vp1*vp1 + wp1*wp1) - Pp1) / Gp1;
-            const Real pp2 = (ep2 - 0.5f*rp2*(up2*up2 + vp2*vp2 + wp2*wp2) - Pp2) / Gp2;
-            const Real pp3 = (ep3 - 0.5f*rp3*(up3*up3 + vp3*vp3 + wp3*wp3) - Pp3) / Gp3;
-            const Real pp = _weno_pluss_clipped(pm2, pm1, pp1, pp2, pp3);
-            const Real pm = _weno_minus_clipped(pm3, pm2, pm1, pp1, pp2);
-            assert(!isnan(pp)); assert(!isnan(pm));
-            // G
-            const Real Gp = _weno_pluss_clipped(Gm2, Gm1, Gp1, Gp2, Gp3);
-            const Real Gm = _weno_minus_clipped(Gm3, Gm2, Gm1, Gp1, Gp2);
-            assert(!isnan(Gp)); assert(!isnan(Gm));
-            // P
-            const Real Pp = _weno_pluss_clipped(Pm2, Pm1, Pp1, Pp2, Pp3);
-            const Real Pm = _weno_minus_clipped(Pm3, Pm2, Pm1, Pp1, Pp2);
-            assert(!isnan(Pp)); assert(!isnan(Pm));
-
-            ///////////////////////////////////////////////////////////////////
-            // 3.) Einfeldt characteristic velocities
-            ///////////////////////////////////////////////////////////////////
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp);
-            const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp);
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
-
-            ///////////////////////////////////////////////////////////////////
-            // 4.) Compute HLLC fluxes
-            ///////////////////////////////////////////////////////////////////
-            const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss);
-            const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss);
-            const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss);
-            const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss);
-            const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss);
-            const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss);
-            const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss);
-            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
-
-            const uint_t idx = ID3(ix, iy, iz-3, NXP1, NY);
+            const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
             flux.r[idx] = fr;
             flux.u[idx] = fu;
             flux.v[idx] = fv;
@@ -469,27 +872,23 @@ void _xflux(const uint_t nslices, const uint_t global_iz,
             flux.G[idx] = fG;
             flux.P[idx] = fP;
 
-            ///////////////////////////////////////////////////////////////////
-            // 5.) RHS for advection equations
-            ///////////////////////////////////////////////////////////////////
-            xtra_vel[idx] = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss);
+            // 5.)
+            xtra_vel[idx] = hllc_vel;
             xtra_Gm[idx]  = Gm;
             xtra_Gp[idx]  = Gp;
             xtra_Pm[idx]  = Pm;
             xtra_Pp[idx]  = Pp;
         }
     }
-#endif
 }
 
 
-
 __global__
-void _yflux(const uint_t nslices, const uint_t global_iz,
-        devPtrSet ghostL, devPtrSet ghostR, devPtrSet flux,
-        Real * const xtra_vel,
-        Real * const xtra_Gm, Real * const xtra_Gp,
-        Real * const xtra_Pm, Real * const xtra_Pp)
+void _yflux00(const uint_t nslices, const uint_t global_iz,
+        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
+        Real * const __restrict__ xtra_vel,
+        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
+        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
 {
     /* *
      * Notes:
@@ -503,191 +902,83 @@ void _yflux(const uint_t nslices, const uint_t global_iz,
      *     all of the x-/yghosts are uploaded to the GPU prior to processing
      *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
      *     are uploaded per chunk.
+     * 6.) Reads texture 00
      * */
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
 
-    /* *
-     * The following code requires 1D thread blocks with dimension
-     * dim3(_NTHREADS_, 1, 1)
-     * on a 2D grid with dimension
-     * dim3((NX + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1)
-     *
-     * The load of ghosts is organized into a switch block with 6 cases.
-     *
-     * NOTE: To minimize the switch cases to 6 (and simplify code) the
-     * following requires that NY >= 5
-     * */
     assert(NYP1 > 5);
 
-#if 1
     if (ix < NX && iy < NYP1)
     {
-        Stencil r, u, v, w, e, G, P;
-        Stencil p; // for reconstruction
         for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
         {
             /* *
              * The general task order is (for each chunk slice along NZ):
-             * 1.) Load ghosts from GMEM or tex3D into stencil (do this 7x, for each
-             *     quantity)
+             * 1.) Load stencils
              * 2.) Reconstruct primitive values using WENO5/WENO3
              * 3.) Compute characteristic velocities
              * 4.) Compute fluxes
              * 5.) Compute RHS for advection of G and P
              * */
 
+            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
+            Real r[6];
+            Real u[6];
+            Real v[6];
+            Real w[6];
+            Real e[6];
+            Real G[6];
+            Real P[6];
+
             // 1.)
-#if 1
-            // more conditionals
-            _read_stencil_Y(r, texR, ghostL.r, ghostR.r, ix, iy, iz, global_iz);
-            _read_stencil_Y(u, texU, ghostL.u, ghostR.u, ix, iy, iz, global_iz);
-            _read_stencil_Y(v, texV, ghostL.v, ghostR.v, ix, iy, iz, global_iz);
-            _read_stencil_Y(w, texW, ghostL.w, ghostR.w, ix, iy, iz, global_iz);
-            _read_stencil_Y(e, texE, ghostL.e, ghostR.e, ix, iy, iz, global_iz);
-            _read_stencil_Y(G, texG, ghostL.G, ghostR.G, ix, iy, iz, global_iz);
-            _read_stencil_Y(P, texP, ghostL.P, ghostR.P, ix, iy, iz, global_iz);
-#else
-            // less conditionals, additional tex3D fetches
-            _load_stencil_tex3D_Y(r, texR, ix, iy, iz);
-            _load_stencil_tex3D_Y(u, texU, ix, iy, iz);
-            _load_stencil_tex3D_Y(v, texV, ix, iy, iz);
-            _load_stencil_tex3D_Y(w, texW, ix, iy, iz);
-            _load_stencil_tex3D_Y(e, texE, ix, iy, iz);
-            _load_stencil_tex3D_Y(G, texG, ix, iy, iz);
-            _load_stencil_tex3D_Y(P, texP, ix, iy, iz);
-            switch (iy)
-            {
-                case 0:
-                    _load_3ghosts_Y(r.im3, r.im2, r.im1, ghostL.r, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(u.im3, u.im2, u.im1, ghostL.u, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(v.im3, v.im2, v.im1, ghostL.v, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(w.im3, w.im2, w.im1, ghostL.w, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(e.im3, e.im2, e.im1, ghostL.e, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(G.im3, G.im2, G.im1, ghostL.G, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(P.im3, P.im2, P.im1, ghostL.P, ix, iz-3+global_iz);
-                    break;
-                case 1:
-                    _load_2ghosts_Y(r.im3, r.im2, 1, 2, ghostL.r, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(u.im3, u.im2, 1, 2, ghostL.u, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(v.im3, v.im2, 1, 2, ghostL.v, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(w.im3, w.im2, 1, 2, ghostL.w, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(e.im3, e.im2, 1, 2, ghostL.e, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(G.im3, G.im2, 1, 2, ghostL.G, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(P.im3, P.im2, 1, 2, ghostL.P, ix, iz-3+global_iz);
-                    break;
-                case 2:
-                    _load_1ghost_Y(r.im3, 2, ghostL.r, ix, iz-3+global_iz);
-                    _load_1ghost_Y(u.im3, 2, ghostL.u, ix, iz-3+global_iz);
-                    _load_1ghost_Y(v.im3, 2, ghostL.v, ix, iz-3+global_iz);
-                    _load_1ghost_Y(w.im3, 2, ghostL.w, ix, iz-3+global_iz);
-                    _load_1ghost_Y(e.im3, 2, ghostL.e, ix, iz-3+global_iz);
-                    _load_1ghost_Y(G.im3, 2, ghostL.G, ix, iz-3+global_iz);
-                    _load_1ghost_Y(P.im3, 2, ghostL.P, ix, iz-3+global_iz);
-                    break;
-                case (NYP1-3):
-                    _load_1ghost_Y(r.ip2, 0, ghostR.r, ix, iz-3+global_iz);
-                    _load_1ghost_Y(u.ip2, 0, ghostR.u, ix, iz-3+global_iz);
-                    _load_1ghost_Y(v.ip2, 0, ghostR.v, ix, iz-3+global_iz);
-                    _load_1ghost_Y(w.ip2, 0, ghostR.w, ix, iz-3+global_iz);
-                    _load_1ghost_Y(e.ip2, 0, ghostR.e, ix, iz-3+global_iz);
-                    _load_1ghost_Y(G.ip2, 0, ghostR.G, ix, iz-3+global_iz);
-                    _load_1ghost_Y(P.ip2, 0, ghostR.P, ix, iz-3+global_iz);
-                    break;
-                case (NYP1-2):
-                    _load_2ghosts_Y(r.ip1, r.ip2, 0, 1, ghostR.r, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(u.ip1, u.ip2, 0, 1, ghostR.u, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(v.ip1, v.ip2, 0, 1, ghostR.v, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(w.ip1, w.ip2, 0, 1, ghostR.w, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(e.ip1, e.ip2, 0, 1, ghostR.e, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(G.ip1, G.ip2, 0, 1, ghostR.G, ix, iz-3+global_iz);
-                    _load_2ghosts_Y(P.ip1, P.ip2, 0, 1, ghostR.P, ix, iz-3+global_iz);
-                    break;
-                case (NYP1-1):
-                    _load_3ghosts_Y(r.i, r.ip1, r.ip2, ghostR.r, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(u.i, u.ip1, u.ip2, ghostR.u, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(v.i, v.ip1, v.ip2, ghostR.v, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(w.i, w.ip1, w.ip2, ghostR.w, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(e.i, e.ip1, e.ip2, ghostR.e, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(G.i, G.ip1, G.ip2, ghostR.G, ix, iz-3+global_iz);
-                    _load_3ghosts_Y(P.i, P.ip1, P.ip2, ghostR.P, ix, iz-3+global_iz);
-                    break;
-            } // end switch
-#endif
-            assert(r > 0);
-            assert(e > 0);
-            assert(G > 0);
-            assert(P >= 0);
+            // GMEM transactions are cached, effective GMEM accesses are 7*3
+            // (according to nvvp)
+            if (0 == iy)
+                _load_3Y00<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*TEX)
+            else if (1 == iy)
+                _load_2Y00<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*TEX)
+            else if (2 == iy)
+                _load_1Y00<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*TEX)
+            else if (NYP1-3 == iy)
+                _load_1Y00<NYP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NYP1-2 == iy)
+                _load_2Y00<NYP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NYP1-1 == iy)
+                _load_3Y00<NYP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else
+                _load_internal_Y00(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
 
-            // 2.)
-            // rho
-            const Real rp = _weno_pluss_clipped(r.im2, r.im1, r.i, r.ip1, r.ip2);
-            const Real rm = _weno_minus_clipped(r.im3, r.im2, r.im1, r.i, r.ip1);
-            assert(!isnan(rp)); assert(!isnan(rm));
-            // u (convert primitive variable u = (rho*u) / rho)
-            u.im3 /= r.im3;
-            u.im2 /= r.im2;
-            u.im1 /= r.im1;
-            u.i   /= r.i;
-            u.ip1 /= r.ip1;
-            u.ip2 /= r.ip2;
-            const Real up = _weno_pluss_clipped(u.im2, u.im1, u.i, u.ip1, u.ip2);
-            const Real um = _weno_minus_clipped(u.im3, u.im2, u.im1, u.i, u.ip1);
-            assert(!isnan(up)); assert(!isnan(um));
-            // v (convert primitive variable v = (rho*v) / rho)
-            v.im3 /= r.im3;
-            v.im2 /= r.im2;
-            v.im1 /= r.im1;
-            v.i   /= r.i;
-            v.ip1 /= r.ip1;
-            v.ip2 /= r.ip2;
-            const Real vp = _weno_pluss_clipped(v.im2, v.im1, v.i, v.ip1, v.ip2);
-            const Real vm = _weno_minus_clipped(v.im3, v.im2, v.im1, v.i, v.ip1);
-            assert(!isnan(vp)); assert(!isnan(vm));
-            // w (convert primitive variable w = (rho*w) / rho)
-            w.im3 /= r.im3;
-            w.im2 /= r.im2;
-            w.im1 /= r.im1;
-            w.i   /= r.i;
-            w.ip1 /= r.ip1;
-            w.ip2 /= r.ip2;
-            const Real wp = _weno_pluss_clipped(w.im2, w.im1, w.i, w.ip1, w.ip2);
-            const Real wm = _weno_minus_clipped(w.im3, w.im2, w.im1, w.i, w.ip1);
-            assert(!isnan(wp)); assert(!isnan(wm));
-            // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
-            p.im3 = (e.im3 - 0.5f*r.im3*(u.im3*u.im3 + v.im3*v.im3 + w.im3*w.im3) - P.im3) / G.im3;
-            p.im2 = (e.im2 - 0.5f*r.im2*(u.im2*u.im2 + v.im2*v.im2 + w.im2*w.im2) - P.im2) / G.im2;
-            p.im1 = (e.im1 - 0.5f*r.im1*(u.im1*u.im1 + v.im1*v.im1 + w.im1*w.im1) - P.im1) / G.im1;
-            p.i   = (e.i   - 0.5f*r.i*(u.i*u.i       + v.i*v.i     + w.i*w.i)     - P.i)   / G.i;
-            p.ip1 = (e.ip1 - 0.5f*r.ip1*(u.ip1*u.ip1 + v.ip1*v.ip1 + w.ip1*w.ip1) - P.ip1) / G.ip1;
-            p.ip2 = (e.ip2 - 0.5f*r.ip2*(u.ip2*u.ip2 + v.ip2*v.ip2 + w.ip2*w.ip2) - P.ip2) / G.ip2;
-            const Real pp = _weno_pluss_clipped(p.im2, p.im1, p.i, p.ip1, p.ip2);
-            const Real pm = _weno_minus_clipped(p.im3, p.im2, p.im1, p.i, p.ip1);
-            assert(!isnan(pp)); assert(!isnan(pm));
-            // G
-            const Real Gp = _weno_pluss_clipped(G.im2, G.im1, G.i, G.ip1, G.ip2);
-            const Real Gm = _weno_minus_clipped(G.im3, G.im2, G.im1, G.i, G.ip1);
-            assert(!isnan(Gp)); assert(!isnan(Gm));
-            // P
-            const Real Pp = _weno_pluss_clipped(P.im2, P.im1, P.i, P.ip1, P.ip2);
-            const Real Pm = _weno_minus_clipped(P.im3, P.im2, P.im1, P.i, P.ip1);
-            assert(!isnan(Pp)); assert(!isnan(Pm));
+            // compute body
+#           include "yflux_body.cu"
 
-            // 3.)
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp);
-            const Real ss = _char_vel_star(rm, rp, vm, vp, pm, pp, sm, sp);
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
-
-            // 4.)
-            const Real fr = _hllc_rho(rm, rp, vm, vp, sm, sp, ss);
-            const Real fu = _hllc_vel(rm, rp, um, up, vm, vp, sm, sp, ss);
-            const Real fv = _hllc_pvel(rm, rp, vm, vp, pm, pp, sm, sp, ss);
-            const Real fw = _hllc_vel(rm, rp, wm, wp, vm, vp, sm, sp, ss);
-            const Real fe = _hllc_e(rm, rp, vm, vp, um, up, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss);
-            const Real fG = _hllc_rho(Gm, Gp, vm, vp, sm, sp, ss);
-            const Real fP = _hllc_rho(Pm, Pp, vm, vp, sm, sp, ss);
-            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+            /* if (global_iz) */
+            /* { */
+/* #pragma unroll 6 */
+            /*     for (uint_t i = 0; i < 6; ++i) */
+            /*     { */
+            /*         r[0] += r[i]; */
+            /*         u[0] += u[i]; */
+            /*         v[0] += v[i]; */
+            /*         w[0] += w[i]; */
+            /*         e[0] += e[i]; */
+            /*         G[0] += G[i]; */
+            /*         P[0] += P[i]; */
+            /*     } */
+            /* } */
+            /* const uint_t idx = ID3(ix, iy, iz-3, NX, NYP1); */
+            /* flux.r[idx] = r[0]; */
+            /* flux.u[idx] = u[0]; */
+            /* flux.v[idx] = v[0]; */
+            /* flux.w[idx] = w[0]; */
+            /* flux.e[idx] = e[0]; */
+            /* flux.G[idx] = G[0]; */
+            /* flux.P[idx] = P[0]; */
+            /* xtra_vel[idx] = r[0]; */
+            /* xtra_Gm[idx]  = w[0]; */
+            /* xtra_Gp[idx]  = e[0]; */
+            /* xtra_Pm[idx]  = P[0]; */
+            /* xtra_Pp[idx]  = u[0]; */
 
             const uint_t idx = ID3(ix, iy, iz-3, NX, NYP1);
             flux.r[idx] = fr;
@@ -699,146 +990,110 @@ void _yflux(const uint_t nslices, const uint_t global_iz,
             flux.P[idx] = fP;
 
             // 5.)
-            xtra_vel[idx] = _extraterm_hllc_vel(vm, vp, Gm, Gp, Pm, Pp, sm, sp, ss);
+            xtra_vel[idx] = hllc_vel;
             xtra_Gm[idx]  = Gm;
             xtra_Gp[idx]  = Gp;
             xtra_Pm[idx]  = Pm;
             xtra_Pp[idx]  = Pp;
         }
     }
-#endif
-
-#if 0
-    if (ix < NX && iy < NYP1)
-    {
-        for (uint_t iz = 3; iz < nslices+3; ++iz)
-        {
-            /* *
-             * 1.) Get cell values
-             * 2.) Reconstruct face values (in primitive variables)
-             * 3.) Compute characteristic velocities
-             * 4.) Compute 7 flux contributions
-             * 5.) Compute right hand side for the advection equations
-             * */
-
-            ///////////////////////////////////////////////////////////////////
-            // 1.) Load data
-            ///////////////////////////////////////////////////////////////////
-            Real rm3, rm2, rm1, rp1, rp2, rp3;
-            _yfetch_data(texR, ghostL.r, ghostR.r, ix, iy, iz, global_iz, NX, NYP1, rm3, rm2, rm1, rp1, rp2, rp3);
-            assert(rm3 > 0); assert(rm2 > 0); assert(rm1 > 0); assert(rp1 > 0); assert(rp2 > 0); assert(rp3 > 0);
-
-            Real um3, um2, um1, up1, up2, up3;
-            _yfetch_data(texU, ghostL.u, ghostR.u, ix, iy, iz, global_iz, NX, NYP1, um3, um2, um1, up1, up2, up3);
-
-            Real vm3, vm2, vm1, vp1, vp2, vp3;
-            _yfetch_data(texV, ghostL.v, ghostR.v, ix, iy, iz, global_iz, NX, NYP1, vm3, vm2, vm1, vp1, vp2, vp3);
-
-            Real wm3, wm2, wm1, wp1, wp2, wp3;
-            _yfetch_data(texW, ghostL.w, ghostR.w, ix, iy, iz, global_iz, NX, NYP1, wm3, wm2, wm1, wp1, wp2, wp3);
-
-            Real em3, em2, em1, ep1, ep2, ep3;
-            _yfetch_data(texE, ghostL.e, ghostR.e, ix, iy, iz, global_iz, NX, NYP1, em3, em2, em1, ep1, ep2, ep3);
-            assert(em3 > 0); assert(em2 > 0); assert(em1 > 0); assert(ep1 > 0); assert(ep2 > 0); assert(ep3 > 0);
-
-            Real Gm3, Gm2, Gm1, Gp1, Gp2, Gp3;
-            _yfetch_data(texG, ghostL.G, ghostR.G, ix, iy, iz, global_iz, NX, NYP1, Gm3, Gm2, Gm1, Gp1, Gp2, Gp3);
-            assert(Gm3 > 0); assert(Gm2 > 0); assert(Gm1 > 0); assert(Gp1 > 0); assert(Gp2 > 0); assert(Gp3 > 0);
-
-            Real Pm3, Pm2, Pm1, Pp1, Pp2, Pp3;
-            _yfetch_data(texP, ghostL.P, ghostR.P, ix, iy, iz, global_iz, NX, NYP1, Pm3, Pm2, Pm1, Pp1, Pp2, Pp3);
-            assert(Pm3 >= 0); assert(Pm2 >= 0); assert(Pm1 >= 0); assert(Pp1 >= 0); assert(Pp2 >= 0); assert(Pp3 >= 0);
-
-            ///////////////////////////////////////////////////////////////////
-            // 2.) Reconstruction of primitive values, using WENO5/3
-            ///////////////////////////////////////////////////////////////////
-            // rho
-            const Real rp = _weno_pluss_clipped(rm2, rm1, rp1, rp2, rp3);
-            const Real rm = _weno_minus_clipped(rm3, rm2, rm1, rp1, rp2);
-            assert(!isnan(rp)); assert(!isnan(rm));
-            // u (convert primitive variable u = (rho*u) / rho)
-            um3 /= rm3; um2 /= rm2; um1 /= rm1; up1 /= rp1; up2 /= rp2; up3 /= rp3;
-            const Real up = _weno_pluss_clipped(um2, um1, up1, up2, up3);
-            const Real um = _weno_minus_clipped(um3, um2, um1, up1, up2);
-            assert(!isnan(up)); assert(!isnan(um));
-            // v (convert primitive variable v = (rho*v) / rho)
-            vm3 /= rm3; vm2 /= rm2; vm1 /= rm1; vp1 /= rp1; vp2 /= rp2; vp3 /= rp3;
-            const Real vp = _weno_pluss_clipped(vm2, vm1, vp1, vp2, vp3);
-            const Real vm = _weno_minus_clipped(vm3, vm2, vm1, vp1, vp2);
-            assert(!isnan(vp)); assert(!isnan(vm));
-            // w (convert primitive variable w = (rho*w) / rho)
-            wm3 /= rm3; wm2 /= rm2; wm1 /= rm1; wp1 /= rp1; wp2 /= rp2; wp3 /= rp3;
-            const Real wp = _weno_pluss_clipped(wm2, wm1, wp1, wp2, wp3);
-            const Real wm = _weno_minus_clipped(wm3, wm2, wm1, wp1, wp2);
-            assert(!isnan(wp)); assert(!isnan(wm));
-            // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
-            const Real pm3 = (em3 - 0.5f*rm3*(um3*um3 + vm3*vm3 + wm3*wm3) - Pm3) / Gm3;
-            const Real pm2 = (em2 - 0.5f*rm2*(um2*um2 + vm2*vm2 + wm2*wm2) - Pm2) / Gm2;
-            const Real pm1 = (em1 - 0.5f*rm1*(um1*um1 + vm1*vm1 + wm1*wm1) - Pm1) / Gm1;
-            const Real pp1 = (ep1 - 0.5f*rp1*(up1*up1 + vp1*vp1 + wp1*wp1) - Pp1) / Gp1;
-            const Real pp2 = (ep2 - 0.5f*rp2*(up2*up2 + vp2*vp2 + wp2*wp2) - Pp2) / Gp2;
-            const Real pp3 = (ep3 - 0.5f*rp3*(up3*up3 + vp3*vp3 + wp3*wp3) - Pp3) / Gp3;
-            const Real pp = _weno_pluss_clipped(pm2, pm1, pp1, pp2, pp3);
-            const Real pm = _weno_minus_clipped(pm3, pm2, pm1, pp1, pp2);
-            assert(!isnan(pp)); assert(!isnan(pm));
-            // G
-            const Real Gp = _weno_pluss_clipped(Gm2, Gm1, Gp1, Gp2, Gp3);
-            const Real Gm = _weno_minus_clipped(Gm3, Gm2, Gm1, Gp1, Gp2);
-            assert(!isnan(Gp)); assert(!isnan(Gm));
-            // P
-            const Real Pp = _weno_pluss_clipped(Pm2, Pm1, Pp1, Pp2, Pp3);
-            const Real Pm = _weno_minus_clipped(Pm3, Pm2, Pm1, Pp1, Pp2);
-            assert(!isnan(Pp)); assert(!isnan(Pm));
-
-            ///////////////////////////////////////////////////////////////////
-            // 3.) Einfeldt characteristic velocities
-            ///////////////////////////////////////////////////////////////////
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp);
-            const Real ss = _char_vel_star(rm, rp, vm, vp, pm, pp, sm, sp);
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
-
-            ///////////////////////////////////////////////////////////////////
-            // 4.) Compute HLLC fluxes
-            ///////////////////////////////////////////////////////////////////
-            const Real fr = _hllc_rho(rm, rp, vm, vp, sm, sp, ss);
-            const Real fu = _hllc_vel(rm, rp, um, up, vm, vp, sm, sp, ss);
-            const Real fv = _hllc_pvel(rm, rp, vm, vp, pm, pp, sm, sp, ss);
-            const Real fw = _hllc_vel(rm, rp, wm, wp, vm, vp, sm, sp, ss);
-            const Real fe = _hllc_e(rm, rp, vm, vp, um, up, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss);
-            const Real fG = _hllc_rho(Gm, Gp, vm, vp, sm, sp, ss);
-            const Real fP = _hllc_rho(Pm, Pp, vm, vp, sm, sp, ss);
-
-            const uint_t idx = ID3(ix, iy, iz-3, NX, NYP1);
-            flux.r[idx] = fr;
-            flux.u[idx] = fu;
-            flux.v[idx] = fv;
-            flux.w[idx] = fw;
-            flux.e[idx] = fe;
-            flux.G[idx] = fG;
-            flux.P[idx] = fP;
-
-            ///////////////////////////////////////////////////////////////////
-            // 5.)
-            ///////////////////////////////////////////////////////////////////
-            xtra_vel[idx] = _extraterm_hllc_vel(vm, vp, Gm, Gp, Pm, Pp, sm, sp, ss);
-            xtra_Gm[idx]  = Gm;
-            xtra_Gp[idx]  = Gp;
-            xtra_Pm[idx]  = Pm;
-            xtra_Pp[idx]  = Pp;
-        }
-    }
-#endif
 }
 
 
+__global__
+void _yflux01(const uint_t nslices, const uint_t global_iz,
+        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
+        Real * const __restrict__ xtra_vel,
+        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
+        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
+{
+    /* *
+     * Notes:
+     * ======
+     * 1.) NYP1 = NY + 1
+     * 2.) NX = NodeBlock::sizeX
+     * 3.) NY = NodeBlock::sizeY
+     * 4.) nslices = number of slices for currently processed chunk
+     * 5.) global_iz is the iz-coordinate in index space of the NodeBlock for
+     *     the first slice of the currently processed chunk.  It is needed if
+     *     all of the x-/yghosts are uploaded to the GPU prior to processing
+     *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
+     *     are uploaded per chunk.
+     * 6.) Reads texture 01
+     * */
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    assert(NYP1 > 5);
+
+    if (ix < NX && iy < NYP1)
+    {
+        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
+        {
+            /* *
+             * The general task order is (for each chunk slice along NZ):
+             * 1.) Load stencils
+             * 2.) Reconstruct primitive values using WENO5/WENO3
+             * 3.) Compute characteristic velocities
+             * 4.) Compute fluxes
+             * 5.) Compute RHS for advection of G and P
+             * */
+
+            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
+            Real r[6];
+            Real u[6];
+            Real v[6];
+            Real w[6];
+            Real e[6];
+            Real G[6];
+            Real P[6];
+
+            // 1.)
+            // GMEM transactions are cached, effective GMEM accesses are 7*3
+            // (according to nvvp)
+            if (0 == iy)
+                _load_3Y01<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*TEX)
+            else if (1 == iy)
+                _load_2Y01<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*TEX)
+            else if (2 == iy)
+                _load_1Y01<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*TEX)
+            else if (NYP1-3 == iy)
+                _load_1Y01<NYP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NYP1-2 == iy)
+                _load_2Y01<NYP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else if (NYP1-1 == iy)
+                _load_3Y01<NYP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
+            else
+                _load_internal_Y01(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
+
+            // compute body
+#           include "yflux_body.cu"
+
+            const uint_t idx = ID3(ix, iy, iz-3, NX, NYP1);
+            flux.r[idx] = fr;
+            flux.u[idx] = fu;
+            flux.v[idx] = fv;
+            flux.w[idx] = fw;
+            flux.e[idx] = fe;
+            flux.G[idx] = fG;
+            flux.P[idx] = fP;
+
+            // 5.)
+            xtra_vel[idx] = hllc_vel;
+            xtra_Gm[idx]  = Gm;
+            xtra_Gp[idx]  = Gp;
+            xtra_Pm[idx]  = Pm;
+            xtra_Pp[idx]  = Pp;
+        }
+    }
+}
 
 
 __global__
-void _zflux(const uint_t nslices, devPtrSet flux,
-        Real * const xtra_vel,
-        Real * const xtra_Gm, Real * const xtra_Gp,
-        Real * const xtra_Pm, Real * const xtra_Pp)
+void _zflux00(const uint_t nslices, DevicePointer flux,
+        Real * const __restrict__ xtra_vel,
+        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
+        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
 {
     /* *
      * Notes:
@@ -847,119 +1102,69 @@ void _zflux(const uint_t nslices, devPtrSet flux,
      * 2.) NY = NodeBlock::sizeY
      * 3.) NZ = NodeBlock::sizeZ
      * 4.) nslices = number of slices for currently processed chunk
+     * 5.) Reads texture 00
      * */
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
 
-    /* *
-     * The following code requires 1D thread blocks with dimension
-     * dim3(_NTHREADS_, 1, 1)
-     * on a 2D grid with dimension
-     * dim3((NX + _NTHREADS_ - 1) / _NTHREADS_, NY, 1)
-     *
-     * The following requires that NZ > 0
-     * */
+    // depends on boundary condition in z-direction
     assert(NodeBlock::sizeZ > 0);
 
-#if 1
     if (ix < NX && iy < NY)
     {
-        Stencil r, u, v, w, e, G, P;
-        Stencil p; // for reconstruction
         for (uint_t iz = 3; iz < (nslices+1)+3; ++iz) // first and last 3 slices are zghosts; need to compute nslices+1 fluxes in z-direction
         {
             /* *
              * The general task order is (for each chunk slice along NZ):
-             * 1.) Load tex3D into stencil (do this 7x, for each quantity)
+             * 1.) Load stencils
              * 2.) Reconstruct primitive values using WENO5/WENO3
              * 3.) Compute characteristic velocities
              * 4.) Compute fluxes
              * 5.) Compute RHS for advection of G and P
              * */
 
+            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
+            Real r[6];
+            Real u[6];
+            Real v[6];
+            Real w[6];
+            Real e[6];
+            Real G[6];
+            Real P[6];
+
             // 1.)
-            // that was easy!
-            _read_stencil_Z(r, texR, ix, iy, iz);
-            _read_stencil_Z(u, texU, ix, iy, iz);
-            _read_stencil_Z(v, texV, ix, iy, iz);
-            _read_stencil_Z(w, texW, ix, iy, iz);
-            _read_stencil_Z(e, texE, ix, iy, iz);
-            _read_stencil_Z(G, texG, ix, iy, iz);
-            _read_stencil_Z(P, texP, ix, iy, iz);
+            _load_internal_Z00(ix, iy, iz, r, u, v, w, e, G, P, 0, NULL); // load 7*(6*TEX)
 
-            assert(r > 0);
-            assert(e > 0);
-            assert(G > 0);
-            assert(P >= 0);
+            // compute body
+#           include "zflux_body.cu"
 
-            // 2.)
-            // rho
-            const Real rp = _weno_pluss_clipped(r.im2, r.im1, r.i, r.ip1, r.ip2);
-            const Real rm = _weno_minus_clipped(r.im3, r.im2, r.im1, r.i, r.ip1);
-            assert(!isnan(rp)); assert(!isnan(rm));
-            // u (convert primitive variable u = (rho*u) / rho)
-            u.im3 /= r.im3;
-            u.im2 /= r.im2;
-            u.im1 /= r.im1;
-            u.i   /= r.i;
-            u.ip1 /= r.ip1;
-            u.ip2 /= r.ip2;
-            const Real up = _weno_pluss_clipped(u.im2, u.im1, u.i, u.ip1, u.ip2);
-            const Real um = _weno_minus_clipped(u.im3, u.im2, u.im1, u.i, u.ip1);
-            assert(!isnan(up)); assert(!isnan(um));
-            // v (convert primitive variable v = (rho*v) / rho)
-            v.im3 /= r.im3;
-            v.im2 /= r.im2;
-            v.im1 /= r.im1;
-            v.i   /= r.i;
-            v.ip1 /= r.ip1;
-            v.ip2 /= r.ip2;
-            const Real vp = _weno_pluss_clipped(v.im2, v.im1, v.i, v.ip1, v.ip2);
-            const Real vm = _weno_minus_clipped(v.im3, v.im2, v.im1, v.i, v.ip1);
-            assert(!isnan(vp)); assert(!isnan(vm));
-            // w (convert primitive variable w = (rho*w) / rho)
-            w.im3 /= r.im3;
-            w.im2 /= r.im2;
-            w.im1 /= r.im1;
-            w.i   /= r.i;
-            w.ip1 /= r.ip1;
-            w.ip2 /= r.ip2;
-            const Real wp = _weno_pluss_clipped(w.im2, w.im1, w.i, w.ip1, w.ip2);
-            const Real wm = _weno_minus_clipped(w.im3, w.im2, w.im1, w.i, w.ip1);
-            assert(!isnan(wp)); assert(!isnan(wm));
-            // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
-            p.im3 = (e.im3 - 0.5f*r.im3*(u.im3*u.im3 + v.im3*v.im3 + w.im3*w.im3) - P.im3) / G.im3;
-            p.im2 = (e.im2 - 0.5f*r.im2*(u.im2*u.im2 + v.im2*v.im2 + w.im2*w.im2) - P.im2) / G.im2;
-            p.im1 = (e.im1 - 0.5f*r.im1*(u.im1*u.im1 + v.im1*v.im1 + w.im1*w.im1) - P.im1) / G.im1;
-            p.i   = (e.i   - 0.5f*r.i*(u.i*u.i       + v.i*v.i     + w.i*w.i)     - P.i)   / G.i;
-            p.ip1 = (e.ip1 - 0.5f*r.ip1*(u.ip1*u.ip1 + v.ip1*v.ip1 + w.ip1*w.ip1) - P.ip1) / G.ip1;
-            p.ip2 = (e.ip2 - 0.5f*r.ip2*(u.ip2*u.ip2 + v.ip2*v.ip2 + w.ip2*w.ip2) - P.ip2) / G.ip2;
-            const Real pp = _weno_pluss_clipped(p.im2, p.im1, p.i, p.ip1, p.ip2);
-            const Real pm = _weno_minus_clipped(p.im3, p.im2, p.im1, p.i, p.ip1);
-            assert(!isnan(pp)); assert(!isnan(pm));
-            // G
-            const Real Gp = _weno_pluss_clipped(G.im2, G.im1, G.i, G.ip1, G.ip2);
-            const Real Gm = _weno_minus_clipped(G.im3, G.im2, G.im1, G.i, G.ip1);
-            assert(!isnan(Gp)); assert(!isnan(Gm));
-            // P
-            const Real Pp = _weno_pluss_clipped(P.im2, P.im1, P.i, P.ip1, P.ip2);
-            const Real Pm = _weno_minus_clipped(P.im3, P.im2, P.im1, P.i, P.ip1);
-            assert(!isnan(Pp)); assert(!isnan(Pm));
-
-            // 3.)
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp);
-            const Real ss = _char_vel_star(rm, rp, wm, wp, pm, pp, sm, sp);
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
-
-            // 4.)
-            const Real fr = _hllc_rho(rm, rp, wm, wp, sm, sp, ss);
-            const Real fu = _hllc_vel(rm, rp, um, up, wm, wp, sm, sp, ss);
-            const Real fv = _hllc_vel(rm, rp, vm, vp, wm, wp, sm, sp, ss);
-            const Real fw = _hllc_pvel(rm, rp, wm, wp, pm, pp, sm, sp, ss);
-            const Real fe = _hllc_e(rm, rp, wm, wp, um, up, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss);
-            const Real fG = _hllc_rho(Gm, Gp, wm, wp, sm, sp, ss);
-            const Real fP = _hllc_rho(Pm, Pp, wm, wp, sm, sp, ss);
+            /* if (global_iz) */
+            /* { */
+/* #pragma unroll 6 */
+            /*     for (uint_t i = 0; i < 6; ++i) */
+            /*     { */
+            /*         r[0] += r[i]; */
+            /*         u[0] += u[i]; */
+            /*         v[0] += v[i]; */
+            /*         w[0] += w[i]; */
+            /*         e[0] += e[i]; */
+            /*         G[0] += G[i]; */
+            /*         P[0] += P[i]; */
+            /*     } */
+            /* } */
+            /* const uint_t idx = ID3(ix, iy, iz-3, NX, NY); */
+            /* flux.r[idx] = r[0]; */
+            /* flux.u[idx] = u[0]; */
+            /* flux.v[idx] = v[0]; */
+            /* flux.w[idx] = w[0]; */
+            /* flux.e[idx] = e[0]; */
+            /* flux.G[idx] = G[0]; */
+            /* flux.P[idx] = P[0]; */
+            /* xtra_vel[idx] = r[0]; */
+            /* xtra_Gm[idx]  = w[0]; */
+            /* xtra_Gp[idx]  = e[0]; */
+            /* xtra_Pm[idx]  = P[0]; */
+            /* xtra_Pp[idx]  = u[0]; */
 
             const uint_t idx = ID3(ix, iy, iz-3, NX, NY);
             flux.r[idx] = fr;
@@ -971,117 +1176,64 @@ void _zflux(const uint_t nslices, devPtrSet flux,
             flux.P[idx] = fP;
 
             // 5.)
-            xtra_vel[idx] = _extraterm_hllc_vel(wm, wp, Gm, Gp, Pm, Pp, sm, sp, ss);
+            xtra_vel[idx] = hllc_vel;
             xtra_Gm[idx]  = Gm;
             xtra_Gp[idx]  = Gp;
             xtra_Pm[idx]  = Pm;
             xtra_Pp[idx]  = Pp;
         }
     }
-#endif
+}
 
 
-#if 0
+__global__
+void _zflux01(const uint_t nslices, DevicePointer flux,
+        Real * const __restrict__ xtra_vel,
+        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
+        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
+{
+    /* *
+     * Notes:
+     * ======
+     * 1.) NX = NodeBlock::sizeX
+     * 2.) NY = NodeBlock::sizeY
+     * 3.) NZ = NodeBlock::sizeZ
+     * 4.) nslices = number of slices for currently processed chunk
+     * 5.) Reads texture 01
+     * */
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    // depends on boundary condition in z-direction
+    assert(NodeBlock::sizeZ > 0);
+
     if (ix < NX && iy < NY)
     {
-        // need to compute nslices+1 fluxes in z-direction
-        for (uint_t iz = 3; iz < (nslices+1)+3; ++iz)
+        for (uint_t iz = 3; iz < (nslices+1)+3; ++iz) // first and last 3 slices are zghosts; need to compute nslices+1 fluxes in z-direction
         {
             /* *
-             * 1.) Get cell values
-             * 2.) Reconstruct face values (in primitive variables)
+             * The general task order is (for each chunk slice along NZ):
+             * 1.) Load stencils
+             * 2.) Reconstruct primitive values using WENO5/WENO3
              * 3.) Compute characteristic velocities
-             * 4.) Compute 7 flux contributions
-             * 5.) Compute right hand side for the advection equations
+             * 4.) Compute fluxes
+             * 5.) Compute RHS for advection of G and P
              * */
 
-            ///////////////////////////////////////////////////////////////////
-            // 1.) Load data
-            ///////////////////////////////////////////////////////////////////
-            Real rm3, rm2, rm1, rp1, rp2, rp3;
-            _zfetch_data(texR, ix, iy, iz, rm3, rm2, rm1, rp1, rp2, rp3);
-            assert(rm3 > 0); assert(rm2 > 0); assert(rm1 > 0); assert(rp1 > 0); assert(rp2 > 0); assert(rp3 > 0);
+            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
+            Real r[6];
+            Real u[6];
+            Real v[6];
+            Real w[6];
+            Real e[6];
+            Real G[6];
+            Real P[6];
 
-            Real um3, um2, um1, up1, up2, up3;
-            _zfetch_data(texU, ix, iy, iz, um3, um2, um1, up1, up2, up3);
+            // 1.)
+            _load_internal_Z01(ix, iy, iz, r, u, v, w, e, G, P, 0, NULL); // load 7*(6*TEX)
 
-            Real vm3, vm2, vm1, vp1, vp2, vp3;
-            _zfetch_data(texV, ix, iy, iz, vm3, vm2, vm1, vp1, vp2, vp3);
-
-            Real wm3, wm2, wm1, wp1, wp2, wp3;
-            _zfetch_data(texW, ix, iy, iz, wm3, wm2, wm1, wp1, wp2, wp3);
-
-            Real em3, em2, em1, ep1, ep2, ep3;
-            _zfetch_data(texE, ix, iy, iz, em3, em2, em1, ep1, ep2, ep3);
-            assert(em3 > 0); assert(em2 > 0); assert(em1 > 0); assert(ep1 > 0); assert(ep2 > 0); assert(ep3 > 0);
-
-            Real Gm3, Gm2, Gm1, Gp1, Gp2, Gp3;
-            _zfetch_data(texG, ix, iy, iz, Gm3, Gm2, Gm1, Gp1, Gp2, Gp3);
-            assert(Gm3 > 0); assert(Gm2 > 0); assert(Gm1 > 0); assert(Gp1 > 0); assert(Gp2 > 0); assert(Gp3 > 0);
-
-            Real Pm3, Pm2, Pm1, Pp1, Pp2, Pp3;
-            _zfetch_data(texP, ix, iy, iz, Pm3, Pm2, Pm1, Pp1, Pp2, Pp3);
-            assert(Pm3 >= 0); assert(Pm2 >= 0); assert(Pm1 >= 0); assert(Pp1 >= 0); assert(Pp2 >= 0); assert(Pp3 >= 0);
-
-            ///////////////////////////////////////////////////////////////////
-            // 2.) Reconstruction of primitive values, using WENO5/3
-            ///////////////////////////////////////////////////////////////////
-            // rho
-            const Real rp = _weno_pluss_clipped(rm2, rm1, rp1, rp2, rp3);
-            const Real rm = _weno_minus_clipped(rm3, rm2, rm1, rp1, rp2);
-            assert(!isnan(rp)); assert(!isnan(rm));
-            // u (convert primitive variable u = (rho*u) / rho)
-            um3 /= rm3; um2 /= rm2; um1 /= rm1; up1 /= rp1; up2 /= rp2; up3 /= rp3;
-            const Real up = _weno_pluss_clipped(um2, um1, up1, up2, up3);
-            const Real um = _weno_minus_clipped(um3, um2, um1, up1, up2);
-            assert(!isnan(up)); assert(!isnan(um));
-            // v (convert primitive variable v = (rho*v) / rho)
-            vm3 /= rm3; vm2 /= rm2; vm1 /= rm1; vp1 /= rp1; vp2 /= rp2; vp3 /= rp3;
-            const Real vp = _weno_pluss_clipped(vm2, vm1, vp1, vp2, vp3);
-            const Real vm = _weno_minus_clipped(vm3, vm2, vm1, vp1, vp2);
-            assert(!isnan(vp)); assert(!isnan(vm));
-            // w (convert primitive variable w = (rho*w) / rho)
-            wm3 /= rm3; wm2 /= rm2; wm1 /= rm1; wp1 /= rp1; wp2 /= rp2; wp3 /= rp3;
-            const Real wp = _weno_pluss_clipped(wm2, wm1, wp1, wp2, wp3);
-            const Real wm = _weno_minus_clipped(wm3, wm2, wm1, wp1, wp2);
-            assert(!isnan(wp)); assert(!isnan(wm));
-            // p (convert primitive variable p = (e - 0.5*rho*(u*u + v*v + w*w) - P) / G
-            const Real pm3 = (em3 - 0.5f*rm3*(um3*um3 + vm3*vm3 + wm3*wm3) - Pm3) / Gm3;
-            const Real pm2 = (em2 - 0.5f*rm2*(um2*um2 + vm2*vm2 + wm2*wm2) - Pm2) / Gm2;
-            const Real pm1 = (em1 - 0.5f*rm1*(um1*um1 + vm1*vm1 + wm1*wm1) - Pm1) / Gm1;
-            const Real pp1 = (ep1 - 0.5f*rp1*(up1*up1 + vp1*vp1 + wp1*wp1) - Pp1) / Gp1;
-            const Real pp2 = (ep2 - 0.5f*rp2*(up2*up2 + vp2*vp2 + wp2*wp2) - Pp2) / Gp2;
-            const Real pp3 = (ep3 - 0.5f*rp3*(up3*up3 + vp3*vp3 + wp3*wp3) - Pp3) / Gp3;
-            const Real pp = _weno_pluss_clipped(pm2, pm1, pp1, pp2, pp3);
-            const Real pm = _weno_minus_clipped(pm3, pm2, pm1, pp1, pp2);
-            assert(!isnan(pp)); assert(!isnan(pm));
-            // G
-            const Real Gp = _weno_pluss_clipped(Gm2, Gm1, Gp1, Gp2, Gp3);
-            const Real Gm = _weno_minus_clipped(Gm3, Gm2, Gm1, Gp1, Gp2);
-            assert(!isnan(Gp)); assert(!isnan(Gm));
-            // P
-            const Real Pp = _weno_pluss_clipped(Pm2, Pm1, Pp1, Pp2, Pp3);
-            const Real Pm = _weno_minus_clipped(Pm3, Pm2, Pm1, Pp1, Pp2);
-            assert(!isnan(Pp)); assert(!isnan(Pm));
-
-            ///////////////////////////////////////////////////////////////////
-            // 3.) Einfeldt characteristic velocities
-            ///////////////////////////////////////////////////////////////////
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp);
-            const Real ss = _char_vel_star(rm, rp, wm, wp, pm, pp, sm, sp);
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
-
-            ///////////////////////////////////////////////////////////////////
-            // 4.) Compute HLLC fluxes
-            ///////////////////////////////////////////////////////////////////
-            const Real fr = _hllc_rho(rm, rp, wm, wp, sm, sp, ss);
-            const Real fu = _hllc_vel(rm, rp, um, up, wm, wp, sm, sp, ss);
-            const Real fv = _hllc_vel(rm, rp, vm, vp, wm, wp, sm, sp, ss);
-            const Real fw = _hllc_pvel(rm, rp, wm, wp, pm, pp, sm, sp, ss);
-            const Real fe = _hllc_e(rm, rp, wm, wp, um, up, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss);
-            const Real fG = _hllc_rho(Gm, Gp, wm, wp, sm, sp, ss);
-            const Real fP = _hllc_rho(Pm, Pp, wm, wp, sm, sp, ss);
+            // compute body
+#           include "zflux_body.cu"
 
             const uint_t idx = ID3(ix, iy, iz-3, NX, NY);
             flux.r[idx] = fr;
@@ -1092,105 +1244,12 @@ void _zflux(const uint_t nslices, devPtrSet flux,
             flux.G[idx] = fG;
             flux.P[idx] = fP;
 
-            ///////////////////////////////////////////////////////////////////
             // 5.)
-            ///////////////////////////////////////////////////////////////////
-            xtra_vel[idx] = _extraterm_hllc_vel(wm, wp, Gm, Gp, Pm, Pp, sm, sp, ss);
+            xtra_vel[idx] = hllc_vel;
             xtra_Gm[idx]  = Gm;
             xtra_Gp[idx]  = Gp;
             xtra_Pm[idx]  = Pm;
             xtra_Pp[idx]  = Pp;
-        }
-    }
-#endif
-}
-
-
-__global__
-void _divergence(const uint_t nslices,
-        const devPtrSet xflux, const devPtrSet yflux, const devPtrSet zflux,
-        devPtrSet rhs, const Real a, const Real dtinvh, const devPtrSet tmp,
-        const Real * const sumG, const Real * const sumP, const Real * const divU)
-{
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (ix < NX && iy < NY)
-    {
-        Real fxp, fxm, fyp, fym, fzp, fzm;
-        const Real factor6 = 1.0f / 6.0f;
-
-        for (uint_t iz = 0; iz < nslices; ++iz)
-        {
-            const uint_t idx = ID3(ix, iy, iz, NX, NY);
-
-            _fetch_flux(ix, iy, iz, xflux.r, yflux.r, zflux.r, fxp, fxm, fyp, fym, fzp, fzm);
-            const Real rhs_r = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
-            rhs.r[idx] = a*tmp.r[idx] - rhs_r;
-
-            _fetch_flux(ix, iy, iz, xflux.u, yflux.u, zflux.u, fxp, fxm, fyp, fym, fzp, fzm);
-            const Real rhs_u = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
-            rhs.u[idx] = a*tmp.u[idx] - rhs_u;
-
-            _fetch_flux(ix, iy, iz, xflux.v, yflux.v, zflux.v, fxp, fxm, fyp, fym, fzp, fzm);
-            const Real rhs_v = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
-            rhs.v[idx] = a*tmp.v[idx] - rhs_v;
-
-            _fetch_flux(ix, iy, iz, xflux.w, yflux.w, zflux.w, fxp, fxm, fyp, fym, fzp, fzm);
-            const Real rhs_w = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
-            rhs.w[idx] = a*tmp.w[idx] - rhs_w;
-
-            _fetch_flux(ix, iy, iz, xflux.e, yflux.e, zflux.e, fxp, fxm, fyp, fym, fzp, fzm);
-            const Real rhs_e = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm);
-            rhs.e[idx] = a*tmp.e[idx] - rhs_e;
-
-            _fetch_flux(ix, iy, iz, xflux.G, yflux.G, zflux.G, fxp, fxm, fyp, fym, fzp, fzm);
-            const Real rhs_G = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm   - divU[idx] * sumG[idx] * factor6);
-            rhs.G[idx] = a*tmp.G[idx] - rhs_G;
-
-            _fetch_flux(ix, iy, iz, xflux.P, yflux.P, zflux.P, fxp, fxm, fyp, fym, fzp, fzm);
-            const Real rhs_P = dtinvh*(fxp - fxm + fyp - fym + fzp - fzm   - divU[idx] * sumP[idx] * factor6);
-            rhs.P[idx] = a*tmp.P[idx] - rhs_P;
-        }
-    }
-}
-
-
-__global__
-void _update(const uint_t nslices, const Real b, devPtrSet tmp, const devPtrSet rhs)
-{
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (ix < NX && iy < NY)
-    {
-        for (uint_t iz = 0; iz < nslices; ++iz)
-        {
-            const uint_t idx = ID3(ix, iy, iz, NX, NY);
-
-            const Real r = tex3D(texR, ix, iy, iz+3);
-            const Real u = tex3D(texU, ix, iy, iz+3);
-            const Real v = tex3D(texV, ix, iy, iz+3);
-            const Real w = tex3D(texW, ix, iy, iz+3);
-            const Real e = tex3D(texE, ix, iy, iz+3);
-            const Real G = tex3D(texG, ix, iy, iz+3);
-            const Real P = tex3D(texP, ix, iy, iz+3);
-
-            // this overwrites the rhs from the previous stage, stored in tmp,
-            // with the updated solution.
-            tmp.r[idx] = b*rhs.r[idx] + r;
-            tmp.u[idx] = b*rhs.u[idx] + u;
-            tmp.v[idx] = b*rhs.v[idx] + v;
-            tmp.w[idx] = b*rhs.w[idx] + w;
-            tmp.e[idx] = b*rhs.e[idx] + e;
-            tmp.G[idx] = b*rhs.G[idx] + G;
-            tmp.P[idx] = b*rhs.P[idx] + P;
-            assert(tmp.r[idx] > 0);
-            assert(tmp.e[idx] > 0);
-            assert(tmp.G[idx] > 0);
-            assert(tmp.P[idx] >= 0);
-            /* if (tmp.P[idx] < 0) */
-            /*     printf("(%d, %d, %d):\trhs.P = %f, tmp.P = %f, P = %f\n", ix, iy, iz, rhs.P[idx], tmp.P[idx], P); */
         }
     }
 }
@@ -1212,13 +1271,14 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
-            const Real r = tex3D(texR, ix, iy, iz);
-            const Real u = tex3D(texU, ix, iy, iz);
-            const Real v = tex3D(texV, ix, iy, iz);
-            const Real w = tex3D(texW, ix, iy, iz);
-            const Real e = tex3D(texE, ix, iy, iz);
-            const Real G = tex3D(texG, ix, iy, iz);
-            const Real P = tex3D(texP, ix, iy, iz);
+            // TODO: used both buffers here
+            const Real r = tex3D(texR00, ix, iy, iz);
+            const Real u = tex3D(texU00, ix, iy, iz);
+            const Real v = tex3D(texV00, ix, iy, iz);
+            const Real w = tex3D(texW00, ix, iy, iz);
+            const Real e = tex3D(texE00, ix, iy, iz);
+            const Real G = tex3D(texG00, ix, iy, iz);
+            const Real P = tex3D(texP00, ix, iy, iz);
 
             const Real p = (e - (u*u + v*v + w*w)*(0.5f/r) - P) / G;
             const Real c = sqrtf(((p + P) / G + p) / r);
@@ -1232,7 +1292,7 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
         {
             for (int i = 1; i < _NTHREADS_; ++i)
                 sos = fmaxf(sos, block_sos[i]);
-            assert(sos > 0);
+            assert(sos > 0.0f);
             atomicMax(g_maxSOS, __float_as_int(sos));
         }
     }
@@ -1240,165 +1300,6 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 
 ///////////////////////////////////////////////////////////////////////////////
 //                              KERNEL WRAPPERS                              //
-///////////////////////////////////////////////////////////////////////////////
-void GPU::xflux(const uint_t nslices, const uint_t global_iz)
-{
-#ifndef _MUTE_GPU_
-    devPtrSet xghostL(d_xgl);
-    devPtrSet xghostR(d_xgr);
-    devPtrSet xflux(d_xflux);
-
-    {
-        const dim3 blocks(1, _NTHREADS_, 1);
-        const dim3 grid(NXP1, (NY + _NTHREADS_ -1)/_NTHREADS_, 1);
-        GPU::profiler.push_startCUDA("_XFLUX", &stream1);
-        _xflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-        GPU::profiler.pop_stopCUDA();
-    }
-
-    {
-        const dim3 xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
-        const dim3 xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
-        GPU::profiler.push_startCUDA("_XEXTRATERM", &stream1);
-        _xextraterm_hllc<<<xtraGrid, xtraBlocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-        GPU::profiler.pop_stopCUDA();
-    }
-#endif
-}
-
-
-void GPU::yflux(const uint_t nslices, const uint_t global_iz)
-{
-#ifndef _MUTE_GPU_
-    devPtrSet yghostL(d_ygl);
-    devPtrSet yghostR(d_ygr);
-    devPtrSet yflux(d_yflux);
-
-    const dim3 blocks(_NTHREADS_, 1, 1);
-
-    {
-        const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1);
-        GPU::profiler.push_startCUDA("_YFLUX", &stream1);
-        _yflux<<<grid, blocks, 0, stream1>>>(nslices, global_iz, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-        GPU::profiler.pop_stopCUDA();
-    }
-
-    {
-        const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-        GPU::profiler.push_startCUDA("_YEXTRATERM", &stream1);
-        _yextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-        GPU::profiler.pop_stopCUDA();
-    }
-#endif
-}
-
-
-void GPU::zflux(const uint_t nslices)
-{
-#ifndef _MUTE_GPU_
-    devPtrSet zflux(d_zflux);
-
-    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-    const dim3 blocks(_NTHREADS_, 1, 1);
-
-    GPU::profiler.push_startCUDA("_ZFLUX", &stream1);
-    _zflux<<<grid, blocks, 0, stream1>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-    GPU::profiler.pop_stopCUDA();
-
-    GPU::profiler.push_startCUDA("_ZEXTRATERM", &stream1);
-    _zextraterm_hllc<<<grid, blocks, 0, stream1>>>(nslices, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
-    GPU::profiler.pop_stopCUDA();
-#endif
-}
-
-
-void GPU::divergence(const Real a, const Real dtinvh, const uint_t nslices)
-{
-#ifndef _MUTE_GPU_
-    cudaStreamWaitEvent(stream1, h2d_tmp_completed, 0);
-
-    devPtrSet xflux(d_xflux);
-    devPtrSet yflux(d_yflux);
-    devPtrSet zflux(d_zflux);
-    devPtrSet rhs(d_rhs);
-    devPtrSet tmp(d_tmp);
-
-    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-    const dim3 blocks(_NTHREADS_, 1, 1);
-
-    GPU::profiler.push_startCUDA("_DIVERGENCE", &stream1);
-    _divergence<<<grid, blocks, 0, stream1>>>(nslices, xflux, yflux, zflux, rhs, a, dtinvh, tmp, d_sumG, d_sumP, d_divU);
-    GPU::profiler.pop_stopCUDA();
-
-    cudaEventRecord(divergence_completed, stream1);
-#endif
-}
-
-
-void GPU::update(const Real b, const uint_t nslices)
-{
-#ifndef _MUTE_GPU_
-    devPtrSet tmp(d_tmp);
-    devPtrSet rhs(d_rhs);
-
-    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-    const dim3 blocks(_NTHREADS_, 1, 1);
-
-    GPU::profiler.push_startCUDA("_UPDATE", &stream1);
-    _update<<<grid, blocks, 0, stream1>>>(nslices, b, tmp, rhs);
-    GPU::profiler.pop_stopCUDA();
-
-    cudaEventRecord(update_completed, stream1);
-#endif
-}
-
-
-void GPU::MaxSpeedOfSound(const uint_t nslices)
-{
-#ifndef _MUTE_GPU_
-    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
-    const dim3 blocks(_NTHREADS_, 1, 1);
-
-    GPU::profiler.push_startCUDA("_MAXSOS", &stream1);
-    _maxSOS<<<grid, blocks, 0, stream1>>>(nslices, d_maxSOS);
-    GPU::profiler.pop_stopCUDA();
-#endif
-}
-
-///////////////////////////////////////////////////////////////////////////
-// TEST SECTION
-///////////////////////////////////////////////////////////////////////////
-void GPU::TestKernel()
-{
-    devPtrSet xghostL(d_xgl);
-    devPtrSet xghostR(d_xgr);
-    devPtrSet xflux(d_xflux);
-
-    devPtrSet yghostL(d_ygl);
-    devPtrSet yghostR(d_ygr);
-    devPtrSet yflux(d_yflux);
-
-    devPtrSet zflux(d_zflux);
-
-    {
-        const uint_t nslices = NodeBlock::sizeZ;
-
-        const dim3 blocks(_NTHREADS_, 1, 1);
-        const dim3 xgrid((NXP1 + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
-        const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1);
-        const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
-
-        GPU::profiler.push_startCUDA("_TEST_KERNEL");
-        /* _xflux<<<xgrid, blocks>>>(nslices, 0, xghostL, xghostR, xflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-        /* _yflux<<<ygrid, blocks>>>(nslices, 0, yghostL, yghostR, yflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-        _zflux<<<zgrid, blocks>>>(nslices, zflux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
-        GPU::profiler.pop_stopCUDA();
-    }
-}
-
-
-///////////////////////////////////////////////////////////////////////////////
-//                                   UTILS                                   //
 ///////////////////////////////////////////////////////////////////////////////
 static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex, cudaArray_t d_ptr)
 {
@@ -1415,29 +1316,262 @@ static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex,
 }
 
 
-void GPU::bind_textures()
+void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
+        const uint_t gbuf_id, const int chunk_id)
 {
 #ifndef _MUTE_GPU_
-    _bindTexture(&texR, d_GPUin[0]);
-    _bindTexture(&texU, d_GPUin[1]);
-    _bindTexture(&texV, d_GPUin[2]);
-    _bindTexture(&texW, d_GPUin[3]);
-    _bindTexture(&texE, d_GPUin[4]);
-    _bindTexture(&texG, d_GPUin[5]);
-    _bindTexture(&texP, d_GPUin[6]);
+    assert(gbuf_id < _NUM_GPU_BUF_);
+
+    /* *
+     * Compute div(F)
+     * */
+
+    // my stream
+    const uint_t s_id = chunk_id % _NUM_STREAMS_;
+
+    // my data
+    GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
+
+    // my ghosts
+    DevicePointer xghostL(mybuf->d_xgl);
+    DevicePointer xghostR(mybuf->d_xgr);
+    DevicePointer yghostL(mybuf->d_ygl);
+    DevicePointer yghostR(mybuf->d_ygr);
+
+    // my output
+    DevicePointer divF(mybuf->d_divF);
+
+    // my tmp storage
+    DevicePointer flux(d_flux);
+
+    // my launch config
+    const dim3 X_blocks(1, _NTHREADS_, 1);
+    const dim3 X_grid(NXP1, (NY + _NTHREADS_ -1)/_NTHREADS_, 1);
+    const dim3 X_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
+    const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
+
+    const dim3 Y_blocks(_NTHREADS_, 1, 1);
+    const dim3 Y_grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1);
+    const dim3 Y_xtraGrid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+
+    const dim3 Z_blocks(_NTHREADS_, 1, 1);
+    const dim3 Z_grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+
+    // previous stream has priority. Since resources are limited, concurrent
+    // kernels make less sense
+    const uint_t s_idm1 = ((chunk_id-1) + _NUM_STREAMS_) % _NUM_STREAMS_;
+    assert(s_idm1 < _NUM_STREAMS_);
+    cudaStreamWaitEvent(stream[s_id], event_compute[s_idm1], 0);
+
+    char prof_item[256];
+
+    // queue kernels in pipe
+    switch (gbuf_id)
+    {
+        case 0:
+            _bindTexture(&texR00, mybuf->d_GPUin[0]);
+            _bindTexture(&texU00, mybuf->d_GPUin[1]);
+            _bindTexture(&texV00, mybuf->d_GPUin[2]);
+            _bindTexture(&texW00, mybuf->d_GPUin[3]);
+            _bindTexture(&texE00, mybuf->d_GPUin[4]);
+            _bindTexture(&texG00, mybuf->d_GPUin[5]);
+            _bindTexture(&texP00, mybuf->d_GPUin[6]);
+            // --- X ---
+            sprintf(prof_item, "_XFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _xflux00<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+
+            // --- Y ---
+            sprintf(prof_item, "_YFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _yflux00<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _yextraterm_hllc<<<Y_xtraGrid, Y_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+
+            // --- Z ---
+            sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _zflux00<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _zextraterm_hllc<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+            break;
+
+        case 1:
+            _bindTexture(&texR01, mybuf->d_GPUin[0]);
+            _bindTexture(&texU01, mybuf->d_GPUin[1]);
+            _bindTexture(&texV01, mybuf->d_GPUin[2]);
+            _bindTexture(&texW01, mybuf->d_GPUin[3]);
+            _bindTexture(&texE01, mybuf->d_GPUin[4]);
+            _bindTexture(&texG01, mybuf->d_GPUin[5]);
+            _bindTexture(&texP01, mybuf->d_GPUin[6]);
+            // --- X ---
+            sprintf(prof_item, "_XFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _xflux01<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+
+            // --- Y ---
+            sprintf(prof_item, "_YFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _yflux01<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _yextraterm_hllc<<<Y_xtraGrid, Y_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+
+            // --- Z ---
+            sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _zflux01<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp);
+            GPU::profiler.pop_stopCUDA();
+
+            sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id);
+            GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+            _zextraterm_hllc<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU);
+            GPU::profiler.pop_stopCUDA();
+            break;
+    }
+
+    cudaEventRecord(event_compute[s_id], stream[s_id]);
 #endif
 }
 
 
-void GPU::unbind_textures()
+void GPU::MaxSpeedOfSound(const uint_t nslices, const uint_t gbuf_id, const int chunk_id)
 {
 #ifndef _MUTE_GPU_
-    cudaUnbindTexture(&texR);
-    cudaUnbindTexture(&texU);
-    cudaUnbindTexture(&texV);
-    cudaUnbindTexture(&texW);
-    cudaUnbindTexture(&texE);
-    cudaUnbindTexture(&texG);
-    cudaUnbindTexture(&texP);
+    assert(gbuf_id < _NUM_GPU_BUF_);
+
+    // my stream
+    const uint_t s_id = chunk_id % _NUM_STREAMS_;
+
+    // my data
+    GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
+
+    _bindTexture(&texR00, mybuf->d_GPUin[0]);
+    _bindTexture(&texU00, mybuf->d_GPUin[1]);
+    _bindTexture(&texV00, mybuf->d_GPUin[2]);
+    _bindTexture(&texW00, mybuf->d_GPUin[3]);
+    _bindTexture(&texE00, mybuf->d_GPUin[4]);
+    _bindTexture(&texG00, mybuf->d_GPUin[5]);
+    _bindTexture(&texP00, mybuf->d_GPUin[6]);
+
+    // my launch config
+    const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
+    const dim3 blocks(_NTHREADS_, 1, 1);
+
+    char prof_item[256];
+
+    sprintf(prof_item, "_MAXSOS (s_id=%d)", s_id);
+    GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
+    _maxSOS<<<grid, blocks, 0, stream[s_id]>>>(nslices, d_maxSOS);
+    GPU::profiler.pop_stopCUDA();
 #endif
+}
+
+///////////////////////////////////////////////////////////////////////////
+// TEST SECTION
+///////////////////////////////////////////////////////////////////////////
+void GPU::TestKernel()
+{
+    const uint_t gbuf_id = 0;
+    const uint_t s_id = 0;
+
+    // my data
+    GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
+
+    _bindTexture(&texR00, mybuf->d_GPUin[0]);
+    _bindTexture(&texU00, mybuf->d_GPUin[1]);
+    _bindTexture(&texV00, mybuf->d_GPUin[2]);
+    _bindTexture(&texW00, mybuf->d_GPUin[3]);
+    _bindTexture(&texE00, mybuf->d_GPUin[4]);
+    _bindTexture(&texG00, mybuf->d_GPUin[5]);
+    _bindTexture(&texP00, mybuf->d_GPUin[6]);
+
+    // my ghosts
+    DevicePointer xghostL(mybuf->d_xgl);
+    DevicePointer xghostR(mybuf->d_xgr);
+    DevicePointer yghostL(mybuf->d_ygl);
+    DevicePointer yghostR(mybuf->d_ygr);
+
+    // my output
+    DevicePointer divF(mybuf->d_divF);
+
+    // my tmp storage
+    DevicePointer flux(d_flux);
+
+    cudaFree(d_Gm);
+    cudaFree(d_Gp);
+    cudaFree(d_Pm);
+    cudaFree(d_Pp);
+    cudaFree(d_hllc_vel);
+    cudaFree(d_sumG);
+    cudaFree(d_sumP);
+    cudaFree(d_divU);
+
+    const uint_t nslices = NodeBlock::sizeZ;
+    const uint_t xflxSize = (NodeBlock::sizeX+1)*NodeBlock::sizeY*nslices;
+    const uint_t yflxSize = NodeBlock::sizeX*(NodeBlock::sizeY+1)*nslices;
+    const uint_t zflxSize = NodeBlock::sizeX*NodeBlock::sizeY*(nslices+1);
+
+    Real *d_extra_X[5];
+    Real *d_extra_Y[5];
+    Real *d_extra_Z[5];
+    for (int i = 0; i < 5; ++i)
+    {
+        cudaMalloc(&(d_extra_X[i]), xflxSize * sizeof(Real));
+        cudaMalloc(&(d_extra_Y[i]), yflxSize * sizeof(Real));
+        cudaMalloc(&(d_extra_Z[i]), zflxSize * sizeof(Real));
+    }
+    GPU::tell_memUsage_GPU();
+
+
+    {
+
+        const dim3 xblocks(1, _NTHREADS_, 1);
+        const dim3 yblocks(_NTHREADS_, 1, 1);
+        const dim3 zblocks(_NTHREADS_, 1, 1);
+        const dim3 xgrid(NXP1, (NY + _NTHREADS_ - 1) / _NTHREADS_,   1);
+        const dim3 ygrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NYP1, 1);
+        const dim3 zgrid((NX   + _NTHREADS_ - 1) / _NTHREADS_, NY,   1);
+
+        GPU::profiler.push_startCUDA("_XFLUX", &stream[s_id]);
+        _xflux00<<<xgrid, xblocks, 0, stream[s_id]>>>(nslices, 0, xghostL, xghostR, flux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]);
+        GPU::profiler.pop_stopCUDA();
+
+        /* GPU::profiler.push_startCUDA("_YFLUX", &_s[0]); */
+        /* _yflux<<<ygrid, yblocks, 0, _s[0]>>>(nslices, 0, yghostL, yghostR, flux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]); */
+        /* GPU::profiler.pop_stopCUDA(); */
+
+        /* GPU::profiler.push_startCUDA("_ZFLUX", &_s[0]); */
+        /* _zflux<<<zgrid, zblocks, 0, _s[0]>>>(nslices, flux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]); */
+        /* GPU::profiler.pop_stopCUDA(); */
+
+        /* _xflux<<<xgrid, xblocks, 0, _s[0]>>>(nslices, 0, xghostL, xghostR, flux, d_extra_X[0], d_extra_X[1], d_extra_X[2], d_extra_X[3], d_extra_X[4]); */
+        /* _yflux<<<ygrid, yblocks, 0, _s[1]>>>(nslices, 0, yghostL, yghostR, flux, d_extra_Y[0], d_extra_Y[1], d_extra_Y[2], d_extra_Y[3], d_extra_Y[4]); */
+        /* _zflux<<<zgrid, zblocks, 0, _s[2]>>>(nslices, flux, d_extra_Z[0], d_extra_Z[1], d_extra_Z[2], d_extra_Z[3], d_extra_Z[4]); */
+
+        cudaDeviceSynchronize();
+    }
 }

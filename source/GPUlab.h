@@ -55,6 +55,8 @@ class GPUlab
         const uint_t nslices_last; // nslices_last = sizeZ % nslices
         const uint_t nchunks;
 
+        Profiler *profiler;
+
         int* maxSOS; // pointer to mapped memory CPU/GPU
 
         ///////////////////////////////////////////////////////////////////////
@@ -73,7 +75,7 @@ class GPUlab
             const uint_t Allhalos;
             std::vector<Real> send_left, send_right; // for position x1 < x2, then x1 = buf_left, x2 = buf_right
             std::vector<Real> recv_left, recv_right;
-            RealPtrVec_t left, right;
+            real_vector_t left, right;
             Halo(const uint_t sizeHalo) :
                 Nhalo(sizeHalo), Allhalos(NVAR*sizeHalo),
                 send_left(NVAR*sizeHalo, 0.0),
@@ -116,29 +118,25 @@ class GPUlab
         {
             static const uint_t NVAR = GridMPI::NVAR; // number of variables in set
             const uint_t _sizeIn, _sizeOut;
+            const int buf_id;
             uint_t Nxghost, Nyghost; // may change depending on last chunk
 
             // Tmp storage for GPU input data
             cuda_vector_t GPUin_all;
-            RealPtrVec_t GPUin;
+            real_vector_t GPUin;
 
-            // Tmp storage for GPU tmp
-            cuda_vector_t GPUtmp_all;
-            RealPtrVec_t GPUtmp;
-
-            // Tmp storage for GPU output data (updated solution)
+            // Tmp storage for GPU output data
             cuda_vector_t GPUout_all;
-            RealPtrVec_t GPUout;
+            real_vector_t GPUout;
 
             // compact ghosts
             cuda_vector_t xyghost_all;
-            RealPtrVec_t xghost_l, xghost_r, yghost_l, yghost_r;
+            real_vector_t xghost_l, xghost_r, yghost_l, yghost_r;
 
-            HostBuffer(const uint_t sizeIn, const uint_t sizeOut, const uint_t sizeXghost, const uint_t sizeYghost) :
-                _sizeIn(sizeIn), _sizeOut(sizeOut),
+            HostBuffer(const uint_t sizeIn, const uint_t sizeOut, const uint_t sizeXghost, const uint_t sizeYghost, const int b_ID=0) :
+                _sizeIn(sizeIn), _sizeOut(sizeOut), buf_id(b_ID),
                 Nxghost(sizeXghost), Nyghost(sizeYghost),
                 GPUin_all(NVAR*sizeIn, 0.0), GPUin(NVAR, NULL),
-                GPUtmp_all(NVAR*sizeOut, 0.0), GPUtmp(NVAR, NULL),
                 GPUout_all(NVAR*sizeOut, 0.0), GPUout(NVAR, NULL),
                 xyghost_all(2*NVAR*sizeXghost + 2*NVAR*sizeYghost, 0.0),
                 xghost_l(NVAR, NULL), xghost_r(NVAR, NULL),
@@ -147,7 +145,6 @@ class GPUlab
                 for (uint_t i = 0; i < NVAR; ++i)
                 {
                     GPUin[i]  = &GPUin_all[i * sizeIn];
-                    GPUtmp[i] = &GPUtmp_all[i * sizeOut];
                     GPUout[i] = &GPUout_all[i * sizeOut];
                 }
                 realign_ghost_pointer(sizeXghost, sizeYghost);
@@ -191,12 +188,12 @@ class GPUlab
         void _alloc_GPU();
         void _free_GPU();
         inline void _syncGPU() { GPU::syncGPU(); }
-        inline void _syncStream(GPU::streamID s) { GPU::syncStream(s); }
+        inline void _syncStream(const int chunk_id) { GPU::syncStream(chunk_id); }
         void _reset();
         void _init_next_chunk();
         void _dump_chunk(const int complete = 0);
 
-        inline void _copy_range(RealPtrVec_t& dst, const uint_t dstOFFSET, const RealPtrVec_t& src, const uint_t srcOFFSET, const uint_t Nelements)
+        inline void _copy_range(real_vector_t& dst, const uint_t dstOFFSET, const real_vector_t& src, const uint_t srcOFFSET, const uint_t Nelements)
         {
             for (int i = 0; i < GridMPI::NVAR; ++i)
                 memcpy(dst[i] + dstOFFSET, src[i] + srcOFFSET, Nelements*sizeof(Real));
@@ -212,8 +209,8 @@ class GPUlab
         }
 
         // execution helper
-        void _process_chunk_sos(const RealPtrVec_t& src);
-        void _process_chunk_flow(const Real a, const Real b, const Real dtinvh, RealPtrVec_t& src, RealPtrVec_t& tmp);
+        void _process_chunk_sos(const real_vector_t& src);
+        void _process_chunk_flow(const Real a, const Real b, const Real dtinvh, real_vector_t& src, real_vector_t& tmp);
 
         // info
         void _print_array(const Real * const in, const uint_t size);
@@ -230,6 +227,7 @@ class GPUlab
         enum {SKIN, FLESH} myFeature[6];
         GridMPI& grid;
 
+        // TODO: This data should go into the host_buffer struct
         // CHUNK metrics
         uint_t curr_slices;
         uint_t curr_iz;

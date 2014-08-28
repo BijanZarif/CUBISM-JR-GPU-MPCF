@@ -15,12 +15,10 @@ class Convection_CUDA
 {
 public:
 
-    const Real a, dtinvh; //LSRK3-related "a" factor, and "lambda"
-
     //the only constructor for this class
-    Convection_CUDA(const Real a, const Real dtinvh);
+    Convection_CUDA() { }
 
     //main method of the class, it evaluates the convection term of the RHS
-    void compute(const uint_t nslices, const uint_t global_iz);
+    void compute(const uint_t nslices, const uint_t global_iz, const uint_t gbuf_id=0, const int chunk_id=0);
 };
 

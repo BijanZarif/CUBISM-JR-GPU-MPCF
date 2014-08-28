@@ -20,7 +20,7 @@ typedef float Real;
 typedef double Real;
 #endif
 
-typedef std::vector<Real *> RealPtrVec_t;
+typedef std::vector<Real *> real_vector_t; // just a vector holding pointers
 typedef unsigned int uint_t;
 
 enum Coord {X=0, Y, Z};
@@ -233,6 +233,52 @@ struct myScalarStreamer
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
         out[0] = r[idx];
+    }
+
+    static const char * getAttributeName() { return "Scalar"; }
+};
+
+
+struct myPressureStreamer
+{
+    static const int NCHANNELS = 1;
+    static const int NX = NodeBlock::sizeX;
+    static const int NY = NodeBlock::sizeY;
+    static const int NZ = NodeBlock::sizeZ;
+
+    typedef const Real * const const_ptr;
+    const_ptr r, u, v, w, e, G, P;
+
+    myPressureStreamer(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
+
+    void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
+    {
+        const int idx = ID3(ix,iy,iz,NX,NY);
+        assert(idx < NX * NY * NZ);
+        out[0] = (e[idx]-0.5f*(u[idx]*u[idx]+v[idx]*v[idx]+w[idx]*w[idx])/r[idx] - P[idx])/G[idx];
+    }
+
+    static const char * getAttributeName() { return "Scalar"; }
+};
+
+
+struct myGammaStreamer
+{
+    static const int NCHANNELS = 1;
+    static const int NX = NodeBlock::sizeX;
+    static const int NY = NodeBlock::sizeY;
+    static const int NZ = NodeBlock::sizeZ;
+
+    typedef const Real * const const_ptr;
+    const_ptr r, u, v, w, e, G, P;
+
+    myGammaStreamer(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
+
+    void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
+    {
+        const int idx = ID3(ix,iy,iz,NX,NY);
+        assert(idx < NX * NY * NZ);
+        out[0] = G[idx];
     }
 
     static const char * getAttributeName() { return "Scalar"; }

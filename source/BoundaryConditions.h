@@ -23,7 +23,7 @@ protected:
 
     int s[3], e[3];
 
-    const RealPtrVec_t& pdata;
+    const real_vector_t& pdata;
     const uint_t startZ, deltaZ;
 
     template<int dir>
@@ -42,7 +42,7 @@ protected:
 
 public:
 
-    BoundaryConditions(const RealPtrVec_t& data, const uint_t first_slice_iz = 0, const uint_t n_slices = TGrid::sizeZ)
+    BoundaryConditions(const real_vector_t& data, const uint_t first_slice_iz = 0, const uint_t n_slices = TGrid::sizeZ)
         :
             pdata(data),
             startZ(first_slice_iz), deltaZ(n_slices)
@@ -58,7 +58,7 @@ public:
     }
 
     template<int dir, int side, index_map map>
-    void applyBC_absorbing(RealPtrVec_t& halo)
+    void applyBC_absorbing(real_vector_t& halo)
     {
         _setup<dir>();
 
@@ -83,7 +83,7 @@ public:
 
 
     template<int dir, int side, index_map map>
-    void applyBC_reflecting(RealPtrVec_t& halo)
+    void applyBC_reflecting(real_vector_t& halo)
     {
         _setup<dir>();
 

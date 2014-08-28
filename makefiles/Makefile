@@ -56,7 +56,8 @@ ifneq "$(findstring localhost.localdomain,$(shell hostname))" "" #Cyrus
 	LIBS += -L/usr/local/cuda-6.0/lib64 -lcudart
 endif
 
-CUFLAGS += -arch=compute_35 -code=compute_35,sm_35 -Xptxas -v
+# CUFLAGS += -arch=sm_35 -Xptxas -v
+CUFLAGS += -arch=sm_35 -Xptxas -v -maxrregcount=64
 
 #CPPFLAGS += -D_ALIGNBYTES_=$(align) -D_BLOCKSIZE_=$(bs) -D_BLOCKSIZEX_=$(bs) -D_BLOCKSIZEY_=$(bs) -D_BLOCKSIZEZ_=$(bs) -DWENOEPS=$(weps) -DNTHREADS=$(nthreads) $(extra)
 CPPFLAGS +=  -I$(mpi-inc)
@@ -96,7 +97,7 @@ VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU ../s
 # core
 OBJECTS = main.o Types.o NodeBlock.o GPUlab.o LSRK3_IntegratorMPI.o
 # kernels
-OBJECTS += MaxSpeedOfSound.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CUDA.o
+OBJECTS += MaxSpeedOfSound.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CPP.o
 # Simulations
 OBJECTS += Sim_SteadyStateMPI.o Sim_SodMPI.o Sim_2DSBIMPI.o Sim_StaticIC.o Sim_SICCloudMPI.o
 # CUDA

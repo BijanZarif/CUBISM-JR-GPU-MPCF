@@ -301,6 +301,7 @@ class Sim_SICCloudMPI : public Sim_SteadyStateMPI
     protected:
         virtual void _allocGPU();
         virtual void _ic();
+        virtual void _dump(const std::string basename = "data");
 
     public:
         Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot);
