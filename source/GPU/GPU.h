@@ -10,14 +10,16 @@
 #include "Types.h"
 #include "Profiler.h"
 
-// flux kernels
+#define _WARPSIZE_ 32
+
+// flux kernels, TODO: REMOVE
 #ifndef _NTHREADS_
-#define _NTHREADS_ 128
+#define _NTHREADS_ (4*_WARPSIZE_)
 #endif
 
 // extra-term kernels (for x-direction only)
 #ifndef _TILE_DIM_
-#define _TILE_DIM_   32
+#define _TILE_DIM_   _WARPSIZE_
 #endif
 #ifndef _BLOCK_ROWS_
 #define _BLOCK_ROWS_ 8

@@ -1,7 +1,7 @@
 /* File        : GPU.cuh */
 /* Creator     : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Thu 14 Aug 2014 09:06:16 AM CEST */
-/* Modified    : Tue 26 Aug 2014 09:30:15 AM CEST */
+/* Modified    : Fri 29 Aug 2014 10:44:25 AM CEST */
 /* Description : GPU only, shared */
 #pragma once
 
@@ -13,8 +13,10 @@
 
 #define NX _BLOCKSIZEX_
 #define NY _BLOCKSIZEY_
+#define NZ _BLOCKSIZEZ_
 #define NXP1 NX+1
 #define NYP1 NY+1
+#define NZP1 NZ+1
 
 enum { VSIZE = NodeBlock::NVAR };
 

@@ -17,6 +17,7 @@
 #error Minimum _BLOCKSIZEZ_ is 1
 #endif
 
+// TODO: this might is no longer needed
 #if NX % _TILE_DIM_ != 0
 #error _BLOCKSIZEX_ should be an integer multiple of _TILE_DIM_
 #endif
@@ -511,7 +512,7 @@ inline void _load_internal_X(const uint_t ix, const uint_t iy, const uint_t iz, 
 
 
 template <int texID> __global__
-void _WENO_kernel_X(const uint_t nslices, Real * const __restrict__ p_minus, Real * const __restrict__ p_plus,
+void _WENO_X(Real * const __restrict__ p_minus, Real * const __restrict__ p_plus,
         const Real * const __restrict__ p_ghostL, const Real * const __restrict__ p_ghostR)
 {
     // this ensures that a stencil can only contain either left ghosts or right
@@ -522,115 +523,43 @@ void _WENO_kernel_X(const uint_t nslices, Real * const __restrict__ p_minus, Rea
 
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z + 3; // textures are padded by 3 slices in z (zghosts)
 
     if (ix < NXP1 && iy < NY)
     {
-        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
-        {
-            Real s[_STENCIL_WIDTH_]; // stencil
+        const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
 
-            if (0 == ix)
-                _load_boundary_X<texID, 0, 3, 0, 0, 3>(iy, iz, s, p_ghostL);
-            else if (1 == ix)
-                _load_boundary_X<texID, 0, 2, 1, 0, 2>(iy, iz, s, p_ghostL);
-            else if (2 == ix)
-                _load_boundary_X<texID, 0, 1, 2, 0, 1>(iy, iz, s, p_ghostL);
-            else if (NXP1-3 == ix)
-                _load_boundary_X<texID, _STENCIL_WIDTH_-1, 0, 0, NX-(_STENCIL_WIDTH_-1), 1>(iy, iz, s, p_ghostR);
-            else if (NXP1-2 == ix)
-                _load_boundary_X<texID, _STENCIL_WIDTH_-2, 0, 0, NX-(_STENCIL_WIDTH_-2), 2>(iy, iz, s, p_ghostR);
-            else if (NXP1-1 == ix)
-                _load_boundary_X<texID, _STENCIL_WIDTH_-3, 0, 0, NX-(_STENCIL_WIDTH_-3), 3>(iy, iz, s, p_ghostR);
-            else
-                _load_internal_X<texID>(ix, iy, iz, s);
+        Real s[_STENCIL_WIDTH_]; // stencil
 
-            const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
+        if (0 == ix)
+            _load_boundary_X<texID, 0, 3, 0, 0, 3>(iy, iz, s, p_ghostL);
+        else if (1 == ix)
+            _load_boundary_X<texID, 0, 2, 1, 0, 2>(iy, iz, s, p_ghostL);
+        else if (2 == ix)
+            _load_boundary_X<texID, 0, 1, 2, 0, 1>(iy, iz, s, p_ghostL);
+        else if (NXP1-3 == ix)
+            _load_boundary_X<texID, _STENCIL_WIDTH_-1, 0, 0, NX-(_STENCIL_WIDTH_-1), 1>(iy, iz, s, p_ghostR);
+        else if (NXP1-2 == ix)
+            _load_boundary_X<texID, _STENCIL_WIDTH_-2, 0, 0, NX-(_STENCIL_WIDTH_-2), 2>(iy, iz, s, p_ghostR);
+        else if (NXP1-1 == ix)
+            _load_boundary_X<texID, _STENCIL_WIDTH_-3, 0, 0, NX-(_STENCIL_WIDTH_-3), 3>(iy, iz, s, p_ghostR);
+        else
+            _load_internal_X<texID>(ix, iy, iz, s);
 
-            const Real recon_m = _weno_minus_clipped(s[0], s[1], s[2], s[3], s[4]); // 96 FLOP (6 DIV)
-            const Real recon_p = _weno_pluss_clipped(s[1], s[2], s[3], s[4], s[5]); // 96 FLOP (6 DIV)
-            assert(!isnan(recon_m)); assert(!isnan(recon_p));
+        const Real recon_m = _weno_minus_clipped(s[0], s[1], s[2], s[3], s[4]); // 96 FLOP (6 DIV)
+        const Real recon_p = _weno_pluss_clipped(s[1], s[2], s[3], s[4], s[5]); // 96 FLOP (6 DIV)
+        assert(!isnan(recon_m)); assert(!isnan(recon_p));
 
-            // write
-            p_minus[idx] = recon_m;
-            p_plus[idx]  = recon_p;
-        }
+        // write
+        p_minus[idx] = recon_m;
+        p_plus[idx]  = recon_p;
     }
 }
 
 
-/* template <int texID> __global__ */
-/* void _WENO_kernel_X(const uint_t nslices, Real * const __restrict__ p_minus, Real * const __restrict__ p_plus, */
-/*         const Real * const __restrict__ p_ghostL, const Real * const __restrict__ p_ghostR) */
-/* { */
-/*     // this ensures that a stencil can only contain either left ghosts or right */
-/*     // ghosts, but not a mix of left AND right ghosts.  This minimizes */
-/*     // if-conditionals below when reading the stencil. Therefore, minimum */
-/*     // number of cells in X-direction is 5 */
-/*     assert(NXP1 > 5); */
-
-/*     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x; */
-/*     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y; */
-
-/*     if (ix < NXP1 && iy < NY) */
-/*     { */
-/*         Real s1[_STENCIL_WIDTH_]; // stencil 1 */
-/*         Real s2[_STENCIL_WIDTH_]; // stencil 2 */
-/*         Real *s = s1; */
-/*         Real *s_next = s2; */
-
-/*         if (0 == ix) */
-/*             _load_boundary_X<texID, 0, 3, 0, 0, 3>(iy, 3, s, p_ghostL); */
-/*         else if (1 == ix) */
-/*             _load_boundary_X<texID, 0, 2, 1, 0, 2>(iy, 3, s, p_ghostL); */
-/*         else if (2 == ix) */
-/*             _load_boundary_X<texID, 0, 1, 2, 0, 1>(iy, 3, s, p_ghostL); */
-/*         else if (NXP1-3 == ix) */
-/*             _load_boundary_X<texID, _STENCIL_WIDTH_-1, 0, 0, NX-(_STENCIL_WIDTH_-1), 1>(iy, 3, s, p_ghostR); */
-/*         else if (NXP1-2 == ix) */
-/*             _load_boundary_X<texID, _STENCIL_WIDTH_-2, 0, 0, NX-(_STENCIL_WIDTH_-2), 2>(iy, 3, s, p_ghostR); */
-/*         else if (NXP1-1 == ix) */
-/*             _load_boundary_X<texID, _STENCIL_WIDTH_-3, 0, 0, NX-(_STENCIL_WIDTH_-3), 3>(iy, 3, s, p_ghostR); */
-/*         else */
-/*             _load_internal_X<texID>(ix, iy, 3, s); */
-
-/*         for (uint_t iz = 4; iz < nslices+3; ++iz) // first and last 3 slices are zghosts */
-/*         { */
-/*             if (0 == ix) */
-/*                 _load_boundary_X<texID, 0, 3, 0, 0, 3>(iy, iz, s_next, p_ghostL); */
-/*             else if (1 == ix) */
-/*                 _load_boundary_X<texID, 0, 2, 1, 0, 2>(iy, iz, s_next, p_ghostL); */
-/*             else if (2 == ix) */
-/*                 _load_boundary_X<texID, 0, 1, 2, 0, 1>(iy, iz, s_next, p_ghostL); */
-/*             else if (NXP1-3 == ix) */
-/*                 _load_boundary_X<texID, _STENCIL_WIDTH_-1, 0, 0, NX-(_STENCIL_WIDTH_-1), 1>(iy, iz, s_next, p_ghostR); */
-/*             else if (NXP1-2 == ix) */
-/*                 _load_boundary_X<texID, _STENCIL_WIDTH_-2, 0, 0, NX-(_STENCIL_WIDTH_-2), 2>(iy, iz, s_next, p_ghostR); */
-/*             else if (NXP1-1 == ix) */
-/*                 _load_boundary_X<texID, _STENCIL_WIDTH_-3, 0, 0, NX-(_STENCIL_WIDTH_-3), 3>(iy, iz, s_next, p_ghostR); */
-/*             else */
-/*                 _load_internal_X<texID>(ix, iy, iz, s_next); */
-
-/*             const uint_t idx = ID3(iy, ix, iz-4, NY, NXP1); */
-
-/*             const Real recon_m = _weno_minus_clipped(s[0], s[1], s[2], s[3], s[4]); // 96 FLOP (6 DIV) */
-/*             const Real recon_p = _weno_pluss_clipped(s[1], s[2], s[3], s[4], s[5]); // 96 FLOP (6 DIV) */
-/*             assert(!isnan(recon_m)); assert(!isnan(recon_p)); */
-
-/*             // write */
-/*             p_minus[idx] = recon_m; */
-/*             p_plus[idx]  = recon_p; */
-
-/*             // swap */
-/*             Real * const tmp = s; */
-/*             s = s_next; */
-/*             s_next = tmp; */
-/*         } */
-/*     } */
-/* } */
-
-
-__global__
-void _HLLC_kernel_X(const uint_t nslices, DevicePointer recon_m, DevicePointer recon_p)
+__global__ void
+/* __launch_bounds__(128, 16) */
+_HLLC_X(DevicePointer recon_m, DevicePointer recon_p)
 {
     // this ensures that a stencil can only contain either left ghosts or right
     // ghosts, but not a mix of left AND right ghosts.  This minimizes
@@ -640,67 +569,151 @@ void _HLLC_kernel_X(const uint_t nslices, DevicePointer recon_m, DevicePointer r
 
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z + 3;
+
+    // reduce reduce register pressure
+    __shared__ Real rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss;
 
     if (ix < NXP1 && iy < NY)
     {
-        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
-        {
-            const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
+        const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
 
-            const Real rm = recon_m.r[idx];
-            const Real rp = recon_p.r[idx];
-            const Real um = recon_m.u[idx];
-            const Real up = recon_p.u[idx];
-            const Real pm = recon_m.e[idx];
-            const Real pp = recon_p.e[idx];
-            const Real Gm = recon_m.G[idx];
-            const Real Gp = recon_p.G[idx];
-            const Real Pm = recon_m.P[idx];
-            const Real Pp = recon_p.P[idx];
-            const Real vm = recon_m.v[idx];
-            const Real vp = recon_p.v[idx];
-            const Real wm = recon_m.w[idx];
-            const Real wp = recon_p.w[idx];
-            assert(rm > 0.0f); assert(rp > 0.0f);
-            assert(pm > 0.0f); assert(pp > 0.0f);
-            assert(Gm > 0.0f); assert(Gp > 0.0f);
-            assert(Pm >= 0.0f); assert(Pp >= 0.0f);
+        rm = recon_m.r[idx];
+        rp = recon_p.r[idx];
+        um = recon_m.u[idx];
+        up = recon_p.u[idx];
+        pm = recon_m.e[idx];
+        pp = recon_p.e[idx];
+        Gm = recon_m.G[idx];
+        Gp = recon_p.G[idx];
+        Pm = recon_m.P[idx];
+        Pp = recon_p.P[idx];
+        vm = recon_m.v[idx];
+        vp = recon_p.v[idx];
+        wm = recon_m.w[idx];
+        wp = recon_p.w[idx];
+        assert(rm > 0.0f); assert(rp > 0.0f);
+        assert(pm > 0.0f); assert(pp > 0.0f);
+        assert(Gm > 0.0f); assert(Gp > 0.0f);
+        assert(Pm >= 0.0f); assert(Pp >= 0.0f);
 
-            Real sm, sp;
-            _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
-            const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp); // 11 FLOP (1 DIV)
-            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
+        // TODO: inline computations below
+        _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+        ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp); // 11 FLOP (1 DIV)
+        assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
 
-            const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
-            const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
-            const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss); // 25 FLOP (2 DIV)
-            const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss); // 25 FLOP (2 DIV)
-            const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
-            const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
-            const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
-            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+        const Real fr = _hllc_rho(rm, rp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
+        const Real fu = _hllc_pvel(rm, rp, um, up, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
+        const Real fv = _hllc_vel(rm, rp, vm, vp, um, up, sm, sp, ss); // 25 FLOP (2 DIV)
+        const Real fw = _hllc_vel(rm, rp, wm, wp, um, up, sm, sp, ss); // 25 FLOP (2 DIV)
+        const Real fe = _hllc_e(rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
+        const Real fG = _hllc_rho(Gm, Gp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
+        const Real fP = _hllc_rho(Pm, Pp, um, up, sm, sp, ss); // 23 FLOP (2 DIV)
+        assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
 
-            const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
+        const Real hllc_vel = _extraterm_hllc_vel(um, up, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
 
-            // this is crap!
-            recon_p.r[idx] = Gm;
-            recon_p.u[idx] = Gp;
-            recon_p.v[idx] = Pm;
-            recon_p.w[idx] = Pp;
+        // this is crap!
+        recon_p.r[idx] = Gm;
+        recon_p.u[idx] = Gp;
+        recon_p.v[idx] = Pm;
+        recon_p.w[idx] = Pp;
 
-            recon_m.r[idx] = fr;
-            recon_m.u[idx] = fu;
-            recon_m.v[idx] = fv;
-            recon_m.w[idx] = fw;
-            recon_m.e[idx] = fe;
-            recon_m.G[idx] = fG;
-            recon_m.P[idx] = fP;
+        recon_m.r[idx] = fr;
+        recon_m.u[idx] = fu;
+        recon_m.v[idx] = fv;
+        recon_m.w[idx] = fw;
+        recon_m.e[idx] = fe;
+        recon_m.G[idx] = fG;
+        recon_m.P[idx] = fP;
 
-            recon_p.e[idx] = hllc_vel;
-        }
+        recon_p.e[idx] = hllc_vel;
     }
 }
 
+
+/* __global__ void */
+/* /1* __launch_bounds__(128, 16) *1/ */
+/* _HLLC3D_X(const uint_t nslices, DevicePointer recon_m, DevicePointer recon_p) */
+/* { */
+/*     // this ensures that a stencil can only contain either left ghosts or right */
+/*     // ghosts, but not a mix of left AND right ghosts.  This minimizes */
+/*     // if-conditionals below when reading the stencil. Therefore, minimum */
+/*     // number of cells in X-direction is 5 */
+/*     assert(NXP1 > 5); */
+
+/*     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x; */
+/*     /1* const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y; *1/ */
+/*     const uint_t iy = blockIdx.y * 2 * _WARPSIZE_ + threadIdx.y; */
+/*     const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z + 3; */
+
+/*     __shared__ Real rm[2], rp[2], um[2], up[2], vm[2], vp[2], wm[2], wp[2], pm[2], pp[2], Gm[2], Gp[2], Pm[2], Pp[2], sm[2], sp[2], ss[2]; */
+/*     /1* __shared__ uint_t idx[2]; *1/ */
+
+/*     if (ix < NXP1 && iy < NY) */
+/*     { */
+/*         for (int i = 0; i < 2; ++i) */
+/*         { */
+/*             const uint_t idx = ID3(iy+i*_WARPSIZE_, ix, iz-3, NY, NXP1); */
+/*             rm[i] = recon_m.r[idx]; */
+/*             rp[i] = recon_p.r[idx]; */
+/*             um[i] = recon_m.u[idx]; */
+/*             up[i] = recon_p.u[idx]; */
+/*             pm[i] = recon_m.e[idx]; */
+/*             pp[i] = recon_p.e[idx]; */
+/*             Gm[i] = recon_m.G[idx]; */
+/*             Gp[i] = recon_p.G[idx]; */
+/*             Pm[i] = recon_m.P[idx]; */
+/*             Pp[i] = recon_p.P[idx]; */
+/*             vm[i] = recon_m.v[idx]; */
+/*             vp[i] = recon_p.v[idx]; */
+/*             wm[i] = recon_m.w[idx]; */
+/*             wp[i] = recon_p.w[idx]; */
+/*             assert(rm > 0.0f); assert(rp > 0.0f); */
+/*             assert(pm > 0.0f); assert(pp > 0.0f); */
+/*             assert(Gm > 0.0f); assert(Gp > 0.0f); */
+/*             assert(Pm >= 0.0f); assert(Pp >= 0.0f); */
+/*         } */
+
+/*         for (int i = 0; i < 2; ++i) */
+/*         { */
+/*             const uint_t idx = ID3(iy+i*_WARPSIZE_, ix, iz-3, NY, NXP1); */
+
+/*             /1* Real sm, sp; *1/ */
+/*             _char_vel_einfeldt(rm[i], rp[i], um[i], up[i], pm[i], pp[i], Gm[i], Gp[i], Pm[i], Pp[i], sm[i], sp[i]); // 29 FLOP (6 DIV) */
+/*             /1* const Real ss = _char_vel_star(rm[i], rp[i], um[i], up[i], pm[i], pp[i], sm[i], sp[i]); // 11 FLOP (1 DIV) *1/ */
+/*             ss[i] = _char_vel_star(rm[i], rp[i], um[i], up[i], pm[i], pp[i], sm[i], sp[i]); // 11 FLOP (1 DIV) */
+/*             assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss)); */
+
+/*             const Real fr = _hllc_rho(rm[i], rp[i], um[i], up[i], sm[i], sp[i], ss[i]); // 23 FLOP (2 DIV) */
+/*             const Real fu = _hllc_pvel(rm[i], rp[i], um[i], up[i], pm[i], pp[i], sm[i], sp[i], ss[i]); // 29 FLOP (2 DIV) */
+/*             const Real fv = _hllc_vel(rm[i], rp[i], vm[i], vp[i], um[i], up[i], sm[i], sp[i], ss[i]); // 25 FLOP (2 DIV) */
+/*             const Real fw = _hllc_vel(rm[i], rp[i], wm[i], wp[i], um[i], up[i], sm[i], sp[i], ss[i]); // 25 FLOP (2 DIV) */
+/*             const Real fe = _hllc_e(rm[i], rp[i], um[i], up[i], vm[i], vp[i], wm[i], wp[i], pm[i], pp[i], Gm[i], Gp[i], Pm[i], Pp[i], sm[i], sp[i], ss[i]); // 59 FLOP (4 DIV) */
+/*             const Real fG = _hllc_rho(Gm[i], Gp[i], um[i], up[i], sm[i], sp[i], ss[i]); // 23 FLOP (2 DIV) */
+/*             const Real fP = _hllc_rho(Pm[i], Pp[i], um[i], up[i], sm[i], sp[i], ss[i]); // 23 FLOP (2 DIV) */
+/*             assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP)); */
+
+/*             const Real hllc_vel = _extraterm_hllc_vel(um[i], up[i], Gm[i], Gp[i], Pm[i], Pp[i], sm[i], sp[i], ss[i]); // 19 FLOP (2 DIV) */
+
+/*             // this is crap! */
+/*             recon_p.r[idx] = Gm[i]; */
+/*             recon_p.u[idx] = Gp[i]; */
+/*             recon_p.v[idx] = Pm[i]; */
+/*             recon_p.w[idx] = Pp[i]; */
+
+/*             recon_m.r[idx] = fr; */
+/*             recon_m.u[idx] = fu; */
+/*             recon_m.v[idx] = fv; */
+/*             recon_m.w[idx] = fw; */
+/*             recon_m.e[idx] = fe; */
+/*             recon_m.G[idx] = fG; */
+/*             recon_m.P[idx] = fP; */
+
+/*             recon_p.e[idx] = hllc_vel; */
+/*         } */
+/*     } */
+/* } */
 
 
 __global__
@@ -775,7 +788,7 @@ void _TEST_CONV(DevicePointer inout,
 
 
 /* __global__ */
-/* void _CONV_kernel(const uint_t nslices, DevicePointer data) */
+/* void _CONV(const uint_t nslices, DevicePointer data) */
 /* { */
 /*     const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x; */
 /*     const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y; */
@@ -824,38 +837,67 @@ void _TEST_CONV(DevicePointer inout,
 /* } */
 
 
+/* __global__ */
+/* void _CONV(const uint_t nslices, DevicePointer data) */
+/* { */
+/*     const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x; */
+/*     const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y; */
+/*     const uint_t offset = _BLOCK_ROWS_ * NX; */
+
+/*     if (ix < NX && iy < NY) */
+/*     { */
+/*         for (uint_t iz = 0; iz < nslices; ++iz) // zghosts inclusive */
+/*         { */
+/*             uint_t i0 = ID3(ix,iy,iz,NX,NY); */
+/*             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
+/*             { */
+/*                 const Real r = data.r[i0]; */
+/*                 const Real u = data.u[i0]; */
+/*                 const Real v = data.v[i0]; */
+/*                 const Real w = data.w[i0]; */
+/*                 const Real e = data.e[i0]; */
+/*                 const Real G = data.G[i0]; */
+/*                 const Real P = data.P[i0]; */
+
+/*                 // convert */
+/*                 const Real rinv = 1.0f/r; */
+/*                 data.u[i0] = u*rinv; */
+/*                 data.v[i0] = v*rinv; */
+/*                 data.w[i0] = w*rinv; */
+/*                 data.e[i0] = (e - 0.5f*(u*u + v*v + w*w)*rinv - P) / G; */
+
+/*                 i0 += offset; */
+/*             } */
+/*         } */
+/*     } */
+/* } */
+
+
 __global__
-void _CONV_kernel(const uint_t nslices, DevicePointer data)
+void _CONV(DevicePointer data)
 {
-    const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x;
-    const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y;
-    const uint_t offset = _BLOCK_ROWS_ * NX;
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z;
 
     if (ix < NX && iy < NY)
     {
-        for (uint_t iz = 0; iz < nslices; ++iz) // zghosts inclusive
-        {
-            uint_t i0 = ID3(ix,iy,iz,NX,NY);
-            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
-            {
-                const Real r = data.r[i0];
-                const Real u = data.u[i0];
-                const Real v = data.v[i0];
-                const Real w = data.w[i0];
-                const Real e = data.e[i0];
-                const Real G = data.G[i0];
-                const Real P = data.P[i0];
+        const uint_t i0 = ID3(ix,iy,iz,NX,NY);
 
-                // convert
-                const Real rinv = 1.0f/r;
-                data.u[i0] = u*rinv;
-                data.v[i0] = v*rinv;
-                data.w[i0] = w*rinv;
-                data.e[i0] = (e - 0.5f*(u*u + v*v + w*w)*rinv - P) / G;
+        const Real r = data.r[i0];
+        const Real u = data.u[i0];
+        const Real v = data.v[i0];
+        const Real w = data.w[i0];
+        const Real e = data.e[i0];
+        const Real G = data.G[i0];
+        const Real P = data.P[i0];
 
-                i0 += offset;
-            }
-        }
+        // convert
+        const Real rinv = 1.0f/r;
+        data.u[i0] = u*rinv;
+        data.v[i0] = v*rinv;
+        data.w[i0] = w*rinv;
+        data.e[i0] = (e - 0.5f*(u*u + v*v + w*w)*rinv - P) / G;
     }
 }
 
@@ -1722,22 +1764,14 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 //                              KERNEL WRAPPERS                              //
 ///////////////////////////////////////////////////////////////////////////////
 
-void _TEST_dump(const real_vector_t& d_data, const string basename = "data")
+void _TEST_dump(const Real * const d_data, const size_t bytes, const string fname = "data.bin")
 {
-    cudaDeviceSynchronize();
-    const size_t bytes = NX * NY * NodeBlock::sizeZ * sizeof(Real);
-    for (int i = 0; i < VSIZE; ++i)
-    {
-        Real *h_data = (Real *)malloc(bytes);
-        cudaMemcpy(h_data, d_data[i], bytes, cudaMemcpyDeviceToHost);
-        ostringstream cbuf;
-        cbuf << i << ".bin";
-        const string fname = basename + cbuf.str();
-        ofstream out(fname.c_str(), std::ofstream::binary);
-        out.write((char *)h_data, bytes);
-        out.close();
-        free(h_data);
-    }
+    Real *h_data = (Real *)malloc(bytes);
+    cudaMemcpy(h_data, d_data, bytes, cudaMemcpyDeviceToHost);
+    ofstream out(fname.c_str(), std::ofstream::binary);
+    out.write((char *)h_data, bytes);
+    out.close();
+    free(h_data);
 }
 
 static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex, cudaArray_t d_ptr)
@@ -1781,12 +1815,12 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
 
     // before we do anything, we convert to primitive variables and prepare
     // texture buffers
-    const dim3 CONV_blocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
-    const dim3 CONV_grid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
+    const dim3 CONV_blocks(_WARPSIZE_, 4, 1);
+    const dim3 CONV_grid((NX + _WARPSIZE_ - 1)/_WARPSIZE_, (NY + 4 - 1)/4, nslices+6);
 
     sprintf(prof_item, "_CONV (%d)", s_id);
     GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
-    _CONV_kernel<<<CONV_grid, CONV_blocks, 0, stream[s_id]>>>(nslices+6, inout);
+    _CONV<<<CONV_grid, CONV_blocks, 0, stream[s_id]>>>(inout);
     GPU::profiler.pop_stopCUDA();
 
     // TODO: REMOVE THIS
@@ -1820,31 +1854,31 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     // ========================================================================
     // X
     // ========================================================================
-    const dim3 X_blocks(1, _NTHREADS_, 1);
-    const dim3 X_grid(NXP1, (NY + _NTHREADS_ - 1)/_NTHREADS_, 1);
+    // TODO: check that nslices is an integer multiple of 4 (or 1)
+    const dim3 X_blocks(1, _WARPSIZE_, 4);
+    const dim3 X_grid(NXP1, (NY + _WARPSIZE_ - 1)/_WARPSIZE_, (nslices + 4 - 1)/4);
 
     // reconstruct
-    _WENO_kernel_X<0><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[0], d_recon_p[0], mybuf->d_xgl[0], mybuf->d_xgr[0]);
-    _WENO_kernel_X<1><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[1], d_recon_p[1], mybuf->d_xgl[1], mybuf->d_xgr[1]);
-    _WENO_kernel_X<2><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[2], d_recon_p[2], mybuf->d_xgl[2], mybuf->d_xgr[2]);
-    _WENO_kernel_X<3><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[3], d_recon_p[3], mybuf->d_xgl[3], mybuf->d_xgr[3]);
-    _WENO_kernel_X<4><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[4], d_recon_p[4], mybuf->d_xgl[4], mybuf->d_xgr[4]);
-    _WENO_kernel_X<5><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[5], d_recon_p[5], mybuf->d_xgl[5], mybuf->d_xgr[5]);
-    _WENO_kernel_X<6><<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, d_recon_m[6], d_recon_p[6], mybuf->d_xgl[6], mybuf->d_xgr[6]);
+    _WENO_X<0><<<X_grid, X_blocks, 0, stream[s_id]>>>(d_recon_m[0], d_recon_p[0], mybuf->d_xgl[0], mybuf->d_xgr[0]);
+    _WENO_X<1><<<X_grid, X_blocks, 0, stream[s_id]>>>(d_recon_m[1], d_recon_p[1], mybuf->d_xgl[1], mybuf->d_xgr[1]);
+    _WENO_X<2><<<X_grid, X_blocks, 0, stream[s_id]>>>(d_recon_m[2], d_recon_p[2], mybuf->d_xgl[2], mybuf->d_xgr[2]);
+    _WENO_X<3><<<X_grid, X_blocks, 0, stream[s_id]>>>(d_recon_m[3], d_recon_p[3], mybuf->d_xgl[3], mybuf->d_xgr[3]);
+    _WENO_X<4><<<X_grid, X_blocks, 0, stream[s_id]>>>(d_recon_m[4], d_recon_p[4], mybuf->d_xgl[4], mybuf->d_xgr[4]);
+    _WENO_X<5><<<X_grid, X_blocks, 0, stream[s_id]>>>(d_recon_m[5], d_recon_p[5], mybuf->d_xgl[5], mybuf->d_xgr[5]);
+    _WENO_X<6><<<X_grid, X_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6], mybuf->d_xgl[6], mybuf->d_xgr[6]);
 
     // hllc fluxes
-    _HLLC_kernel_X<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, recon_m, recon_p);
+    _HLLC_X<<<X_grid, X_blocks, 0, stream[s_id]>>>(recon_m, recon_p);
 
     // flux divegence X + extra term contribution
     const dim3 X_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
     const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
-    _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, inout, recon_m, recon_p.r, recon_p.u, recon_p.v, recon_p.w, recon_p.e,
-            d_sumG, d_sumP, d_divU);
+    _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, inout, recon_m, recon_p.r, recon_p.u, recon_p.v, recon_p.w, recon_p.e, d_sumG, d_sumP, d_divU);
 
     cudaDeviceSynchronize();
     /* std::exit(3); */
 
-    _TEST_dump(mybuf->d_inout, "split");
+    _TEST_dump(inout.u, 256*256*256*sizeof(Real), "split_xrhs.u.bin");
 
 
     // my ghosts TODO: don't need them
