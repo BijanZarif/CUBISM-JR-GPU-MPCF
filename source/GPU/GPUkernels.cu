@@ -569,14 +569,14 @@ _HLLC_X(DevicePointer recon_m, DevicePointer recon_p)
 
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z + 3;
+    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z;
 
     // reduce reduce register pressure
     __shared__ Real rm, rp, um, up, vm, vp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss;
 
     if (ix < NXP1 && iy < NY)
     {
-        const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
+        const uint_t idx = ID3(iy, ix, iz, NY, NXP1);
 
         rm = recon_m.r[idx];
         rp = recon_p.r[idx];
