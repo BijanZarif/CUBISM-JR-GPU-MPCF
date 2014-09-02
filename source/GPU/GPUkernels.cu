@@ -895,8 +895,9 @@ void _CONV(DevicePointer data)
 }
 
 
-__global__
-void _xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
+__global__ void
+__launch_bounds__(128, 8)
+_xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
         const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
         const Real * const __restrict__ vel,
@@ -908,7 +909,7 @@ void _xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer fl
 
     // limiting resource
     __shared__ Real smem1[_TILE_DIM_][_TILE_DIM_+1];
-    __shared__ Real smem2[_TILE_DIM_][_TILE_DIM_+1];
+    /* __shared__ Real smem2[_TILE_DIM_][_TILE_DIM_+1]; */
     /* __shared__ Real smem3[_TILE_DIM_][_TILE_DIM_+1]; */
     /* __shared__ Real smem4[_TILE_DIM_][_TILE_DIM_+1]; */
     /* __shared__ Real smem5[_TILE_DIM_][_TILE_DIM_+1]; */
@@ -920,103 +921,109 @@ void _xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer fl
         const uint_t iyT = blockIdx.y * _TILE_DIM_ + threadIdx.x;
         const uint_t ixT = blockIdx.x * _TILE_DIM_ + threadIdx.y;
 
-        for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
+        uint_t idxm[_TILE_DIM_ / _BLOCK_ROWS_];
+        uint_t idxp[_TILE_DIM_ / _BLOCK_ROWS_];
+        uint_t idx[_TILE_DIM_ / _BLOCK_ROWS_];
+
+        // sumG
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
         {
-            const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
-            const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
+            idxm[j] = ID3(iyT,ixT+i,iz,NY,NXP1);
+            idxp[j] = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
 
-            // continue here
-            smem1[threadIdx.x][threadIdx.y+i] = Gp[idxm] + Gm[idxp];
-
-            // pre-fetch
-            Real _sumG = Gp[idxm];
-            Real _sumP = Pp[idxm];
-            Real _divU = vel[idxp];
-            _sumG = _sumG + Gm[idxp];
-            _sumP = _sumP + Pm[idxp];
-            _divU = _divU - vel[idxm];
-            // read first batch
-            smem1[threadIdx.x][threadIdx.y+i] = _sumG;
-            smem2[threadIdx.x][threadIdx.y+i] = _sumP;
-            smem3[threadIdx.x][threadIdx.y+i] = _divU;
+            // fill shared memory
+            smem1[threadIdx.x][threadIdx.y+i] = Gp[idxm[j]] + Gm[idxp[j]];
         }
         __syncthreads();
 
-            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
-            {
-                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
-                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
-                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+        {
+            idx[j] = ID3(ix,iy+i,iz,NX,NY);
 
-                // pre-fetch
-                Real _divFr = flux.r[idxp];
-                Real _divFu = flux.u[idxp];
-                Real _divFv = flux.v[idxp];
-                _divFr = _divFr - flux.r[idxm];
-                _divFu = _divFu - flux.u[idxm];
-                _divFv = _divFv - flux.v[idxm];
-                // write first batch
-                sumG[idx] = smem1[threadIdx.y+i][threadIdx.x];
-                sumP[idx] = smem2[threadIdx.y+i][threadIdx.x];
-                divU[idx] = smem3[threadIdx.y+i][threadIdx.x];
-                // read second batch
-                smem4[threadIdx.x][threadIdx.y+i] = _divFr;
-                smem5[threadIdx.x][threadIdx.y+i] = _divFu;
-                smem6[threadIdx.x][threadIdx.y+i] = _divFv;
-            }
-            __syncthreads();
-
-            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
-            {
-                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
-                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
-                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
-
-                // pre-fetch
-                Real _divFw = flux.w[idxp];
-                Real _divFe = flux.e[idxp];
-                Real _divFG = flux.G[idxp];
-                _divFw = _divFw - flux.w[idxm];
-                _divFe = _divFe - flux.e[idxm];
-                _divFG = _divFG - flux.G[idxm];
-                // write second batch
-                divF.r[idx] = smem4[threadIdx.y+i][threadIdx.x];
-                divF.u[idx] = smem5[threadIdx.y+i][threadIdx.x];
-                divF.v[idx] = smem6[threadIdx.y+i][threadIdx.x];
-                // read third batch
-                smem1[threadIdx.x][threadIdx.y+i] = _divFw;
-                smem2[threadIdx.x][threadIdx.y+i] = _divFe;
-                smem3[threadIdx.x][threadIdx.y+i] = _divFG;
-            }
-            __syncthreads();
-
-            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
-            {
-                const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1);
-                const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1);
-                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
-
-                // pre-fetch
-                Real _divFP = flux.P[idxp];
-                _divFP = _divFP - flux.P[idxm];
-                // write third batch
-                divF.w[idx] = smem1[threadIdx.y+i][threadIdx.x];
-                divF.e[idx] = smem2[threadIdx.y+i][threadIdx.x];
-                divF.G[idx] = smem3[threadIdx.y+i][threadIdx.x];
-                // read fourth batch
-                smem4[threadIdx.x][threadIdx.y+i] = _divFP;
-            }
-            __syncthreads();
-
-            for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_)
-            {
-                const uint_t idx = ID3(ix,iy+i,iz,NX,NY);
-                // write fourth batch
-                divF.P[idx] = smem4[threadIdx.y+i][threadIdx.x];
-            }
-            // NOTE: __syncthreads() can be omitted since it will not be
-            // touched until next synchronization point
+            // write back coalesced
+            sumG[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
         }
+        __syncthreads();
+
+        // sumP
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            smem1[threadIdx.x][threadIdx.y+i] = Pp[idxm[j]] + Pm[idxp[j]];
+        __syncthreads();
+
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            sumP[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
+        __syncthreads();
+
+        // divU
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            smem1[threadIdx.x][threadIdx.y+i] = vel[idxp[j]] - vel[idxm[j]];
+        __syncthreads();
+
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            divU[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
+        __syncthreads();
+
+        // div(flux rho)
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            smem1[threadIdx.x][threadIdx.y+i] = flux.r[idxp[j]] - flux.r[idxm[j]];
+        __syncthreads();
+
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            divF.r[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
+        __syncthreads();
+
+        // div(flux u)
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            smem1[threadIdx.x][threadIdx.y+i] = flux.u[idxp[j]] - flux.u[idxm[j]];
+        __syncthreads();
+
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            divF.u[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
+        __syncthreads();
+
+        // div(flux v)
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            smem1[threadIdx.x][threadIdx.y+i] = flux.v[idxp[j]] - flux.v[idxm[j]];
+        __syncthreads();
+
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            divF.v[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
+        __syncthreads();
+
+        // div(flux w)
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            smem1[threadIdx.x][threadIdx.y+i] = flux.w[idxp[j]] - flux.w[idxm[j]];
+        __syncthreads();
+
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            divF.w[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
+        __syncthreads();
+
+        // div(flux e)
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            smem1[threadIdx.x][threadIdx.y+i] = flux.e[idxp[j]] - flux.e[idxm[j]];
+        __syncthreads();
+
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            divF.e[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
+        __syncthreads();
+
+        // div(flux G)
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            smem1[threadIdx.x][threadIdx.y+i] = flux.G[idxp[j]] - flux.G[idxm[j]];
+        __syncthreads();
+
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            divF.G[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
+        __syncthreads();
+
+        // div(flux P)
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            smem1[threadIdx.x][threadIdx.y+i] = flux.P[idxp[j]] - flux.P[idxm[j]];
+        __syncthreads();
+
+        for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
+            divF.P[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
     }
 }
 
@@ -1992,7 +1999,7 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     // flux divegence X + extra term contribution
     DevicePointer fluxes(recon_m.r, recon_m.u, recon_m.v, recon_m.w, recon_m.e, recon_p.r, recon_p.u);
     const dim3 X_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
-    const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1);
+    const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, nslices);
     _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, inout, fluxes, recon_m.G, recon_p.G, recon_m.P, recon_p.P, recon_p.v, d_sumG, d_sumP, d_divU);
 
     cudaDeviceSynchronize();

@@ -22,7 +22,7 @@
 #define _TILE_DIM_   _WARPSIZE_
 #endif
 #ifndef _BLOCK_ROWS_
-#define _BLOCK_ROWS_ 8
+#define _BLOCK_ROWS_ 4
 #endif
 
 #ifndef _PAGEABLE_HOST_MEM_
