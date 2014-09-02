@@ -717,9 +717,11 @@ _HLLC_X(DevicePointer recon_m, DevicePointer recon_p)
     }
 }
 
+
 __global__ void
-/* __launch_bounds__(128, 16) */
-_HLLC_Y(DevicePointer recon_m, DevicePointer recon_p)
+__launch_bounds__(128, 9)
+_HLLC_Y(DevicePointer recon_m, DevicePointer recon_p, DevicePointer divF,
+        Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU)
 {
     // this ensures that a stencil can only contain either left ghosts or right
     // ghosts, but not a mix of left AND right ghosts.  This minimizes
@@ -731,56 +733,76 @@ _HLLC_Y(DevicePointer recon_m, DevicePointer recon_p)
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
     const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z;
 
-
-    if (ix < NX && iy < NYP1)
+    if (ix < NX && iy < NY)
     {
-        const uint_t idx = ID3(ix, iy, iz, NX, NYP1);
+        Real fr[2];
+        Real fu[2];
+        Real fv[2];
+        Real fw[2];
+        Real fe[2];
+        Real fG[2];
+        Real fP[2];
+        Real hllc_vel[2];
+        Real Gpp[2], Gmm[2];
+        Real Ppp[2], Pmm[2];
 
-        const Real rm = recon_m.r[idx];
-        const Real rp = recon_p.r[idx];
-        const Real vm = recon_m.v[idx];
-        const Real vp = recon_p.v[idx];
-        const Real pm = recon_m.e[idx];
-        const Real pp = recon_p.e[idx];
-        const Real Gm = recon_m.G[idx];
-        const Real Gp = recon_p.G[idx];
-        const Real Pm = recon_m.P[idx];
-        const Real Pp = recon_p.P[idx];
-        const Real um = recon_m.u[idx];
-        const Real up = recon_p.u[idx];
-        const Real wm = recon_m.w[idx];
-        const Real wp = recon_p.w[idx];
-        assert(rm > 0.0f); assert(rp > 0.0f);
-        assert(pm > 0.0f); assert(pp > 0.0f);
-        assert(Gm > 0.0f); assert(Gp > 0.0f);
-        assert(Pm >= 0.0f); assert(Pp >= 0.0f);
+        const uint_t idx_c = ID3(ix, iy, iz, NX, NY);
 
-        Real sm, sp;
-        _char_vel_einfeldt(rm, rp, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
-        const Real ss = _char_vel_star(rm, rp, vm, vp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
-        assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
+        for (int i=0; i < 2; ++i)
+        {
+            const uint_t idx = ID3(ix, iy+i, iz, NX, NYP1);
 
-        const Real fr = _hllc_rho(rm, rp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
-        const Real fv = _hllc_pvel(rm, rp, vm, vp, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
-        const Real fu = _hllc_vel(rm, rp, um, up, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
-        const Real fw = _hllc_vel(rm, rp, wm, wp, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
-        const Real fe = _hllc_e(rm, rp, vm, vp, um, up, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
-        const Real fG = _hllc_rho(Gm, Gp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
-        const Real fP = _hllc_rho(Pm, Pp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
-        assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+            const Real rm = recon_m.r[idx];
+            const Real rp = recon_p.r[idx];
+            const Real vm = recon_m.v[idx];
+            const Real vp = recon_p.v[idx];
+            const Real pm = recon_m.e[idx];
+            const Real pp = recon_p.e[idx];
+            const Real Gm = recon_m.G[idx];
+            const Real Gp = recon_p.G[idx];
+            const Real Pm = recon_m.P[idx];
+            const Real Pp = recon_p.P[idx];
+            const Real um = recon_m.u[idx];
+            const Real up = recon_p.u[idx];
+            const Real wm = recon_m.w[idx];
+            const Real wp = recon_p.w[idx];
+            assert(rm > 0.0f); assert(rp > 0.0f);
+            assert(pm > 0.0f); assert(pp > 0.0f);
+            assert(Gm > 0.0f); assert(Gp > 0.0f);
+            assert(Pm >= 0.0f); assert(Pp >= 0.0f);
 
-        const Real hllc_vel = _extraterm_hllc_vel(vm, vp, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
+            Real sm, sp;
+            _char_vel_einfeldt(rm, rp, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+            const Real ss = _char_vel_star(rm, rp, vm, vp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
+            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
 
-        // fluxes are saved in input arrays
-        recon_m.r[idx] = fr;
-        recon_m.v[idx] = fv;
-        recon_m.u[idx] = fu;
-        recon_m.w[idx] = fw;
-        recon_m.e[idx] = fe;
-        recon_p.r[idx] = fG;
-        recon_p.u[idx] = fP;
+            Gpp[i] = Gp; Gmm[i] = Gm;
+            Ppp[i] = Pp; Pmm[i] = Pm;
 
-        recon_p.v[idx] = hllc_vel;
+            fr[i] = _hllc_rho(rm, rp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
+            fv[i] = _hllc_pvel(rm, rp, vm, vp, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
+            fu[i] = _hllc_vel(rm, rp, um, up, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
+            fw[i] = _hllc_vel(rm, rp, wm, wp, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
+            fe[i] = _hllc_e(rm, rp, vm, vp, um, up, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
+            fG[i] = _hllc_rho(Gm, Gp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
+            fP[i] = _hllc_rho(Pm, Pp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
+            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+
+            hllc_vel[i] = _extraterm_hllc_vel(vm, vp, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
+        }
+
+        // fused flux divergence
+        divF.r[idx_c] += fr[1] - fr[0];
+        divF.v[idx_c] += fv[1] - fv[0];
+        divF.u[idx_c] += fu[1] - fu[0];
+        divF.w[idx_c] += fw[1] - fw[0];
+        divF.e[idx_c] += fe[1] - fe[0];
+        divF.r[idx_c] += fG[1] - fG[0];
+        divF.u[idx_c] += fP[1] - fP[0];
+
+        sumG[idx_c] += Gpp[0] + Gmm[1];
+        sumP[idx_c] += Ppp[0] + Pmm[1];
+        divU[idx_c] += hllc_vel[1] - hllc_vel[0];
     }
 }
 
@@ -2237,7 +2259,9 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     _WENO_Y<6><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6], mybuf->d_ygl[6], mybuf->d_ygr[6]);
 
     // hllc fluxes
-    _HLLC_Y<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(recon_m, recon_p);
+    // (the fused variant is less favorable -> based on current test results)
+    _HLLC_Y<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(recon_m, recon_p,
+            inout, d_sumG, d_sumP, d_divU);
 
     // flux divergence Y + extra term contribution
     const dim3 TEST_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
