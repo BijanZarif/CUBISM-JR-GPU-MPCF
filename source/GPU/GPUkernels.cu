@@ -1056,7 +1056,7 @@ void _CONV(DevicePointer data)
 
 __global__ void
 __launch_bounds__(128, 8)
-_xextraterm_hllc(DevicePointer divF, DevicePointer flux,
+_XEXTRATERM_HLLC(DevicePointer divF, DevicePointer flux,
         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
         const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
         const Real * const __restrict__ vel,
@@ -1178,6 +1178,65 @@ _xextraterm_hllc(DevicePointer divF, DevicePointer flux,
 
         for (int i=0, j=0; i < _TILE_DIM_; i += _BLOCK_ROWS_, ++j)
             divF.P[idx[j]] = smem1[threadIdx.y+i][threadIdx.x];
+    }
+}
+
+__global__ void
+__launch_bounds__(128, 8)
+_YEXTRATERM_HLLC(DevicePointer divF, DevicePointer flux,
+        const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
+        const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
+        const Real * const __restrict__ vel,
+        Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU)
+{
+    /* const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x; */
+    /* const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y; */
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if (ix < NX && iy < NY)
+    {
+        /* for (int i=0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
+        {
+            /* const uint_t idxm = ID3(ix,iy+i,iz,NX,NYP1); */
+            /* const uint_t idxp = ID3(ix,(iy+1)+i,iz,NX,NYP1); */
+            const uint_t idxm = ID3(ix,iy,iz,NX,NYP1);
+            const uint_t idxp = ID3(ix,(iy+1),iz,NX,NYP1);
+            const uint_t idx  = ID3(ix,iy,iz,NX,NY);
+
+            Real _sumG = Gp[idxm];
+            Real _sumP = Pp[idxm];
+            Real _divU = vel[idxp];
+            Real _divFr = flux.r[idxp];
+            Real _divFu = flux.u[idxp];
+            Real _divFv = flux.v[idxp];
+            Real _divFw = flux.w[idxp];
+            Real _divFe = flux.e[idxp];
+            Real _divFG = flux.G[idxp];
+            Real _divFP = flux.P[idxp];
+            _sumG = _sumG + Gm[idxp];
+            _sumP = _sumP + Pm[idxp];
+            _divU = _divU - vel[idxm];
+            _divFr = _divFr - flux.r[idxm];
+            _divFu = _divFu - flux.u[idxm];
+            _divFv = _divFv - flux.v[idxm];
+            _divFw = _divFw - flux.w[idxm];
+            _divFe = _divFe - flux.e[idxm];
+            _divFG = _divFG - flux.G[idxm];
+            _divFP = _divFP - flux.P[idxm];
+
+            sumG[idx] += _sumG;
+            sumP[idx] += _sumP;
+            divU[idx] += _divU;
+            divF.r[idx] += _divFr;
+            divF.u[idx] += _divFu;
+            divF.v[idx] += _divFv;
+            divF.w[idx] += _divFw;
+            divF.e[idx] += _divFe;
+            divF.G[idx] += _divFG;
+            divF.P[idx] += _divFP;
+        }
     }
 }
 
@@ -1306,58 +1365,58 @@ _xextraterm_hllc(DevicePointer divF, DevicePointer flux,
 /* } */
 
 
-__global__
-void _yextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
-        const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
-        const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
-        const Real * const __restrict__ vel,
-        Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU)
-{
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+/* __global__ */
+/* void _yextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux, */
+/*         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp, */
+/*         const Real * const __restrict__ Pm, const Real * const __restrict__ Pp, */
+/*         const Real * const __restrict__ vel, */
+/*         Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU) */
+/* { */
+/*     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x; */
+/*     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y; */
 
-    if (ix < NX && iy < NY)
-    {
-        for (uint_t iz = 0; iz < nslices; ++iz)
-        {
-            const uint_t idx  = ID3(ix,iy,iz,NX,NY);
-            const uint_t idxm = ID3(ix,iy,iz,NX,NYP1);
-            const uint_t idxp = ID3(ix,(iy+1),iz,NX,NYP1);
+/*     if (ix < NX && iy < NY) */
+/*     { */
+/*         for (uint_t iz = 0; iz < nslices; ++iz) */
+/*         { */
+/*             const uint_t idx  = ID3(ix,iy,iz,NX,NY); */
+/*             const uint_t idxm = ID3(ix,iy,iz,NX,NYP1); */
+/*             const uint_t idxp = ID3(ix,(iy+1),iz,NX,NYP1); */
 
-            Real _sumG = Gp[idxm];
-            Real _sumP = Pp[idxm];
-            Real _divU = vel[idxp];
-            Real _divFr = flux.r[idxp];
-            Real _divFu = flux.u[idxp];
-            Real _divFv = flux.v[idxp];
-            Real _divFw = flux.w[idxp];
-            Real _divFe = flux.e[idxp];
-            Real _divFG = flux.G[idxp];
-            Real _divFP = flux.P[idxp];
-            _sumG = _sumG + Gm[idxp];
-            _sumP = _sumP + Pm[idxp];
-            _divU = _divU - vel[idxm];
-            _divFr = _divFr - flux.r[idxm];
-            _divFu = _divFu - flux.u[idxm];
-            _divFv = _divFv - flux.v[idxm];
-            _divFw = _divFw - flux.w[idxm];
-            _divFe = _divFe - flux.e[idxm];
-            _divFG = _divFG - flux.G[idxm];
-            _divFP = _divFP - flux.P[idxm];
+/*             Real _sumG = Gp[idxm]; */
+/*             Real _sumP = Pp[idxm]; */
+/*             Real _divU = vel[idxp]; */
+/*             Real _divFr = flux.r[idxp]; */
+/*             Real _divFu = flux.u[idxp]; */
+/*             Real _divFv = flux.v[idxp]; */
+/*             Real _divFw = flux.w[idxp]; */
+/*             Real _divFe = flux.e[idxp]; */
+/*             Real _divFG = flux.G[idxp]; */
+/*             Real _divFP = flux.P[idxp]; */
+/*             _sumG = _sumG + Gm[idxp]; */
+/*             _sumP = _sumP + Pm[idxp]; */
+/*             _divU = _divU - vel[idxm]; */
+/*             _divFr = _divFr - flux.r[idxm]; */
+/*             _divFu = _divFu - flux.u[idxm]; */
+/*             _divFv = _divFv - flux.v[idxm]; */
+/*             _divFw = _divFw - flux.w[idxm]; */
+/*             _divFe = _divFe - flux.e[idxm]; */
+/*             _divFG = _divFG - flux.G[idxm]; */
+/*             _divFP = _divFP - flux.P[idxm]; */
 
-            sumG[idx] += _sumG;
-            sumP[idx] += _sumP;
-            divU[idx] += _divU;
-            divF.r[idx] += _divFr;
-            divF.u[idx] += _divFu;
-            divF.v[idx] += _divFv;
-            divF.w[idx] += _divFw;
-            divF.e[idx] += _divFe;
-            divF.G[idx] += _divFG;
-            divF.P[idx] += _divFP;
-        }
-    }
-}
+/*             sumG[idx] += _sumG; */
+/*             sumP[idx] += _sumP; */
+/*             divU[idx] += _divU; */
+/*             divF.r[idx] += _divFr; */
+/*             divF.u[idx] += _divFu; */
+/*             divF.v[idx] += _divFv; */
+/*             divF.w[idx] += _divFw; */
+/*             divF.e[idx] += _divFe; */
+/*             divF.G[idx] += _divFG; */
+/*             divF.P[idx] += _divFP; */
+/*         } */
+/*     } */
+/* } */
 
 
 __global__
@@ -2155,10 +2214,12 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     // computation, no warp divergence in branches), but fastest index in
     // output array is x. Shared memory is used to transpose the data
     // slice-wise.
+    // NOTE: fluxes computed in _HLLC kernels are stored in the recon_ arrays,
+    // as shown below. hllc_vel is stored in recon_p.v
     DevicePointer fluxes(recon_m.r, recon_m.u, recon_m.v, recon_m.w, recon_m.e, recon_p.r, recon_p.u);
-    const dim3 X_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
-    const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, nslices);
-    _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(inout, fluxes, recon_m.G, recon_p.G, recon_m.P, recon_p.P, recon_p.v, d_sumG, d_sumP, d_divU);
+    const dim3 xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
+    const dim3 xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, nslices);
+    _XEXTRATERM_HLLC<<<xtraGrid, xtraBlocks, 0, stream[s_id]>>>(inout, fluxes, recon_m.G, recon_p.G, recon_m.P, recon_p.P, recon_p.v, d_sumG, d_sumP, d_divU);
 
     // ========================================================================
     // Y
@@ -2178,6 +2239,10 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     // hllc fluxes
     _HLLC_Y<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(recon_m, recon_p);
 
+    // flux divergence Y + extra term contribution
+    const dim3 TEST_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
+    const dim3 TEST_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _BLOCK_ROWS_ - 1)/_BLOCK_ROWS_, nslices);
+    _YEXTRATERM_HLLC<<<TEST_xtraGrid, TEST_xtraBlocks, 0, stream[s_id]>>>(inout, fluxes, recon_m.G, recon_p.G, recon_m.P, recon_p.P, recon_p.v, d_sumG, d_sumP, d_divU);
 
 
     cudaDeviceSynchronize();
