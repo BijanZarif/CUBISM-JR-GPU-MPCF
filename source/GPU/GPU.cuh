@@ -1,7 +1,7 @@
 /* File        : GPU.cuh */
 /* Creator     : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Thu 14 Aug 2014 09:06:16 AM CEST */
-/* Modified    : Fri 29 Aug 2014 10:44:25 AM CEST */
+/* Modified    : Mon 01 Sep 2014 03:43:29 PM CEST */
 /* Description : GPU only, shared */
 #pragma once
 
@@ -49,4 +49,5 @@ struct DevicePointer // 7 fluid quantities
     Real * __restrict__ G;
     Real * __restrict__ P;
     DevicePointer(real_vector_t& c) : r(c[0]), u(c[1]), v(c[2]), w(c[3]), e(c[4]), G(c[5]), P(c[6]) { assert(c.size() == VSIZE); }
+    DevicePointer(Real *r_, Real *u_, Real *v_, Real *w_, Real *e_, Real *G_, Real *P_) : r(r_), u(u_), v(v_), w(w_), e(e_), G(G_), P(P_) {}
 };
