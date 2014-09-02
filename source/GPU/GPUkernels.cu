@@ -500,14 +500,61 @@ inline void _load_boundary_X(const uint_t iy, const uint_t iz,
         stencil[tid0 + i] = myTex3D<texID>(tmap0+i, iy, iz);
 }
 
+template <int texID, int gid0, int tid0, int gmap0, int tmap0, int ng> __device__
+inline void _load_boundary_Y(const uint_t ix, const uint_t iz,
+        Real * const __restrict__ stencil, const Real * const __restrict__ ghost)
+{
+    /* *
+     * load stencil data from texture and ghost mix.
+     * texID = texture reference to use
+     * gid0  = start index of first ghost value in stencil
+     * tid0  = start index of first texture value in stencil
+     * gmap0 = start index of first ghost value in ghost array
+     * tmap0 = start index of first tex value in 3DArray
+     * ng    = number of ghosts
+     *
+     * Assuming _STENCIL_WIDTH_ = 6, possible combinations are (x = ghost,
+     * o = texture), stencil is processed from left to right:
+     *
+     * gmap=0
+     * |     tmap=0
+     * |     |
+     * x x x o o o         tmap=NX-1 (gid0=0; tid0=3; gmap0=0; tmap0=0; ng=3)
+     *   x x o o o o       | gmap=0  (gid0=0; tid0=2; gmap0=1; tmap0=0; ng=2)
+     *     x o o o o o     | |       (gid0=0; tid0=1; gmap0=2; tmap0=0; ng=1)
+     *             o o o o o x       (gid0=5; tid0=0; gmap0=0; tmap0=NX-5; ng=1)
+     *               o o o o x x     (gid0=4; tid0=0; gmap0=0; tmap0=NX-4; ng=2)
+     *                 o o o x x x   (gid0=3; tid0=0; gmap0=0; tmap0=NX-3; ng=3)
+     * */
+    const int giz = iz-3; // iz starts at 3 due to zghosts in texture, but not in ghost array
+    for (int i = 0; i < ng; ++i)
+        stencil[gid0 + i] = ghost[GHOSTMAPY(ix, gmap0+i, giz)];
+
+    const int ntex = _STENCIL_WIDTH_ - ng;
+    for (int i = 0; i < ntex; ++i)
+        stencil[tid0 + i] = myTex3D<texID>(ix, tmap0+i, iz);
+}
+
 template <int texID> __device__
 inline void _load_internal_X(const uint_t ix, const uint_t iy, const uint_t iz, Real * __restrict__ stencil)
 {
     // fixed stencil: - - - 0 + + + + + . . .
+    assert(2 < ix);
     const int s_start = -3;
     const int s_end   = _STENCIL_WIDTH_ + s_start;
     for (int i=s_start; i < s_end; ++i)
         *stencil++ = myTex3D<texID>(ix+i, iy, iz);
+}
+
+template <int texID> __device__
+inline void _load_internal_Y(const uint_t ix, const uint_t iy, const uint_t iz, Real * __restrict__ stencil)
+{
+    // fixed stencil: - - - 0 + + + + + . . .
+    assert(2 < iy);
+    const int s_start = -3;
+    const int s_end   = _STENCIL_WIDTH_ + s_start;
+    for (int i=s_start; i < s_end; ++i)
+        *stencil++ = myTex3D<texID>(ix, iy+i, iz);
 }
 
 
@@ -545,6 +592,52 @@ void _WENO_X(Real * const __restrict__ p_minus, Real * const __restrict__ p_plus
             _load_boundary_X<texID, _STENCIL_WIDTH_-3, 0, 0, NX-(_STENCIL_WIDTH_-3), 3>(iy, iz, s, p_ghostR);
         else
             _load_internal_X<texID>(ix, iy, iz, s);
+
+        const Real recon_m = _weno_minus_clipped(s[0], s[1], s[2], s[3], s[4]); // 96 FLOP (6 DIV)
+        const Real recon_p = _weno_pluss_clipped(s[1], s[2], s[3], s[4], s[5]); // 96 FLOP (6 DIV)
+        assert(!isnan(recon_m)); assert(!isnan(recon_p));
+
+        // write
+        p_minus[idx] = recon_m;
+        p_plus[idx]  = recon_p;
+    }
+}
+
+
+template <int texID> __global__
+void _WENO_Y(Real * const __restrict__ p_minus, Real * const __restrict__ p_plus,
+        const Real * const __restrict__ p_ghostL, const Real * const __restrict__ p_ghostR)
+{
+    // this ensures that a stencil can only contain either left ghosts or right
+    // ghosts, but not a mix of left AND right ghosts.  This minimizes
+    // if-conditionals below when reading the stencil. Therefore, minimum
+    // number of cells in Y-direction is 5
+    assert(NYP1 > 5);
+
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z + 3; // textures are padded by 3 slices in z (zghosts)
+
+    if (ix < NX && iy < NYP1)
+    {
+        const uint_t idx = ID3(ix, iy, iz-3, NX, NYP1);
+
+        Real s[_STENCIL_WIDTH_]; // stencil
+
+        if (0 == iy)
+            _load_boundary_Y<texID, 0, 3, 0, 0, 3>(ix, iz, s, p_ghostL);
+        else if (1 == iy)
+            _load_boundary_Y<texID, 0, 2, 1, 0, 2>(ix, iz, s, p_ghostL);
+        else if (2 == iy)
+            _load_boundary_Y<texID, 0, 1, 2, 0, 1>(ix, iz, s, p_ghostL);
+        else if (NYP1-3 == iy)
+            _load_boundary_Y<texID, _STENCIL_WIDTH_-1, 0, 0, NY-(_STENCIL_WIDTH_-1), 1>(ix, iz, s, p_ghostR);
+        else if (NYP1-2 == iy)
+            _load_boundary_Y<texID, _STENCIL_WIDTH_-2, 0, 0, NY-(_STENCIL_WIDTH_-2), 2>(ix, iz, s, p_ghostR);
+        else if (NYP1-1 == iy)
+            _load_boundary_Y<texID, _STENCIL_WIDTH_-3, 0, 0, NY-(_STENCIL_WIDTH_-3), 3>(ix, iz, s, p_ghostR);
+        else
+            _load_internal_Y<texID>(ix, iy, iz, s);
 
         const Real recon_m = _weno_minus_clipped(s[0], s[1], s[2], s[3], s[4]); // 96 FLOP (6 DIV)
         const Real recon_p = _weno_pluss_clipped(s[1], s[2], s[3], s[4], s[5]); // 96 FLOP (6 DIV)
@@ -624,6 +717,72 @@ _HLLC_X(DevicePointer recon_m, DevicePointer recon_p)
     }
 }
 
+__global__ void
+/* __launch_bounds__(128, 16) */
+_HLLC_Y(DevicePointer recon_m, DevicePointer recon_p)
+{
+    // this ensures that a stencil can only contain either left ghosts or right
+    // ghosts, but not a mix of left AND right ghosts.  This minimizes
+    // if-conditionals below when reading the stencil. Therefore, minimum
+    // number of cells in Y-direction is 5
+    assert(NYP1 > 5);
+
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z;
+
+
+    if (ix < NX && iy < NYP1)
+    {
+        const uint_t idx = ID3(ix, iy, iz, NX, NYP1);
+
+        const Real rm = recon_m.r[idx];
+        const Real rp = recon_p.r[idx];
+        const Real vm = recon_m.v[idx];
+        const Real vp = recon_p.v[idx];
+        const Real pm = recon_m.e[idx];
+        const Real pp = recon_p.e[idx];
+        const Real Gm = recon_m.G[idx];
+        const Real Gp = recon_p.G[idx];
+        const Real Pm = recon_m.P[idx];
+        const Real Pp = recon_p.P[idx];
+        const Real um = recon_m.u[idx];
+        const Real up = recon_p.u[idx];
+        const Real wm = recon_m.w[idx];
+        const Real wp = recon_p.w[idx];
+        assert(rm > 0.0f); assert(rp > 0.0f);
+        assert(pm > 0.0f); assert(pp > 0.0f);
+        assert(Gm > 0.0f); assert(Gp > 0.0f);
+        assert(Pm >= 0.0f); assert(Pp >= 0.0f);
+
+        Real sm, sp;
+        _char_vel_einfeldt(rm, rp, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+        const Real ss = _char_vel_star(rm, rp, vm, vp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
+        assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
+
+        const Real fr = _hllc_rho(rm, rp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
+        const Real fv = _hllc_pvel(rm, rp, vm, vp, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
+        const Real fu = _hllc_vel(rm, rp, um, up, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
+        const Real fw = _hllc_vel(rm, rp, wm, wp, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
+        const Real fe = _hllc_e(rm, rp, vm, vp, um, up, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
+        const Real fG = _hllc_rho(Gm, Gp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
+        const Real fP = _hllc_rho(Pm, Pp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
+        assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+
+        const Real hllc_vel = _extraterm_hllc_vel(vm, vp, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
+
+        // fluxes are saved in input arrays
+        recon_m.r[idx] = fr;
+        recon_m.v[idx] = fv;
+        recon_m.u[idx] = fu;
+        recon_m.w[idx] = fw;
+        recon_m.e[idx] = fe;
+        recon_p.r[idx] = fG;
+        recon_p.u[idx] = fP;
+
+        recon_p.v[idx] = hllc_vel;
+    }
+}
 
 /* __global__ void */
 /* /1* __launch_bounds__(128, 16) *1/ */
@@ -897,7 +1056,7 @@ void _CONV(DevicePointer data)
 
 __global__ void
 __launch_bounds__(128, 8)
-_xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
+_xextraterm_hllc(DevicePointer divF, DevicePointer flux,
         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
         const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
         const Real * const __restrict__ vel,
@@ -909,11 +1068,6 @@ _xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
 
     // limiting resource
     __shared__ Real smem1[_TILE_DIM_][_TILE_DIM_+1];
-    /* __shared__ Real smem2[_TILE_DIM_][_TILE_DIM_+1]; */
-    /* __shared__ Real smem3[_TILE_DIM_][_TILE_DIM_+1]; */
-    /* __shared__ Real smem4[_TILE_DIM_][_TILE_DIM_+1]; */
-    /* __shared__ Real smem5[_TILE_DIM_][_TILE_DIM_+1]; */
-    /* __shared__ Real smem6[_TILE_DIM_][_TILE_DIM_+1]; */
 
     if (ix < NX && iy < NY)
     {
@@ -1996,16 +2150,39 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     // hllc fluxes
     _HLLC_X<<<X_grid, X_blocks, 0, stream[s_id]>>>(recon_m, recon_p);
 
-    // flux divegence X + extra term contribution
+    // flux divegence X + extra term contribution. Need extra kernel because of
+    // y is the fastest moving index for the above kernels (most efficient WENO
+    // computation, no warp divergence in branches), but fastest index in
+    // output array is x. Shared memory is used to transpose the data
+    // slice-wise.
     DevicePointer fluxes(recon_m.r, recon_m.u, recon_m.v, recon_m.w, recon_m.e, recon_p.r, recon_p.u);
     const dim3 X_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
     const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, nslices);
-    _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, inout, fluxes, recon_m.G, recon_p.G, recon_m.P, recon_p.P, recon_p.v, d_sumG, d_sumP, d_divU);
+    _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(inout, fluxes, recon_m.G, recon_p.G, recon_m.P, recon_p.P, recon_p.v, d_sumG, d_sumP, d_divU);
+
+    // ========================================================================
+    // Y
+    // ========================================================================
+    const dim3 Y_blocks(_WARPSIZE_, 1, 4);
+    const dim3 Y_grid((NX + _WARPSIZE_ - 1)/_WARPSIZE_, NYP1, (nslices + 4 - 1)/4);
+
+    // reconstruct
+    _WENO_Y<0><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[0], d_recon_p[0], mybuf->d_ygl[0], mybuf->d_ygr[0]);
+    _WENO_Y<1><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[1], d_recon_p[1], mybuf->d_ygl[1], mybuf->d_ygr[1]);
+    _WENO_Y<2><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[2], d_recon_p[2], mybuf->d_ygl[2], mybuf->d_ygr[2]);
+    _WENO_Y<3><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[3], d_recon_p[3], mybuf->d_ygl[3], mybuf->d_ygr[3]);
+    _WENO_Y<4><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[4], d_recon_p[4], mybuf->d_ygl[4], mybuf->d_ygr[4]);
+    _WENO_Y<5><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[5], d_recon_p[5], mybuf->d_ygl[5], mybuf->d_ygr[5]);
+    _WENO_Y<6><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6], mybuf->d_ygl[6], mybuf->d_ygr[6]);
+
+    // hllc fluxes
+    _HLLC_Y<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(recon_m, recon_p);
+
+
 
     cudaDeviceSynchronize();
-    /* std::exit(3); */
 
-    _TEST_dump(inout.u, 256*256*256*sizeof(Real), "split_xrhs.u.bin");
+    _TEST_dump(recon_m.u, 256*257*256*sizeof(Real), "split_recon_m.u.bin");
 
 
     // my ghosts TODO: don't need them
