@@ -717,8 +717,9 @@ _HLLC_X(DevicePointer recon_m, DevicePointer recon_p)
     }
 }
 
+
 __global__ void
-/* __launch_bounds__(128, 16) */
+__launch_bounds__(128, 9)
 _HLLC_Y(DevicePointer recon_m, DevicePointer recon_p, DevicePointer divF,
         Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU)
 {
@@ -790,7 +791,7 @@ _HLLC_Y(DevicePointer recon_m, DevicePointer recon_p, DevicePointer divF,
             hllc_vel[i] = _extraterm_hllc_vel(vm, vp, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
         }
 
-        // fluxes are saved in input arrays
+        // fused flux divergence
         divF.r[idx_c] += fr[1] - fr[0];
         divF.v[idx_c] += fv[1] - fv[0];
         divF.u[idx_c] += fu[1] - fu[0];
