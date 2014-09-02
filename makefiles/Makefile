@@ -57,8 +57,8 @@ ifneq "$(findstring localhost.localdomain,$(shell hostname))" "" #Cyrus
 endif
 
 # CUFLAGS += -arch=sm_35 -Xptxas -v
-# CUFLAGS += -arch=sm_35 -Xptxas -v -maxrregcount=64
-CUFLAGS += -arch=sm_35 -Xptxas -v -maxrregcount=32
+CUFLAGS += -arch=sm_35 -Xptxas -v -maxrregcount=50
+# CUFLAGS += -arch=sm_35 -Xptxas -v -maxrregcount=32
 
 #CPPFLAGS += -D_ALIGNBYTES_=$(align) -D_BLOCKSIZE_=$(bs) -D_BLOCKSIZEX_=$(bs) -D_BLOCKSIZEY_=$(bs) -D_BLOCKSIZEZ_=$(bs) -DWENOEPS=$(weps) -DNTHREADS=$(nthreads) $(extra)
 CPPFLAGS +=  -I$(mpi-inc)
