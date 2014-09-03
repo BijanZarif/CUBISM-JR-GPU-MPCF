@@ -47,17 +47,17 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
         trk1 = GPU->process_all(0, 1./4, dt/h);
         if (verbosity) printf("RK stage 1 takes %f sec\n", trk1);
     }
-    /* {// stage 2 */
-    /*     GPU->load_ghosts(); */
-    /*     trk2 = GPU->process_all(-17./32, 8./9, dt/h); */
-    /*     if (verbosity) printf("RK stage 2 takes %f sec\n", trk2); */
-    /* } */
-    /* {// stage 3 */
-    /*     GPU->load_ghosts(); */
-    /*     trk3 = GPU->process_all(-32./27, 3./4, dt/h); */
-    /*     if (verbosity) printf("RK stage 3 takes %f sec\n", trk3); */
-    /* } */
-    /* if (verbosity) printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3); */
+    {// stage 2
+        GPU->load_ghosts();
+        trk2 = GPU->process_all(-17./32, 8./9, dt/h);
+        if (verbosity) printf("RK stage 2 takes %f sec\n", trk2);
+    }
+    {// stage 3
+        GPU->load_ghosts();
+        trk3 = GPU->process_all(-32./27, 3./4, dt/h);
+        if (verbosity) printf("RK stage 3 takes %f sec\n", trk3);
+    }
+    if (verbosity) printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
     printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
 
     return dt;

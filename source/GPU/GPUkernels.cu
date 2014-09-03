@@ -6,8 +6,11 @@
  * */
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "GPU.cuh"
+
+#define _STENCIL_WIDTH_ 6
 
 #if _BLOCKSIZEX_ < 5
 #error Minimum _BLOCKSIZEX_ is 5
@@ -17,7 +20,6 @@
 #error Minimum _BLOCKSIZEZ_ is 1
 #endif
 
-// TODO: this might is no longer needed
 #if NX % _TILE_DIM_ != 0
 #error _BLOCKSIZEX_ should be an integer multiple of _TILE_DIM_
 #endif
@@ -25,12 +27,10 @@
 #error _BLOCKSIZEY_ should be an integer multiple of _TILE_DIM_
 #endif
 
+#ifndef NDEBUG
+#include "GPUdebug.h"
+#endif
 
-// DEBUG / CHECK
-#include <fstream>
-#include <sstream>
-#include <string>
-using namespace std;
 
 ///////////////////////////////////////////////////////////////////////////////
 //                           GLOBAL VARIABLES                                //
@@ -60,9 +60,6 @@ texture<float, 3, cudaReadModeElementType> tex03;
 texture<float, 3, cudaReadModeElementType> tex04;
 texture<float, 3, cudaReadModeElementType> tex05;
 texture<float, 3, cudaReadModeElementType> tex06;
-
-// TODO: REMOVE
-#include "Texture.cu"
 
 ///////////////////////////////////////////////////////////////////////////////
 //                             DEVICE FUNCTIONS                              //
@@ -454,7 +451,34 @@ inline Real _extraterm_hllc_vel(const Real um, const Real up,
 ///////////////////////////////////////////////////////////////////////////////
 //                                  KERNELS                                  //
 ///////////////////////////////////////////////////////////////////////////////
-#define _STENCIL_WIDTH_ 6
+__global__
+void _CONV(DevicePointer data)
+{
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z;
+
+    if (ix < NX && iy < NY)
+    {
+        const uint_t i0 = ID3(ix,iy,iz,NX,NY);
+
+        const Real r = data.r[i0];
+        const Real u = data.u[i0];
+        const Real v = data.v[i0];
+        const Real w = data.w[i0];
+        const Real e = data.e[i0];
+        const Real G = data.G[i0];
+        const Real P = data.P[i0];
+
+        // convert
+        const Real rinv = 1.0f/r;
+        data.u[i0] = u*rinv;
+        data.v[i0] = v*rinv;
+        data.w[i0] = w*rinv;
+        data.e[i0] = (e - 0.5f*(u*u + v*v + w*w)*rinv - P) / G;
+    }
+}
+
 
 template <int texID> __device__ inline float myTex3D(const int ix, const int iy, const int iz);
 template <> __device__ inline float myTex3D<0>(const int ix, const int iy, const int iz) { return tex3D(tex00, ix, iy, iz); }
@@ -557,6 +581,17 @@ inline void _load_internal_Y(const uint_t ix, const uint_t iy, const uint_t iz, 
         *stencil++ = myTex3D<texID>(ix, iy+i, iz);
 }
 
+template <int texID> __device__
+inline void _load_internal_Z(const uint_t ix, const uint_t iy, const uint_t iz, Real * __restrict__ stencil)
+{
+    // fixed stencil: - - - 0 + + + + + . . .
+    assert(2 < iz);
+    const int s_start = -3;
+    const int s_end   = _STENCIL_WIDTH_ + s_start;
+    for (int i=s_start; i < s_end; ++i)
+        *stencil++ = myTex3D<texID>(ix, iy, iz+i);
+}
+
 
 template <int texID> __global__
 void _WENO_X(Real * const __restrict__ p_minus, Real * const __restrict__ p_plus,
@@ -597,7 +632,6 @@ void _WENO_X(Real * const __restrict__ p_minus, Real * const __restrict__ p_plus
         const Real recon_p = _weno_pluss_clipped(s[1], s[2], s[3], s[4], s[5]); // 96 FLOP (6 DIV)
         assert(!isnan(recon_m)); assert(!isnan(recon_p));
 
-        // write
         p_minus[idx] = recon_m;
         p_plus[idx]  = recon_p;
     }
@@ -643,15 +677,73 @@ void _WENO_Y(Real * const __restrict__ p_minus, Real * const __restrict__ p_plus
         const Real recon_p = _weno_pluss_clipped(s[1], s[2], s[3], s[4], s[5]); // 96 FLOP (6 DIV)
         assert(!isnan(recon_m)); assert(!isnan(recon_p));
 
-        // write
         p_minus[idx] = recon_m;
         p_plus[idx]  = recon_p;
     }
 }
 
 
+/* template <int texID> __global__ */
+/* void _WENO_Z(Real * const __restrict__ p_minus, Real * const __restrict__ p_plus) */
+/* { */
+/*     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x; */
+/*     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y; */
+/*     const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z + 3; // textures are padded by 3 slices in z (zghosts) */
+
+/*     if (ix < NX && iy < NY) */
+/*     { */
+/*         const uint_t idx = ID3(ix, iy, iz-3, NX, NY); */
+
+/*         Real s[_STENCIL_WIDTH_]; // stencil */
+
+/*         _load_internal_Z<texID>(ix, iy, iz, s); */
+
+/*         const Real recon_m = _weno_minus_clipped(s[0], s[1], s[2], s[3], s[4]); // 96 FLOP (6 DIV) */
+/*         const Real recon_p = _weno_pluss_clipped(s[1], s[2], s[3], s[4], s[5]); // 96 FLOP (6 DIV) */
+/*         assert(!isnan(recon_m)); assert(!isnan(recon_p)); */
+
+/*         p_minus[idx] = recon_m; */
+/*         p_plus[idx]  = recon_p; */
+/*     } */
+/* } */
+
+template <int texID> __global__
+void _WENO_Z(Real * const __restrict__ p_minus, Real * const __restrict__ p_plus)
+{
+    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint_t iy = blockIdx.y * 8 + threadIdx.y; // each thread below does twice amount of work
+    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z + 3; // textures are padded by 3 slices in z (zghosts)
+
+    // we must do twice the amount of work for the Z-direction in order to
+    // reach good performance
+    if (ix < NX && iy < NY)
+    {
+        const uint_t idx1 = ID3(ix, iy, iz-3, NX, NY);
+        const uint_t idx2 = ID3(ix, iy+4, iz-3, NX, NY);
+
+        Real s1[_STENCIL_WIDTH_]; // stencil
+        Real s2[_STENCIL_WIDTH_]; // stencil
+
+        _load_internal_Z<texID>(ix, iy, iz, s1);
+        _load_internal_Z<texID>(ix, iy+4, iz, s2);
+
+        const Real recon_m1 = _weno_minus_clipped(s1[0], s1[1], s1[2], s1[3], s1[4]); // 96 FLOP (6 DIV)
+        const Real recon_p1 = _weno_pluss_clipped(s1[1], s1[2], s1[3], s1[4], s1[5]); // 96 FLOP (6 DIV)
+        assert(!isnan(recon_m1)); assert(!isnan(recon_p1));
+
+        const Real recon_m2 = _weno_minus_clipped(s2[0], s2[1], s2[2], s2[3], s2[4]); // 96 FLOP (6 DIV)
+        const Real recon_p2 = _weno_pluss_clipped(s2[1], s2[2], s2[3], s2[4], s2[5]); // 96 FLOP (6 DIV)
+        assert(!isnan(recon_m2)); assert(!isnan(recon_p2));
+
+        p_minus[idx1] = recon_m1;
+        p_plus[idx1]  = recon_p1;
+        p_minus[idx2] = recon_m2;
+        p_plus[idx2]  = recon_p2;
+    }
+}
+
 __global__ void
-/* __launch_bounds__(128, 16) */
+__launch_bounds__(128, 16)
 _HLLC_X(DevicePointer recon_m, DevicePointer recon_p)
 {
     // this ensures that a stencil can only contain either left ghosts or right
@@ -688,7 +780,6 @@ _HLLC_X(DevicePointer recon_m, DevicePointer recon_p)
         assert(Gm > 0.0f); assert(Gp > 0.0f);
         assert(Pm >= 0.0f); assert(Pp >= 0.0f);
 
-        // TODO: inline computations below
         Real sm, sp;
         _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
         const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp); // 11 FLOP (1 DIV)
@@ -733,20 +824,28 @@ _HLLC_Y(DevicePointer recon_m, DevicePointer recon_p, DevicePointer divF,
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
     const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z;
 
+    /* *
+     * Fused HLLC -> flux divergence is computed directly in this kernel.
+     * Therefore, no additional kernel launch is required to compute the flux
+     * divergence and the advection extra term contributions after this kernel
+     * has completed
+     * */
     if (ix < NX && iy < NY)
     {
-        Real fr[2];
-        Real fu[2];
-        Real fv[2];
-        Real fw[2];
-        Real fe[2];
-        Real fG[2];
-        Real fP[2];
-        Real hllc_vel[2];
-        Real Gpp[2], Gmm[2];
-        Real Ppp[2], Pmm[2];
-
         const uint_t idx_c = ID3(ix, iy, iz, NX, NY);
+        const Real s10[2] = {1.0f, 0.0f};
+        const Real s01[2] = {0.0f, 1.0f};
+        const Real m11[2] = {-1.0f, 1.0f};
+        Real fr = divF.r[idx_c];
+        Real fu = divF.u[idx_c];
+        Real fv = divF.v[idx_c];
+        Real fw = divF.w[idx_c];
+        Real fe = divF.e[idx_c];
+        Real fG = divF.G[idx_c];
+        Real fP = divF.P[idx_c];
+        Real hllc_vel = divU[idx_c];
+        Real sG = sumG[idx_c];
+        Real sP = sumP[idx_c];
 
         for (int i=0; i < 2; ++i)
         {
@@ -776,302 +875,131 @@ _HLLC_Y(DevicePointer recon_m, DevicePointer recon_p, DevicePointer divF,
             const Real ss = _char_vel_star(rm, rp, vm, vp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
             assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
 
-            Gpp[i] = Gp; Gmm[i] = Gm;
-            Ppp[i] = Pp; Pmm[i] = Pm;
+            sG += s10[i]*Gp;
+            sP += s10[i]*Pp;
+            sG += s01[i]*Gm;
+            sP += s01[i]*Pm;
 
-            fr[i] = _hllc_rho(rm, rp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
-            fv[i] = _hllc_pvel(rm, rp, vm, vp, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
-            fu[i] = _hllc_vel(rm, rp, um, up, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
-            fw[i] = _hllc_vel(rm, rp, wm, wp, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
-            fe[i] = _hllc_e(rm, rp, vm, vp, um, up, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
-            fG[i] = _hllc_rho(Gm, Gp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
-            fP[i] = _hllc_rho(Pm, Pp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
+            fr += m11[i] * _hllc_rho(rm, rp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
+            fv += m11[i] * _hllc_pvel(rm, rp, vm, vp, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
+            fu += m11[i] * _hllc_vel(rm, rp, um, up, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
+            fw += m11[i] * _hllc_vel(rm, rp, wm, wp, vm, vp, sm, sp, ss); // 25 FLOP (2 DIV)
+            fe += m11[i] * _hllc_e(rm, rp, vm, vp, um, up, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
+            fG += m11[i] * _hllc_rho(Gm, Gp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
+            fP += m11[i] * _hllc_rho(Pm, Pp, vm, vp, sm, sp, ss); // 23 FLOP (2 DIV)
             assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
 
-            hllc_vel[i] = _extraterm_hllc_vel(vm, vp, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
+            hllc_vel += m11[i] * _extraterm_hllc_vel(vm, vp, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
         }
 
         // fused flux divergence
-        divF.r[idx_c] += fr[1] - fr[0];
-        divF.v[idx_c] += fv[1] - fv[0];
-        divF.u[idx_c] += fu[1] - fu[0];
-        divF.w[idx_c] += fw[1] - fw[0];
-        divF.e[idx_c] += fe[1] - fe[0];
-        divF.r[idx_c] += fG[1] - fG[0];
-        divF.u[idx_c] += fP[1] - fP[0];
+        divF.r[idx_c] = fr;
+        divF.v[idx_c] = fv;
+        divF.u[idx_c] = fu;
+        divF.w[idx_c] = fw;
+        divF.e[idx_c] = fe;
+        divF.G[idx_c] = fG;
+        divF.P[idx_c] = fP;
 
-        sumG[idx_c] += Gpp[0] + Gmm[1];
-        sumP[idx_c] += Ppp[0] + Pmm[1];
-        divU[idx_c] += hllc_vel[1] - hllc_vel[0];
-    }
-}
-
-/* __global__ void */
-/* /1* __launch_bounds__(128, 16) *1/ */
-/* _HLLC3D_X(const uint_t nslices, DevicePointer recon_m, DevicePointer recon_p) */
-/* { */
-/*     // this ensures that a stencil can only contain either left ghosts or right */
-/*     // ghosts, but not a mix of left AND right ghosts.  This minimizes */
-/*     // if-conditionals below when reading the stencil. Therefore, minimum */
-/*     // number of cells in X-direction is 5 */
-/*     assert(NXP1 > 5); */
-
-/*     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x; */
-/*     /1* const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y; *1/ */
-/*     const uint_t iy = blockIdx.y * 2 * _WARPSIZE_ + threadIdx.y; */
-/*     const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z + 3; */
-
-/*     __shared__ Real rm[2], rp[2], um[2], up[2], vm[2], vp[2], wm[2], wp[2], pm[2], pp[2], Gm[2], Gp[2], Pm[2], Pp[2], sm[2], sp[2], ss[2]; */
-/*     /1* __shared__ uint_t idx[2]; *1/ */
-
-/*     if (ix < NXP1 && iy < NY) */
-/*     { */
-/*         for (int i = 0; i < 2; ++i) */
-/*         { */
-/*             const uint_t idx = ID3(iy+i*_WARPSIZE_, ix, iz-3, NY, NXP1); */
-/*             rm[i] = recon_m.r[idx]; */
-/*             rp[i] = recon_p.r[idx]; */
-/*             um[i] = recon_m.u[idx]; */
-/*             up[i] = recon_p.u[idx]; */
-/*             pm[i] = recon_m.e[idx]; */
-/*             pp[i] = recon_p.e[idx]; */
-/*             Gm[i] = recon_m.G[idx]; */
-/*             Gp[i] = recon_p.G[idx]; */
-/*             Pm[i] = recon_m.P[idx]; */
-/*             Pp[i] = recon_p.P[idx]; */
-/*             vm[i] = recon_m.v[idx]; */
-/*             vp[i] = recon_p.v[idx]; */
-/*             wm[i] = recon_m.w[idx]; */
-/*             wp[i] = recon_p.w[idx]; */
-/*             assert(rm > 0.0f); assert(rp > 0.0f); */
-/*             assert(pm > 0.0f); assert(pp > 0.0f); */
-/*             assert(Gm > 0.0f); assert(Gp > 0.0f); */
-/*             assert(Pm >= 0.0f); assert(Pp >= 0.0f); */
-/*         } */
-
-/*         for (int i = 0; i < 2; ++i) */
-/*         { */
-/*             const uint_t idx = ID3(iy+i*_WARPSIZE_, ix, iz-3, NY, NXP1); */
-
-/*             /1* Real sm, sp; *1/ */
-/*             _char_vel_einfeldt(rm[i], rp[i], um[i], up[i], pm[i], pp[i], Gm[i], Gp[i], Pm[i], Pp[i], sm[i], sp[i]); // 29 FLOP (6 DIV) */
-/*             /1* const Real ss = _char_vel_star(rm[i], rp[i], um[i], up[i], pm[i], pp[i], sm[i], sp[i]); // 11 FLOP (1 DIV) *1/ */
-/*             ss[i] = _char_vel_star(rm[i], rp[i], um[i], up[i], pm[i], pp[i], sm[i], sp[i]); // 11 FLOP (1 DIV) */
-/*             assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss)); */
-
-/*             const Real fr = _hllc_rho(rm[i], rp[i], um[i], up[i], sm[i], sp[i], ss[i]); // 23 FLOP (2 DIV) */
-/*             const Real fu = _hllc_pvel(rm[i], rp[i], um[i], up[i], pm[i], pp[i], sm[i], sp[i], ss[i]); // 29 FLOP (2 DIV) */
-/*             const Real fv = _hllc_vel(rm[i], rp[i], vm[i], vp[i], um[i], up[i], sm[i], sp[i], ss[i]); // 25 FLOP (2 DIV) */
-/*             const Real fw = _hllc_vel(rm[i], rp[i], wm[i], wp[i], um[i], up[i], sm[i], sp[i], ss[i]); // 25 FLOP (2 DIV) */
-/*             const Real fe = _hllc_e(rm[i], rp[i], um[i], up[i], vm[i], vp[i], wm[i], wp[i], pm[i], pp[i], Gm[i], Gp[i], Pm[i], Pp[i], sm[i], sp[i], ss[i]); // 59 FLOP (4 DIV) */
-/*             const Real fG = _hllc_rho(Gm[i], Gp[i], um[i], up[i], sm[i], sp[i], ss[i]); // 23 FLOP (2 DIV) */
-/*             const Real fP = _hllc_rho(Pm[i], Pp[i], um[i], up[i], sm[i], sp[i], ss[i]); // 23 FLOP (2 DIV) */
-/*             assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP)); */
-
-/*             const Real hllc_vel = _extraterm_hllc_vel(um[i], up[i], Gm[i], Gp[i], Pm[i], Pp[i], sm[i], sp[i], ss[i]); // 19 FLOP (2 DIV) */
-
-/*             // this is crap! */
-/*             recon_p.r[idx] = Gm[i]; */
-/*             recon_p.u[idx] = Gp[i]; */
-/*             recon_p.v[idx] = Pm[i]; */
-/*             recon_p.w[idx] = Pp[i]; */
-
-/*             recon_m.r[idx] = fr; */
-/*             recon_m.u[idx] = fu; */
-/*             recon_m.v[idx] = fv; */
-/*             recon_m.w[idx] = fw; */
-/*             recon_m.e[idx] = fe; */
-/*             recon_m.G[idx] = fG; */
-/*             recon_m.P[idx] = fP; */
-
-/*             recon_p.e[idx] = hllc_vel; */
-/*         } */
-/*     } */
-/* } */
-
-
-__global__
-void _TEST_CONV(DevicePointer inout,
-        DevicePointer xgL, DevicePointer xgR,
-        DevicePointer ygL, DevicePointer ygR)
-{
-    const Real r_ref = 1.5f;
-    const Real u_ref = 1.0f;
-    const Real v_ref = 1.0f;
-    const Real w_ref = 1.0f;
-    const Real e_ref = 1.0f;
-    const Real G_ref = 2.0f;
-    const Real P_ref = 3.0f;
-
-    // test main body
-    const uint_t Ninout = NX * NY * (NodeBlock::sizeZ + 6);
-    for (int i = 0; i < Ninout; ++i)
-    {
-        /* printf("%f\n", inout.w[i]); */
-        assert(inout.r[i] == r_ref);
-        assert(inout.u[i] == u_ref);
-        assert(inout.v[i] == v_ref);
-        assert(inout.w[i] == w_ref);
-        assert(inout.e[i] == e_ref);
-        assert(inout.G[i] == G_ref);
-        assert(inout.P[i] == P_ref);
-    }
-
-    // test xghosts
-    const uint_t Nxghost = 3*NY*(NodeBlock::sizeZ);
-    for (int i = 0; i < Nxghost; ++i)
-    {
-        assert(xgR.r[i] == r_ref);
-        assert(xgR.u[i] == u_ref);
-        assert(xgR.v[i] == v_ref);
-        assert(xgR.w[i] == w_ref);
-        assert(xgR.e[i] == e_ref);
-        assert(xgR.G[i] == G_ref);
-        assert(xgR.P[i] == P_ref);
-
-        assert(xgL.r[i] == r_ref);
-        assert(xgL.u[i] == u_ref);
-        assert(xgL.v[i] == v_ref);
-        assert(xgL.w[i] == w_ref);
-        assert(xgL.e[i] == e_ref);
-        assert(xgL.G[i] == G_ref);
-        assert(xgL.P[i] == P_ref);
-    }
-
-    // test yghosts
-    const uint_t Nyghost = NX*3*(NodeBlock::sizeZ);
-    for (int i = 0; i < Nyghost; ++i)
-    {
-        assert(ygR.r[i] == r_ref);
-        assert(ygR.u[i] == u_ref);
-        assert(ygR.v[i] == v_ref);
-        assert(ygR.w[i] == w_ref);
-        assert(ygR.e[i] == e_ref);
-        assert(ygR.G[i] == G_ref);
-        assert(ygR.P[i] == P_ref);
-
-        assert(ygL.r[i] == r_ref);
-        assert(ygL.u[i] == u_ref);
-        assert(ygL.v[i] == v_ref);
-        assert(ygL.w[i] == w_ref);
-        assert(ygL.e[i] == e_ref);
-        assert(ygL.G[i] == G_ref);
-        assert(ygL.P[i] == P_ref);
+        divU[idx_c] = hllc_vel;
+        sumG[idx_c] = sG;
+        sumP[idx_c] = sP;
     }
 }
 
 
-/* __global__ */
-/* void _CONV(const uint_t nslices, DevicePointer data) */
-/* { */
-/*     const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x; */
-/*     const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y; */
-/*     const uint_t offset = _BLOCK_ROWS_ * NX; */
-
-/*     if (ix < NX && iy < NY) */
-/*     { */
-/*         for (uint_t iz = 0; iz < nslices; ++iz) // zghosts inclusive */
-/*         { */
-/*             uint_t i0 = ID3(ix,iy,iz,NX,NY); */
-/*             Real *pr = &data.r[i0]; */
-/*             Real *pu = &data.u[i0]; */
-/*             Real *pv = &data.v[i0]; */
-/*             Real *pw = &data.w[i0]; */
-/*             Real *pe = &data.e[i0]; */
-/*             Real *pG = &data.G[i0]; */
-/*             Real *pP = &data.P[i0]; */
-/*             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
-/*             { */
-/*                 /1* const uint_t myidx = ID3(ix,iy+i,iz,NX,NY); *1/ */
-/*                 const Real r = *pr; */
-/*                 const Real u = *pu; */
-/*                 const Real v = *pv; */
-/*                 const Real w = *pw; */
-/*                 const Real e = *pe; */
-/*                 const Real G = *pG; */
-/*                 const Real P = *pP; */
-
-/*                 // convert */
-/*                 const Real rinv = 1.0f/r; */
-/*                 *pu = u*rinv; */
-/*                 *pv = v*rinv; */
-/*                 *pw = w*rinv; */
-/*                 *pe = (e - 0.5f*(u*u + v*v + w*w)*rinv - P) / G; */
-
-/*                 pr += offset; */
-/*                 pu += offset; */
-/*                 pv += offset; */
-/*                 pw += offset; */
-/*                 pe += offset; */
-/*                 pG += offset; */
-/*                 pP += offset; */
-/*             } */
-/*         } */
-/*     } */
-/* } */
-
-
-/* __global__ */
-/* void _CONV(const uint_t nslices, DevicePointer data) */
-/* { */
-/*     const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x; */
-/*     const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y; */
-/*     const uint_t offset = _BLOCK_ROWS_ * NX; */
-
-/*     if (ix < NX && iy < NY) */
-/*     { */
-/*         for (uint_t iz = 0; iz < nslices; ++iz) // zghosts inclusive */
-/*         { */
-/*             uint_t i0 = ID3(ix,iy,iz,NX,NY); */
-/*             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
-/*             { */
-/*                 const Real r = data.r[i0]; */
-/*                 const Real u = data.u[i0]; */
-/*                 const Real v = data.v[i0]; */
-/*                 const Real w = data.w[i0]; */
-/*                 const Real e = data.e[i0]; */
-/*                 const Real G = data.G[i0]; */
-/*                 const Real P = data.P[i0]; */
-
-/*                 // convert */
-/*                 const Real rinv = 1.0f/r; */
-/*                 data.u[i0] = u*rinv; */
-/*                 data.v[i0] = v*rinv; */
-/*                 data.w[i0] = w*rinv; */
-/*                 data.e[i0] = (e - 0.5f*(u*u + v*v + w*w)*rinv - P) / G; */
-
-/*                 i0 += offset; */
-/*             } */
-/*         } */
-/*     } */
-/* } */
-
-
-__global__
-void _CONV(DevicePointer data)
+__global__ void
+__launch_bounds__(128, 9)
+_HLLC_Z(DevicePointer recon_m, DevicePointer recon_p, DevicePointer divF,
+        Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU)
 {
     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
     const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z;
 
+    /* *
+     * Fused HLLC -> flux divergence is computed directly in this kernel.
+     * Therefore, no additional kernel launch is required to compute the flux
+     * divergence and the advection extra term contributions after this kernel
+     * has completed
+     * */
     if (ix < NX && iy < NY)
     {
-        const uint_t i0 = ID3(ix,iy,iz,NX,NY);
+        const uint_t idx_c = ID3(ix, iy, iz, NX, NY);
+        const Real s10[2] = {1.0f, 0.0f};
+        const Real s01[2] = {0.0f, 1.0f};
+        const Real m11[2] = {-1.0f, 1.0f};
+        Real fr = divF.r[idx_c];
+        Real fu = divF.u[idx_c];
+        Real fv = divF.v[idx_c];
+        Real fw = divF.w[idx_c];
+        Real fe = divF.e[idx_c];
+        Real fG = divF.G[idx_c];
+        Real fP = divF.P[idx_c];
+        Real hllc_vel = divU[idx_c];
+        Real sG = sumG[idx_c];
+        Real sP = sumP[idx_c];
 
-        const Real r = data.r[i0];
-        const Real u = data.u[i0];
-        const Real v = data.v[i0];
-        const Real w = data.w[i0];
-        const Real e = data.e[i0];
-        const Real G = data.G[i0];
-        const Real P = data.P[i0];
+        const Real inv6 = 1.0f/6.0f;
 
-        // convert
-        const Real rinv = 1.0f/r;
-        data.u[i0] = u*rinv;
-        data.v[i0] = v*rinv;
-        data.w[i0] = w*rinv;
-        data.e[i0] = (e - 0.5f*(u*u + v*v + w*w)*rinv - P) / G;
+        for (int i=0; i < 2; ++i)
+        {
+            const uint_t idx = ID3(ix, iy, iz+i, NX, NY);
+
+            const Real rm = recon_m.r[idx];
+            const Real rp = recon_p.r[idx];
+            const Real wm = recon_m.w[idx];
+            const Real wp = recon_p.w[idx];
+            const Real pm = recon_m.e[idx];
+            const Real pp = recon_p.e[idx];
+            const Real Gm = recon_m.G[idx];
+            const Real Gp = recon_p.G[idx];
+            const Real Pm = recon_m.P[idx];
+            const Real Pp = recon_p.P[idx];
+            const Real um = recon_m.u[idx];
+            const Real up = recon_p.u[idx];
+            const Real vm = recon_m.v[idx];
+            const Real vp = recon_p.v[idx];
+            assert(rm > 0.0f); assert(rp > 0.0f);
+            assert(pm > 0.0f); assert(pp > 0.0f);
+            assert(Gm > 0.0f); assert(Gp > 0.0f);
+            assert(Pm >= 0.0f); assert(Pp >= 0.0f);
+
+            Real sm, sp;
+            _char_vel_einfeldt(rm, rp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+            const Real ss = _char_vel_star(rm, rp, wm, wp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
+            assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
+
+            sG += s10[i]*Gp;
+            sP += s10[i]*Pp;
+            sG += s01[i]*Gm;
+            sP += s01[i]*Pm;
+
+            fr += m11[i] * _hllc_rho(rm, rp, wm, wp, sm, sp, ss); // 23 FLOP (2 DIV)
+            fw += m11[i] * _hllc_pvel(rm, rp, wm, wp, pm, pp, sm, sp, ss); // 29 FLOP (2 DIV)
+            fu += m11[i] * _hllc_vel(rm, rp, um, up, wm, wp, sm, sp, ss); // 25 FLOP (2 DIV)
+            fv += m11[i] * _hllc_vel(rm, rp, vm, vp, wm, wp, sm, sp, ss); // 25 FLOP (2 DIV)
+            fe += m11[i] * _hllc_e(rm, rp, wm, wp, um, up, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp, ss); // 59 FLOP (4 DIV)
+            fG += m11[i] * _hllc_rho(Gm, Gp, wm, wp, sm, sp, ss); // 23 FLOP (2 DIV)
+            fP += m11[i] * _hllc_rho(Pm, Pp, wm, wp, sm, sp, ss); // 23 FLOP (2 DIV)
+            assert(!isnan(fr)); assert(!isnan(fu)); assert(!isnan(fv)); assert(!isnan(fw)); assert(!isnan(fe)); assert(!isnan(fG)); assert(!isnan(fP));
+
+            hllc_vel += m11[i] * _extraterm_hllc_vel(wm, wp, Gm, Gp, Pm, Pp, sm, sp, ss); // 19 FLOP (2 DIV)
+        }
+
+        sG *= inv6;
+        sP *= inv6;
+
+        // fused flux divergence
+        divF.r[idx_c] = fr;
+        fG = fG + (-sG*hllc_vel);
+        divF.w[idx_c] = fw;
+        fP = fP + (-sP*hllc_vel);
+        divF.u[idx_c] = fu;
+        divF.v[idx_c] = fv;
+        divF.e[idx_c] = fe;
+        divF.G[idx_c] = fG;
+        divF.P[idx_c] = fP;
     }
 }
 
@@ -1088,7 +1016,7 @@ _XEXTRATERM_HLLC(DevicePointer divF, DevicePointer flux,
     const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y;
     const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z;
 
-    // limiting resource
+    // limiting resource (4.125 KB/block with _TILE_DIM_ = 32)
     __shared__ Real smem1[_TILE_DIM_][_TILE_DIM_+1];
 
     if (ix < NX && iy < NY)
@@ -1203,207 +1131,30 @@ _XEXTRATERM_HLLC(DevicePointer divF, DevicePointer flux,
     }
 }
 
-__global__ void
-__launch_bounds__(128, 8)
-_YEXTRATERM_HLLC(DevicePointer divF, DevicePointer flux,
-        const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
-        const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
-        const Real * const __restrict__ vel,
-        Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU)
-{
-    /* const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x; */
-    /* const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y; */
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-    const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z;
 
-    if (ix < NX && iy < NY)
-    {
-        /* for (int i=0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
-        {
-            /* const uint_t idxm = ID3(ix,iy+i,iz,NX,NYP1); */
-            /* const uint_t idxp = ID3(ix,(iy+1)+i,iz,NX,NYP1); */
-            const uint_t idxm = ID3(ix,iy,iz,NX,NYP1);
-            const uint_t idxp = ID3(ix,(iy+1),iz,NX,NYP1);
-            const uint_t idx  = ID3(ix,iy,iz,NX,NY);
-
-            Real _sumG = Gp[idxm];
-            Real _sumP = Pp[idxm];
-            Real _divU = vel[idxp];
-            Real _divFr = flux.r[idxp];
-            Real _divFu = flux.u[idxp];
-            Real _divFv = flux.v[idxp];
-            Real _divFw = flux.w[idxp];
-            Real _divFe = flux.e[idxp];
-            Real _divFG = flux.G[idxp];
-            Real _divFP = flux.P[idxp];
-            _sumG = _sumG + Gm[idxp];
-            _sumP = _sumP + Pm[idxp];
-            _divU = _divU - vel[idxm];
-            _divFr = _divFr - flux.r[idxm];
-            _divFu = _divFu - flux.u[idxm];
-            _divFv = _divFv - flux.v[idxm];
-            _divFw = _divFw - flux.w[idxm];
-            _divFe = _divFe - flux.e[idxm];
-            _divFG = _divFG - flux.G[idxm];
-            _divFP = _divFP - flux.P[idxm];
-
-            sumG[idx] += _sumG;
-            sumP[idx] += _sumP;
-            divU[idx] += _divU;
-            divF.r[idx] += _divFr;
-            divF.u[idx] += _divFu;
-            divF.v[idx] += _divFv;
-            divF.w[idx] += _divFw;
-            divF.e[idx] += _divFe;
-            divF.G[idx] += _divFG;
-            divF.P[idx] += _divFP;
-        }
-    }
-}
-
-
-/* __global__ */
-/* void _xextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux, */
+/* __global__ void */
+/* __launch_bounds__(128, 8) */
+/* _YEXTRATERM_HLLC(DevicePointer divF, DevicePointer flux, */
 /*         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp, */
 /*         const Real * const __restrict__ Pm, const Real * const __restrict__ Pp, */
 /*         const Real * const __restrict__ vel, */
 /*         Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU) */
 /* { */
-/*     const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x; */
-/*     const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y; */
-
-/*     // limiting resource */
-/*     __shared__ Real smem1[_TILE_DIM_][_TILE_DIM_+1]; */
-/*     __shared__ Real smem2[_TILE_DIM_][_TILE_DIM_+1]; */
-/*     __shared__ Real smem3[_TILE_DIM_][_TILE_DIM_+1]; */
-/*     __shared__ Real smem4[_TILE_DIM_][_TILE_DIM_+1]; */
-/*     __shared__ Real smem5[_TILE_DIM_][_TILE_DIM_+1]; */
-/*     __shared__ Real smem6[_TILE_DIM_][_TILE_DIM_+1]; */
-
-/*     if (ix < NX && iy < NY) */
-/*     { */
-/*         // transpose */
-/*         const uint_t iyT = blockIdx.y * _TILE_DIM_ + threadIdx.x; */
-/*         const uint_t ixT = blockIdx.x * _TILE_DIM_ + threadIdx.y; */
-
-/*         for (uint_t iz = 0; iz < nslices; ++iz) */
-/*         { */
-/*             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
-/*             { */
-/*                 const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1); */
-/*                 const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1); */
-
-/*                 // pre-fetch */
-/*                 Real _sumG = Gp[idxm]; */
-/*                 Real _sumP = Pp[idxm]; */
-/*                 Real _divU = vel[idxp]; */
-/*                 _sumG = _sumG + Gm[idxp]; */
-/*                 _sumP = _sumP + Pm[idxp]; */
-/*                 _divU = _divU - vel[idxm]; */
-/*                 // read first batch */
-/*                 smem1[threadIdx.x][threadIdx.y+i] = _sumG; */
-/*                 smem2[threadIdx.x][threadIdx.y+i] = _sumP; */
-/*                 smem3[threadIdx.x][threadIdx.y+i] = _divU; */
-/*             } */
-/*             __syncthreads(); */
-
-/*             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
-/*             { */
-/*                 const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1); */
-/*                 const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1); */
-/*                 const uint_t idx = ID3(ix,iy+i,iz,NX,NY); */
-
-/*                 // pre-fetch */
-/*                 Real _divFr = flux.r[idxp]; */
-/*                 Real _divFu = flux.u[idxp]; */
-/*                 Real _divFv = flux.v[idxp]; */
-/*                 _divFr = _divFr - flux.r[idxm]; */
-/*                 _divFu = _divFu - flux.u[idxm]; */
-/*                 _divFv = _divFv - flux.v[idxm]; */
-/*                 // write first batch */
-/*                 sumG[idx] = smem1[threadIdx.y+i][threadIdx.x]; */
-/*                 sumP[idx] = smem2[threadIdx.y+i][threadIdx.x]; */
-/*                 divU[idx] = smem3[threadIdx.y+i][threadIdx.x]; */
-/*                 // read second batch */
-/*                 smem4[threadIdx.x][threadIdx.y+i] = _divFr; */
-/*                 smem5[threadIdx.x][threadIdx.y+i] = _divFu; */
-/*                 smem6[threadIdx.x][threadIdx.y+i] = _divFv; */
-/*             } */
-/*             __syncthreads(); */
-
-/*             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
-/*             { */
-/*                 const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1); */
-/*                 const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1); */
-/*                 const uint_t idx = ID3(ix,iy+i,iz,NX,NY); */
-
-/*                 // pre-fetch */
-/*                 Real _divFw = flux.w[idxp]; */
-/*                 Real _divFe = flux.e[idxp]; */
-/*                 Real _divFG = flux.G[idxp]; */
-/*                 _divFw = _divFw - flux.w[idxm]; */
-/*                 _divFe = _divFe - flux.e[idxm]; */
-/*                 _divFG = _divFG - flux.G[idxm]; */
-/*                 // write second batch */
-/*                 divF.r[idx] = smem4[threadIdx.y+i][threadIdx.x]; */
-/*                 divF.u[idx] = smem5[threadIdx.y+i][threadIdx.x]; */
-/*                 divF.v[idx] = smem6[threadIdx.y+i][threadIdx.x]; */
-/*                 // read third batch */
-/*                 smem1[threadIdx.x][threadIdx.y+i] = _divFw; */
-/*                 smem2[threadIdx.x][threadIdx.y+i] = _divFe; */
-/*                 smem3[threadIdx.x][threadIdx.y+i] = _divFG; */
-/*             } */
-/*             __syncthreads(); */
-
-/*             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
-/*             { */
-/*                 const uint_t idxm = ID3(iyT,ixT+i,iz,NY,NXP1); */
-/*                 const uint_t idxp = ID3(iyT,(ixT+1)+i,iz,NY,NXP1); */
-/*                 const uint_t idx = ID3(ix,iy+i,iz,NX,NY); */
-
-/*                 // pre-fetch */
-/*                 Real _divFP = flux.P[idxp]; */
-/*                 _divFP = _divFP - flux.P[idxm]; */
-/*                 // write third batch */
-/*                 divF.w[idx] = smem1[threadIdx.y+i][threadIdx.x]; */
-/*                 divF.e[idx] = smem2[threadIdx.y+i][threadIdx.x]; */
-/*                 divF.G[idx] = smem3[threadIdx.y+i][threadIdx.x]; */
-/*                 // read fourth batch */
-/*                 smem4[threadIdx.x][threadIdx.y+i] = _divFP; */
-/*             } */
-/*             __syncthreads(); */
-
-/*             for (int i = 0; i < _TILE_DIM_; i += _BLOCK_ROWS_) */
-/*             { */
-/*                 const uint_t idx = ID3(ix,iy+i,iz,NX,NY); */
-/*                 // write fourth batch */
-/*                 divF.P[idx] = smem4[threadIdx.y+i][threadIdx.x]; */
-/*             } */
-/*             // NOTE: __syncthreads() can be omitted since it will not be */
-/*             // touched until next synchronization point */
-/*         } */
-/*     } */
-/* } */
-
-
-/* __global__ */
-/* void _yextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux, */
-/*         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp, */
-/*         const Real * const __restrict__ Pm, const Real * const __restrict__ Pp, */
-/*         const Real * const __restrict__ vel, */
-/*         Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU) */
-/* { */
+/*     /1* const uint_t ix = blockIdx.x * _TILE_DIM_ + threadIdx.x; *1/ */
+/*     /1* const uint_t iy = blockIdx.y * _TILE_DIM_ + threadIdx.y; *1/ */
 /*     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x; */
 /*     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y; */
+/*     const uint_t iz = blockIdx.z * blockDim.z + threadIdx.z; */
 
 /*     if (ix < NX && iy < NY) */
 /*     { */
-/*         for (uint_t iz = 0; iz < nslices; ++iz) */
+/*         /1* for (int i=0; i < _TILE_DIM_; i += _BLOCK_ROWS_) *1/ */
 /*         { */
-/*             const uint_t idx  = ID3(ix,iy,iz,NX,NY); */
+/*             /1* const uint_t idxm = ID3(ix,iy+i,iz,NX,NYP1); *1/ */
+/*             /1* const uint_t idxp = ID3(ix,(iy+1)+i,iz,NX,NYP1); *1/ */
 /*             const uint_t idxm = ID3(ix,iy,iz,NX,NYP1); */
 /*             const uint_t idxp = ID3(ix,(iy+1),iz,NX,NYP1); */
+/*             const uint_t idx  = ID3(ix,iy,iz,NX,NY); */
 
 /*             Real _sumG = Gp[idxm]; */
 /*             Real _sumP = Pp[idxm]; */
@@ -1441,641 +1192,63 @@ _YEXTRATERM_HLLC(DevicePointer divF, DevicePointer flux,
 /* } */
 
 
-__global__
-void _zextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux,
-        const Real * const __restrict__ Gm, const Real * const __restrict__ Gp,
-        const Real * const __restrict__ Pm, const Real * const __restrict__ Pp,
-        const Real * const __restrict__ vel,
-        Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU)
-{
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
+/* __global__ */
+/* void _zextraterm_hllc(const uint_t nslices, DevicePointer divF, DevicePointer flux, */
+/*         const Real * const __restrict__ Gm, const Real * const __restrict__ Gp, */
+/*         const Real * const __restrict__ Pm, const Real * const __restrict__ Pp, */
+/*         const Real * const __restrict__ vel, */
+/*         Real * const __restrict__ sumG, Real * const __restrict__ sumP, Real * const __restrict__ divU) */
+/* { */
+/*     const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x; */
+/*     const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y; */
 
-    if (ix < NX && iy < NY)
-    {
-        for (uint_t iz = 0; iz < nslices; ++iz)
-        {
-            const uint_t idx  = ID3(ix,iy,iz,NX,NY);
-            const uint_t idxm = ID3(ix,iy,iz,NX,NY);
-            const uint_t idxp = ID3(ix,iy,(iz+1),NX,NY);
+/*     if (ix < NX && iy < NY) */
+/*     { */
+/*         for (uint_t iz = 0; iz < nslices; ++iz) */
+/*         { */
+/*             const uint_t idx  = ID3(ix,iy,iz,NX,NY); */
+/*             const uint_t idxm = ID3(ix,iy,iz,NX,NY); */
+/*             const uint_t idxp = ID3(ix,iy,(iz+1),NX,NY); */
 
-            const Real inv6 = 1.0f/6.0f;
+/*             const Real inv6 = 1.0f/6.0f; */
 
-            // cummulative sums of x and y
-            const Real cumm_sumG = sumG[idx];
-            const Real cumm_sumP = sumP[idx];
-            const Real cumm_divU = divU[idx];
+/*             // cummulative sums of x and y */
+/*             const Real cumm_sumG = sumG[idx]; */
+/*             const Real cumm_sumP = sumP[idx]; */
+/*             const Real cumm_divU = divU[idx]; */
 
-            Real _sumG = Gp[idxm];
-            Real _sumP = Pp[idxm];
-            Real _divU = vel[idxp];
-            Real _divFr = flux.r[idxp];
-            Real _divFu = flux.u[idxp];
-            Real _divFv = flux.v[idxp];
-            Real _divFw = flux.w[idxp];
-            Real _divFe = flux.e[idxp];
-            Real _divFG = flux.G[idxp];
-            Real _divFP = flux.P[idxp];
-            _sumG = _sumG + Gm[idxp] + cumm_sumG;
-            _sumP = _sumP + Pm[idxp] + cumm_sumP;
-            _divU = _divU - vel[idxm]+ cumm_divU;
-            _divFr = _divFr - flux.r[idxm];
-            _divFu = _divFu - flux.u[idxm];
-            _divFv = _divFv - flux.v[idxm];
-            _divFw = _divFw - flux.w[idxm];
-            _divFe = _divFe - flux.e[idxm];
-            _divFG = _divFG - flux.G[idxm];
-            _divFP = _divFP - flux.P[idxm];
+/*             Real _sumG = Gp[idxm]; */
+/*             Real _sumP = Pp[idxm]; */
+/*             Real _divU = vel[idxp]; */
+/*             Real _divFr = flux.r[idxp]; */
+/*             Real _divFu = flux.u[idxp]; */
+/*             Real _divFv = flux.v[idxp]; */
+/*             Real _divFw = flux.w[idxp]; */
+/*             Real _divFe = flux.e[idxp]; */
+/*             Real _divFG = flux.G[idxp]; */
+/*             Real _divFP = flux.P[idxp]; */
+/*             _sumG = _sumG + Gm[idxp] + cumm_sumG; */
+/*             _sumP = _sumP + Pm[idxp] + cumm_sumP; */
+/*             _divU = _divU - vel[idxm]+ cumm_divU; */
+/*             _divFr = _divFr - flux.r[idxm]; */
+/*             _divFu = _divFu - flux.u[idxm]; */
+/*             _divFv = _divFv - flux.v[idxm]; */
+/*             _divFw = _divFw - flux.w[idxm]; */
+/*             _divFe = _divFe - flux.e[idxm]; */
+/*             _divFG = _divFG - flux.G[idxm]; */
+/*             _divFP = _divFP - flux.P[idxm]; */
 
-            // final divF
-            divF.r[idx] += _divFr;
-            divF.u[idx] += _divFu;
-            divF.v[idx] += _divFv;
-            divF.w[idx] += _divFw;
-            divF.e[idx] += _divFe;
-            divF.G[idx] += _divFG - inv6*_divU*_sumG;
-            divF.P[idx] += _divFP - inv6*_divU*_sumP;
-        }
-    }
-}
-
-
-__global__
-void _xflux00(const uint_t nslices, const uint_t global_iz,
-        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
-        Real * const __restrict__ xtra_vel,
-        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
-        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
-{
-    /* *
-     * Notes:
-     * ======
-     * 1.) NXP1 = NX + 1
-     * 2.) NX = NodeBlock::sizeX
-     * 3.) NY = NodeBlock::sizeY
-     * 4.) nslices = number of slices for currently processed chunk
-     * 5.) global_iz is the iz-coordinate in index space of the NodeBlock for
-     *     the first slice of the currently processed chunk.  It is needed if
-     *     all of the x-/yghosts are uploaded to the GPU prior to processing
-     *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
-     *     are uploaded per chunk.
-     * 6.) Reads textures 00
-     * */
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    assert(NXP1 > 5);
-
-    if (ix < NXP1 && iy < NY)
-    {
-        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
-        {
-            /* *
-             * The general task order is (for each chunk slice along NZ):
-             * 1.) Load stencils
-             * 2.) Reconstruct primitive values using WENO5/WENO3
-             * 3.) Compute characteristic velocities
-             * 4.) Compute fluxes
-             * 5.) Compute RHS for advection of G and P
-             * */
-
-            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
-            Real r[6];
-            Real u[6];
-            Real v[6];
-            Real w[6];
-            Real e[6];
-            Real G[6];
-            Real P[6];
-
-            // 1.)
-            // GMEM transactions are cached, effective GMEM accesses are 7*3
-            // (according to nvvp)
-            if (0 == ix)
-                _load_3X00<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*tex_start)
-            else if (1 == ix)
-                _load_2X00<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*tex_start)
-            else if (2 == ix)
-                _load_1X00<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*tex_start)
-            else if (NXP1-3 == ix)
-                _load_1X00<NXP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else if (NXP1-2 == ix)
-                _load_2X00<NXP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else if (NXP1-1 == ix)
-                _load_3X00<NXP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else
-                _load_internal_X00(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*tex_start)
-
-            // compute body
-#           include "xflux_body.cu"
-
-            /* if (global_iz) */
-            /* { */
-/* #pragma unroll 6 */
-            /*     for (uint_t i = 0; i < 6; ++i) */
-            /*     { */
-            /*         r[0] += r[i]; */
-            /*         u[0] += u[i]; */
-            /*         v[0] += v[i]; */
-            /*         w[0] += w[i]; */
-            /*         e[0] += e[i]; */
-            /*         G[0] += G[i]; */
-            /*         P[0] += P[i]; */
-            /*     } */
-            /* } */
-            /* const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1); */
-            /* flux.r[idx] = r[0]; */
-            /* flux.u[idx] = u[0]; */
-            /* flux.v[idx] = v[0]; */
-            /* flux.w[idx] = w[0]; */
-            /* flux.e[idx] = e[0]; */
-            /* flux.G[idx] = G[0]; */
-            /* flux.P[idx] = P[0]; */
-            /* xtra_vel[idx] = r[0]; */
-            /* xtra_Gm[idx]  = w[0]; */
-            /* xtra_Gp[idx]  = e[0]; */
-            /* xtra_Pm[idx]  = P[0]; */
-            /* xtra_Pp[idx]  = u[0]; */
-
-            const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
-            flux.r[idx] = fr;
-            flux.u[idx] = fu;
-            flux.v[idx] = fv;
-            flux.w[idx] = fw;
-            flux.e[idx] = fe;
-            flux.G[idx] = fG;
-            flux.P[idx] = fP;
-
-            // 5.)
-            xtra_vel[idx] = hllc_vel;
-            xtra_Gm[idx]  = Gm;
-            xtra_Gp[idx]  = Gp;
-            xtra_Pm[idx]  = Pm;
-            xtra_Pp[idx]  = Pp;
-        }
-    }
-}
-
-
-__global__
-void _xflux01(const uint_t nslices, const uint_t global_iz,
-        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
-        Real * const __restrict__ xtra_vel,
-        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
-        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
-{
-    /* *
-     * Notes:
-     * ======
-     * 1.) NXP1 = NX + 1
-     * 2.) NX = NodeBlock::sizeX
-     * 3.) NY = NodeBlock::sizeY
-     * 4.) nslices = number of slices for currently processed chunk
-     * 5.) global_iz is the iz-coordinate in index space of the NodeBlock for
-     *     the first slice of the currently processed chunk.  It is needed if
-     *     all of the x-/yghosts are uploaded to the GPU prior to processing
-     *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
-     *     are uploaded per chunk.
-     * 6.) Reads textures 01
-     * */
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    assert(NXP1 > 5);
-
-    if (ix < NXP1 && iy < NY)
-    {
-        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
-        {
-            /* *
-             * The general task order is (for each chunk slice along NZ):
-             * 1.) Load stencils
-             * 2.) Reconstruct primitive values using WENO5/WENO3
-             * 3.) Compute characteristic velocities
-             * 4.) Compute fluxes
-             * 5.) Compute RHS for advection of G and P
-             * */
-
-            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
-            Real r[6];
-            Real u[6];
-            Real v[6];
-            Real w[6];
-            Real e[6];
-            Real G[6];
-            Real P[6];
-
-            // 1.)
-            // GMEM transactions are cached, effective GMEM accesses are 7*3
-            // (according to nvvp)
-            if (0 == ix)
-                _load_3X01<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*tex_start)
-            else if (1 == ix)
-                _load_2X01<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*tex_start)
-            else if (2 == ix)
-                _load_1X01<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*tex_start)
-            else if (NXP1-3 == ix)
-                _load_1X01<NXP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else if (NXP1-2 == ix)
-                _load_2X01<NXP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else if (NXP1-1 == ix)
-                _load_3X01<NXP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else
-                _load_internal_X01(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*tex_start)
-
-            // compute body
-#           include "xflux_body.cu"
-
-            const uint_t idx = ID3(iy, ix, iz-3, NY, NXP1);
-            flux.r[idx] = fr;
-            flux.u[idx] = fu;
-            flux.v[idx] = fv;
-            flux.w[idx] = fw;
-            flux.e[idx] = fe;
-            flux.G[idx] = fG;
-            flux.P[idx] = fP;
-
-            // 5.)
-            xtra_vel[idx] = hllc_vel;
-            xtra_Gm[idx]  = Gm;
-            xtra_Gp[idx]  = Gp;
-            xtra_Pm[idx]  = Pm;
-            xtra_Pp[idx]  = Pp;
-        }
-    }
-}
-
-
-__global__
-void _yflux00(const uint_t nslices, const uint_t global_iz,
-        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
-        Real * const __restrict__ xtra_vel,
-        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
-        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
-{
-    /* *
-     * Notes:
-     * ======
-     * 1.) NYP1 = NY + 1
-     * 2.) NX = NodeBlock::sizeX
-     * 3.) NY = NodeBlock::sizeY
-     * 4.) nslices = number of slices for currently processed chunk
-     * 5.) global_iz is the iz-coordinate in index space of the NodeBlock for
-     *     the first slice of the currently processed chunk.  It is needed if
-     *     all of the x-/yghosts are uploaded to the GPU prior to processing
-     *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
-     *     are uploaded per chunk.
-     * 6.) Reads texture 00
-     * */
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    assert(NYP1 > 5);
-
-    if (ix < NX && iy < NYP1)
-    {
-        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
-        {
-            /* *
-             * The general task order is (for each chunk slice along NZ):
-             * 1.) Load stencils
-             * 2.) Reconstruct primitive values using WENO5/WENO3
-             * 3.) Compute characteristic velocities
-             * 4.) Compute fluxes
-             * 5.) Compute RHS for advection of G and P
-             * */
-
-            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
-            Real r[6];
-            Real u[6];
-            Real v[6];
-            Real w[6];
-            Real e[6];
-            Real G[6];
-            Real P[6];
-
-            // 1.)
-            // GMEM transactions are cached, effective GMEM accesses are 7*3
-            // (according to nvvp)
-            if (0 == iy)
-                _load_3Y00<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*TEX)
-            else if (1 == iy)
-                _load_2Y00<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*TEX)
-            else if (2 == iy)
-                _load_1Y00<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*TEX)
-            else if (NYP1-3 == iy)
-                _load_1Y00<NYP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else if (NYP1-2 == iy)
-                _load_2Y00<NYP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else if (NYP1-1 == iy)
-                _load_3Y00<NYP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else
-                _load_internal_Y00(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
-
-            // compute body
-#           include "yflux_body.cu"
-
-            /* if (global_iz) */
-            /* { */
-/* #pragma unroll 6 */
-            /*     for (uint_t i = 0; i < 6; ++i) */
-            /*     { */
-            /*         r[0] += r[i]; */
-            /*         u[0] += u[i]; */
-            /*         v[0] += v[i]; */
-            /*         w[0] += w[i]; */
-            /*         e[0] += e[i]; */
-            /*         G[0] += G[i]; */
-            /*         P[0] += P[i]; */
-            /*     } */
-            /* } */
-            /* const uint_t idx = ID3(ix, iy, iz-3, NX, NYP1); */
-            /* flux.r[idx] = r[0]; */
-            /* flux.u[idx] = u[0]; */
-            /* flux.v[idx] = v[0]; */
-            /* flux.w[idx] = w[0]; */
-            /* flux.e[idx] = e[0]; */
-            /* flux.G[idx] = G[0]; */
-            /* flux.P[idx] = P[0]; */
-            /* xtra_vel[idx] = r[0]; */
-            /* xtra_Gm[idx]  = w[0]; */
-            /* xtra_Gp[idx]  = e[0]; */
-            /* xtra_Pm[idx]  = P[0]; */
-            /* xtra_Pp[idx]  = u[0]; */
-
-            const uint_t idx = ID3(ix, iy, iz-3, NX, NYP1);
-            flux.r[idx] = fr;
-            flux.u[idx] = fu;
-            flux.v[idx] = fv;
-            flux.w[idx] = fw;
-            flux.e[idx] = fe;
-            flux.G[idx] = fG;
-            flux.P[idx] = fP;
-
-            // 5.)
-            xtra_vel[idx] = hllc_vel;
-            xtra_Gm[idx]  = Gm;
-            xtra_Gp[idx]  = Gp;
-            xtra_Pm[idx]  = Pm;
-            xtra_Pp[idx]  = Pp;
-        }
-    }
-}
-
-
-__global__
-void _yflux01(const uint_t nslices, const uint_t global_iz,
-        const DevicePointer ghostL, const DevicePointer ghostR, DevicePointer flux,
-        Real * const __restrict__ xtra_vel,
-        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
-        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
-{
-    /* *
-     * Notes:
-     * ======
-     * 1.) NYP1 = NY + 1
-     * 2.) NX = NodeBlock::sizeX
-     * 3.) NY = NodeBlock::sizeY
-     * 4.) nslices = number of slices for currently processed chunk
-     * 5.) global_iz is the iz-coordinate in index space of the NodeBlock for
-     *     the first slice of the currently processed chunk.  It is needed if
-     *     all of the x-/yghosts are uploaded to the GPU prior to processing
-     *     the chunks sequentially.  Currently global_iz = 0, since x-/yghosts
-     *     are uploaded per chunk.
-     * 6.) Reads texture 01
-     * */
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    assert(NYP1 > 5);
-
-    if (ix < NX && iy < NYP1)
-    {
-        for (uint_t iz = 3; iz < nslices+3; ++iz) // first and last 3 slices are zghosts
-        {
-            /* *
-             * The general task order is (for each chunk slice along NZ):
-             * 1.) Load stencils
-             * 2.) Reconstruct primitive values using WENO5/WENO3
-             * 3.) Compute characteristic velocities
-             * 4.) Compute fluxes
-             * 5.) Compute RHS for advection of G and P
-             * */
-
-            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
-            Real r[6];
-            Real u[6];
-            Real v[6];
-            Real w[6];
-            Real e[6];
-            Real G[6];
-            Real P[6];
-
-            // 1.)
-            // GMEM transactions are cached, effective GMEM accesses are 7*3
-            // (according to nvvp)
-            if (0 == iy)
-                _load_3Y01<0,0,3,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(3*GMEM + 3*TEX)
-            else if (1 == iy)
-                _load_2Y01<0,0,2,1>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(2*GMEM + 4*TEX)
-            else if (2 == iy)
-                _load_1Y01<0,0,1,2>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostL); // load 7*(1*GMEM + 5*TEX)
-            else if (NYP1-3 == iy)
-                _load_1Y01<NYP1-6,5,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else if (NYP1-2 == iy)
-                _load_2Y01<NYP1-5,4,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else if (NYP1-1 == iy)
-                _load_3Y01<NYP1-4,3,0,0>(ix, iy, iz, r, u, v, w, e, G, P, global_iz, &ghostR);
-            else
-                _load_internal_Y01(ix, iy, iz, r, u, v, w, e, G, P, global_iz, NULL); // load 7*(6*TEX)
-
-            // compute body
-#           include "yflux_body.cu"
-
-            const uint_t idx = ID3(ix, iy, iz-3, NX, NYP1);
-            flux.r[idx] = fr;
-            flux.u[idx] = fu;
-            flux.v[idx] = fv;
-            flux.w[idx] = fw;
-            flux.e[idx] = fe;
-            flux.G[idx] = fG;
-            flux.P[idx] = fP;
-
-            // 5.)
-            xtra_vel[idx] = hllc_vel;
-            xtra_Gm[idx]  = Gm;
-            xtra_Gp[idx]  = Gp;
-            xtra_Pm[idx]  = Pm;
-            xtra_Pp[idx]  = Pp;
-        }
-    }
-}
-
-
-__global__
-void _zflux00(const uint_t nslices, DevicePointer flux,
-        Real * const __restrict__ xtra_vel,
-        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
-        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
-{
-    /* *
-     * Notes:
-     * ======
-     * 1.) NX = NodeBlock::sizeX
-     * 2.) NY = NodeBlock::sizeY
-     * 3.) NZ = NodeBlock::sizeZ
-     * 4.) nslices = number of slices for currently processed chunk
-     * 5.) Reads texture 00
-     * */
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    // depends on boundary condition in z-direction
-    assert(NodeBlock::sizeZ > 0);
-
-    if (ix < NX && iy < NY)
-    {
-        for (uint_t iz = 3; iz < (nslices+1)+3; ++iz) // first and last 3 slices are zghosts; need to compute nslices+1 fluxes in z-direction
-        {
-            /* *
-             * The general task order is (for each chunk slice along NZ):
-             * 1.) Load stencils
-             * 2.) Reconstruct primitive values using WENO5/WENO3
-             * 3.) Compute characteristic velocities
-             * 4.) Compute fluxes
-             * 5.) Compute RHS for advection of G and P
-             * */
-
-            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
-            Real r[6];
-            Real u[6];
-            Real v[6];
-            Real w[6];
-            Real e[6];
-            Real G[6];
-            Real P[6];
-
-            // 1.)
-            _load_internal_Z00(ix, iy, iz, r, u, v, w, e, G, P, 0, NULL); // load 7*(6*TEX)
-
-            // compute body
-#           include "zflux_body.cu"
-
-            /* if (global_iz) */
-            /* { */
-/* #pragma unroll 6 */
-            /*     for (uint_t i = 0; i < 6; ++i) */
-            /*     { */
-            /*         r[0] += r[i]; */
-            /*         u[0] += u[i]; */
-            /*         v[0] += v[i]; */
-            /*         w[0] += w[i]; */
-            /*         e[0] += e[i]; */
-            /*         G[0] += G[i]; */
-            /*         P[0] += P[i]; */
-            /*     } */
-            /* } */
-            /* const uint_t idx = ID3(ix, iy, iz-3, NX, NY); */
-            /* flux.r[idx] = r[0]; */
-            /* flux.u[idx] = u[0]; */
-            /* flux.v[idx] = v[0]; */
-            /* flux.w[idx] = w[0]; */
-            /* flux.e[idx] = e[0]; */
-            /* flux.G[idx] = G[0]; */
-            /* flux.P[idx] = P[0]; */
-            /* xtra_vel[idx] = r[0]; */
-            /* xtra_Gm[idx]  = w[0]; */
-            /* xtra_Gp[idx]  = e[0]; */
-            /* xtra_Pm[idx]  = P[0]; */
-            /* xtra_Pp[idx]  = u[0]; */
-
-            const uint_t idx = ID3(ix, iy, iz-3, NX, NY);
-            flux.r[idx] = fr;
-            flux.u[idx] = fu;
-            flux.v[idx] = fv;
-            flux.w[idx] = fw;
-            flux.e[idx] = fe;
-            flux.G[idx] = fG;
-            flux.P[idx] = fP;
-
-            // 5.)
-            xtra_vel[idx] = hllc_vel;
-            xtra_Gm[idx]  = Gm;
-            xtra_Gp[idx]  = Gp;
-            xtra_Pm[idx]  = Pm;
-            xtra_Pp[idx]  = Pp;
-        }
-    }
-}
-
-
-__global__
-void _zflux01(const uint_t nslices, DevicePointer flux,
-        Real * const __restrict__ xtra_vel,
-        Real * const __restrict__ xtra_Gm, Real * const __restrict__ xtra_Gp,
-        Real * const __restrict__ xtra_Pm, Real * const __restrict__ xtra_Pp)
-{
-    /* *
-     * Notes:
-     * ======
-     * 1.) NX = NodeBlock::sizeX
-     * 2.) NY = NodeBlock::sizeY
-     * 3.) NZ = NodeBlock::sizeZ
-     * 4.) nslices = number of slices for currently processed chunk
-     * 5.) Reads texture 01
-     * */
-    const uint_t ix = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint_t iy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    // depends on boundary condition in z-direction
-    assert(NodeBlock::sizeZ > 0);
-
-    if (ix < NX && iy < NY)
-    {
-        for (uint_t iz = 3; iz < (nslices+1)+3; ++iz) // first and last 3 slices are zghosts; need to compute nslices+1 fluxes in z-direction
-        {
-            /* *
-             * The general task order is (for each chunk slice along NZ):
-             * 1.) Load stencils
-             * 2.) Reconstruct primitive values using WENO5/WENO3
-             * 3.) Compute characteristic velocities
-             * 4.) Compute fluxes
-             * 5.) Compute RHS for advection of G and P
-             * */
-
-            // stencils (7 * _STENCIL_WIDTH_ registers per thread)
-            Real r[6];
-            Real u[6];
-            Real v[6];
-            Real w[6];
-            Real e[6];
-            Real G[6];
-            Real P[6];
-
-            // 1.)
-            _load_internal_Z01(ix, iy, iz, r, u, v, w, e, G, P, 0, NULL); // load 7*(6*TEX)
-
-            // compute body
-#           include "zflux_body.cu"
-
-            const uint_t idx = ID3(ix, iy, iz-3, NX, NY);
-            flux.r[idx] = fr;
-            flux.u[idx] = fu;
-            flux.v[idx] = fv;
-            flux.w[idx] = fw;
-            flux.e[idx] = fe;
-            flux.G[idx] = fG;
-            flux.P[idx] = fP;
-
-            // 5.)
-            xtra_vel[idx] = hllc_vel;
-            xtra_Gm[idx]  = Gm;
-            xtra_Gp[idx]  = Gp;
-            xtra_Pm[idx]  = Pm;
-            xtra_Pp[idx]  = Pp;
-        }
-    }
-}
+/*             // final divF */
+/*             divF.r[idx] += _divFr; */
+/*             divF.u[idx] += _divFu; */
+/*             divF.v[idx] += _divFv; */
+/*             divF.w[idx] += _divFw; */
+/*             divF.e[idx] += _divFe; */
+/*             divF.G[idx] += _divFG - inv6*_divU*_sumG; */
+/*             divF.P[idx] += _divFP - inv6*_divU*_sumP; */
+/*         } */
+/*     } */
+/* } */
 
 
 __global__
@@ -2094,19 +1267,20 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
-            // TODO: used both buffers here
-            const Real r = tex3D(texR00, ix, iy, iz);
-            const Real u = tex3D(texU00, ix, iy, iz);
-            const Real v = tex3D(texV00, ix, iy, iz);
-            const Real w = tex3D(texW00, ix, iy, iz);
-            const Real e = tex3D(texE00, ix, iy, iz);
-            const Real G = tex3D(texG00, ix, iy, iz);
-            const Real P = tex3D(texP00, ix, iy, iz);
+            const Real r = tex3D(tex00, ix, iy, iz);
+            const Real G = tex3D(tex05, ix, iy, iz);
+            const Real u = tex3D(tex01, ix, iy, iz);
+            const Real v = tex3D(tex02, ix, iy, iz);
+            const Real invr = 1.0f / r;
+            const Real invG = 1.0f / G;
+            const Real w = tex3D(tex03, ix, iy, iz);
+            const Real e = tex3D(tex04, ix, iy, iz);
+            const Real P = tex3D(tex06, ix, iy, iz);
 
-            const Real p = (e - (u*u + v*v + w*w)*(0.5f/r) - P) / G;
-            const Real c = sqrtf(((p + P) / G + p) / r);
+            const Real p = (e - 0.5f*(u*u + v*v + w*w)*invr - P)*invG;
+            const Real c = sqrtf(((p + P)*invG + p)*invr);
 
-            sos = fmaxf(sos, c + fmaxf(fmaxf(fabsf(u), fabsf(v)), fabsf(w)) / r);
+            sos = fmaxf(sos, c + fmaxf(fmaxf(fabsf(u), fabsf(v)), fabsf(w))*invr);
         }
         block_sos[loc_idx] = sos;
         __syncthreads();
@@ -2124,17 +1298,6 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 ///////////////////////////////////////////////////////////////////////////////
 //                              KERNEL WRAPPERS                              //
 ///////////////////////////////////////////////////////////////////////////////
-
-void _TEST_dump(const Real * const d_data, const size_t bytes, const string fname = "data.bin")
-{
-    Real *h_data = (Real *)malloc(bytes);
-    cudaMemcpy(h_data, d_data, bytes, cudaMemcpyDeviceToHost);
-    ofstream out(fname.c_str(), std::ofstream::binary);
-    out.write((char *)h_data, bytes);
-    out.close();
-    free(h_data);
-}
-
 static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex, cudaArray_t d_ptr)
 {
     cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
@@ -2157,6 +1320,12 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     /* *
      * Compute div(F)
      * */
+
+    if (nslices % 4 != 0 && nslices != 1)
+    {
+        fprintf(stderr, "ERROR: nslices must be an integer multiple of 4. Aborting...\n");
+        abort();
+    }
 
     // my stream
     const uint_t s_id = chunk_id % _NUM_STREAMS_;
@@ -2184,12 +1353,7 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     _CONV<<<CONV_grid, CONV_blocks, 0, stream[s_id]>>>(inout);
     GPU::profiler.pop_stopCUDA();
 
-    // TODO: REMOVE THIS
-    /* sprintf(prof_item, "_TEST_CONV (%d)", s_id); */
-    /* GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /* _TEST_CONV<<<1,1,0,stream[s_id]>>>(inout, xghostL, xghostR, yghostL, yghostR); */
-    /* GPU::profiler.pop_stopCUDA(); */
-
+    // TODO: is there a faster solution than this??
     // copy to tex buffers
     for (uint_t i = 0; i < VSIZE; ++i)
     {
@@ -2215,7 +1379,6 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     // ========================================================================
     // X
     // ========================================================================
-    // TODO: check that nslices is an integer multiple of 4 (or 1)
     const dim3 X_blocks(1, _WARPSIZE_, 4);
     const dim3 X_grid(NXP1, (NY + _WARPSIZE_ - 1)/_WARPSIZE_, (nslices + 4 - 1)/4);
 
@@ -2259,133 +1422,28 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     _WENO_Y<6><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6], mybuf->d_ygl[6], mybuf->d_ygr[6]);
 
     // hllc fluxes
-    // (the fused variant is less favorable -> based on current test results)
-    _HLLC_Y<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(recon_m, recon_p,
-            inout, d_sumG, d_sumP, d_divU);
+    _HLLC_Y<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(recon_m, recon_p, inout, d_sumG, d_sumP, d_divU);
 
-    // flux divergence Y + extra term contribution
-    const dim3 TEST_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
-    const dim3 TEST_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _BLOCK_ROWS_ - 1)/_BLOCK_ROWS_, nslices);
-    _YEXTRATERM_HLLC<<<TEST_xtraGrid, TEST_xtraBlocks, 0, stream[s_id]>>>(inout, fluxes, recon_m.G, recon_p.G, recon_m.P, recon_p.P, recon_p.v, d_sumG, d_sumP, d_divU);
+    // ========================================================================
+    // Z
+    // ========================================================================
+    const dim3 Z_blocks(_WARPSIZE_, 4, 1);
+    const dim3 Z_grid_WENO((NX + _WARPSIZE_ - 1)/_WARPSIZE_, (NY + 8 - 1)/8, nslices + 1); // we do twice the amount of work in WENO_Z kernel
 
+    // reconstruct
+    _WENO_Z<0><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[0], d_recon_p[0]);
+    _WENO_Z<1><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[1], d_recon_p[1]);
+    _WENO_Z<2><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[2], d_recon_p[2]);
+    _WENO_Z<3><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[3], d_recon_p[3]);
+    _WENO_Z<4><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[4], d_recon_p[4]);
+    _WENO_Z<5><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[5], d_recon_p[5]);
+    _WENO_Z<6><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6]);
 
-    cudaDeviceSynchronize();
+    // hllc fluxes
+    const dim3 Z_grid((NX + _WARPSIZE_ - 1)/_WARPSIZE_, (NY + 4 - 1)/4, nslices);
+    _HLLC_Z<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(recon_m, recon_p, inout, d_sumG, d_sumP, d_divU);
 
-    _TEST_dump(recon_m.u, 256*257*256*sizeof(Real), "split_recon_m.u.bin");
-
-
-    // my ghosts TODO: don't need them
-    DevicePointer xghostL(mybuf->d_xgl);
-    DevicePointer xghostR(mybuf->d_xgr);
-    DevicePointer yghostL(mybuf->d_ygl);
-    DevicePointer yghostR(mybuf->d_ygr);
-
-
-
-    /* // my launch config */
-    /* const dim3 X_blocks(1, _NTHREADS_, 1); */
-    /* const dim3 X_grid(NXP1, (NY + _NTHREADS_ -1)/_NTHREADS_, 1); */
-    /* const dim3 X_xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1); */
-    /* const dim3 X_xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, 1); */
-
-    /* const dim3 Y_blocks(_NTHREADS_, 1, 1); */
-    /* const dim3 Y_grid((NX + _NTHREADS_ -1) / _NTHREADS_, NYP1, 1); */
-    /* const dim3 Y_xtraGrid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1); */
-
-    /* const dim3 Z_blocks(_NTHREADS_, 1, 1); */
-    /* const dim3 Z_grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1); */
-
-
-
-    /* // queue kernels in pipe */
-    /* switch (gbuf_id) */
-    /* { */
-    /*     case 0: */
-    /*         _bindTexture(&texR00, mybuf->d_GPUin[0]); */
-    /*         _bindTexture(&texU00, mybuf->d_GPUin[1]); */
-    /*         _bindTexture(&texV00, mybuf->d_GPUin[2]); */
-    /*         _bindTexture(&texW00, mybuf->d_GPUin[3]); */
-    /*         _bindTexture(&texE00, mybuf->d_GPUin[4]); */
-    /*         _bindTexture(&texG00, mybuf->d_GPUin[5]); */
-    /*         _bindTexture(&texP00, mybuf->d_GPUin[6]); */
-    /*         // --- X --- */
-    /*         sprintf(prof_item, "_XFLUX (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _xflux00<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-
-    /*         sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-
-    /*         // --- Y --- */
-    /*         sprintf(prof_item, "_YFLUX (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _yflux00<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-
-    /*         sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _yextraterm_hllc<<<Y_xtraGrid, Y_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-
-    /*         // --- Z --- */
-    /*         sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _zflux00<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-
-    /*         sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _zextraterm_hllc<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-    /*         break; */
-
-    /*     case 1: */
-    /*         _bindTexture(&texR01, mybuf->d_GPUin[0]); */
-    /*         _bindTexture(&texU01, mybuf->d_GPUin[1]); */
-    /*         _bindTexture(&texV01, mybuf->d_GPUin[2]); */
-    /*         _bindTexture(&texW01, mybuf->d_GPUin[3]); */
-    /*         _bindTexture(&texE01, mybuf->d_GPUin[4]); */
-    /*         _bindTexture(&texG01, mybuf->d_GPUin[5]); */
-    /*         _bindTexture(&texP01, mybuf->d_GPUin[6]); */
-    /*         // --- X --- */
-    /*         sprintf(prof_item, "_XFLUX (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _xflux01<<<X_grid, X_blocks, 0, stream[s_id]>>>(nslices, global_iz, xghostL, xghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-
-    /*         sprintf(prof_item, "_XEXTRATERM (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _xextraterm_hllc<<<X_xtraGrid, X_xtraBlocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-
-    /*         // --- Y --- */
-    /*         sprintf(prof_item, "_YFLUX (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _yflux01<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(nslices, global_iz, yghostL, yghostR, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-
-    /*         sprintf(prof_item, "_YEXTRATERM (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _yextraterm_hllc<<<Y_xtraGrid, Y_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-
-    /*         // --- Z --- */
-    /*         sprintf(prof_item, "_ZFLUX (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _zflux01<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, flux, d_hllc_vel, d_Gm, d_Gp, d_Pm, d_Pp); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-
-    /*         sprintf(prof_item, "_ZEXTRATERM (s_id=%d)", s_id); */
-    /*         GPU::profiler.push_startCUDA(prof_item, &stream[s_id]); */
-    /*         _zextraterm_hllc<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(nslices, divF, flux, d_Gm, d_Gp, d_Pm, d_Pp, d_hllc_vel, d_sumG, d_sumP, d_divU); */
-    /*         GPU::profiler.pop_stopCUDA(); */
-    /*         break; */
-    /* } */
-
-    /* cudaEventRecord(event_compute[s_id], stream[s_id]); */
+    cudaEventRecord(event_compute[s_id], stream[s_id]);
 }
 
 
@@ -2393,19 +1451,25 @@ void GPU::MaxSpeedOfSound(const uint_t nslices, const uint_t gbuf_id, const int 
 {
     assert(gbuf_id < _NUM_GPU_BUF_);
 
+    if (nslices % 4 != 0 && nslices != 1)
+    {
+        fprintf(stderr, "ERROR: nslices must be an integer multiple of 4. Aborting...\n");
+        abort();
+    }
+
     // my stream
     const uint_t s_id = chunk_id % _NUM_STREAMS_;
 
     // my data
     GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
 
-    _bindTexture(&texR00, mybuf->d_GPU3D[0]);
-    _bindTexture(&texU00, mybuf->d_GPU3D[1]);
-    _bindTexture(&texV00, mybuf->d_GPU3D[2]);
-    _bindTexture(&texW00, mybuf->d_GPU3D[3]);
-    _bindTexture(&texE00, mybuf->d_GPU3D[4]);
-    _bindTexture(&texG00, mybuf->d_GPU3D[5]);
-    _bindTexture(&texP00, mybuf->d_GPU3D[6]);
+    _bindTexture(&tex00, mybuf->d_GPU3D[0]);
+    _bindTexture(&tex01, mybuf->d_GPU3D[1]);
+    _bindTexture(&tex02, mybuf->d_GPU3D[2]);
+    _bindTexture(&tex03, mybuf->d_GPU3D[3]);
+    _bindTexture(&tex04, mybuf->d_GPU3D[4]);
+    _bindTexture(&tex05, mybuf->d_GPU3D[5]);
+    _bindTexture(&tex06, mybuf->d_GPU3D[6]);
 
     // my launch config
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);
@@ -2430,13 +1494,13 @@ void GPU::TestKernel()
     // my data
     GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
 
-    _bindTexture(&texR00, mybuf->d_GPU3D[0]);
-    _bindTexture(&texU00, mybuf->d_GPU3D[1]);
-    _bindTexture(&texV00, mybuf->d_GPU3D[2]);
-    _bindTexture(&texW00, mybuf->d_GPU3D[3]);
-    _bindTexture(&texE00, mybuf->d_GPU3D[4]);
-    _bindTexture(&texG00, mybuf->d_GPU3D[5]);
-    _bindTexture(&texP00, mybuf->d_GPU3D[6]);
+    /* _bindTexture(&texR00, mybuf->d_GPU3D[0]); */
+    /* _bindTexture(&texU00, mybuf->d_GPU3D[1]); */
+    /* _bindTexture(&texV00, mybuf->d_GPU3D[2]); */
+    /* _bindTexture(&texW00, mybuf->d_GPU3D[3]); */
+    /* _bindTexture(&texE00, mybuf->d_GPU3D[4]); */
+    /* _bindTexture(&texG00, mybuf->d_GPU3D[5]); */
+    /* _bindTexture(&texP00, mybuf->d_GPU3D[6]); */
 
     /* // my ghosts */
     /* DevicePointer xghostL(mybuf->d_xgl); */
