@@ -96,10 +96,18 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         const Real ke = 0.5*(u_new*u_new + v_new*v_new + w_new*w_new)/r_new; // whatever ke we had before
         const Real pressure = (e_new - P_new - ke)/G_new; // whatever pressure we had before
 
-        if (P[i]/(static_cast<Real>(1.0) + G[i]) < -2.0*pressure) // if it was still bad with new P and new G
+        /* if (P[i]/(static_cast<Real>(1.0) + G[i]) < -2*pressure) // if it was still bad with new P and new G */
+        /* { */
+        /*     /1* const Real difference = -16.86 * pressure * (static_cast<Real>(1.0) + G[i]) - P[i]; *1/ */
+        /*     /1* P[i] += abs(difference); // change P again *1/ */
+        /*     G[i] *= static_cast<Real>(0.2); */
+        /* } */
+        if (G[i] > 2.55) // if it was still bad with new P and new G
         {
-            const Real difference = -4.0 * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
-            P[i] += abs(difference); // change P again
+            /* const Real diff_G = 0.7*G[i] - 2.55; */
+            const Real diff_P = -4 * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
+            G[i] = 2.5
+            P[i] += abs(diff_P); // change P again
         }
 
         e[i] = pressure * G[i] + P[i] + ke; // update e

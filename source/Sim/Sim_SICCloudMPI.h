@@ -21,6 +21,7 @@ namespace SICCloudData
     extern Real pressureRatio, rho0, c0, u0, p0, rhoB, uB, pB;
     extern Real rho1, u1, p1, mach;
     extern Real g1, g2, pc1, pc2;
+    extern Real post_shock_conservative[GridMPI::NVAR];
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -313,7 +314,8 @@ class GPUlabSICCloud : public GPUlab
         void _apply_bc(const double t = 0)
         {
             BoundaryConditions<GridMPI> bc(grid.pdata());
-            if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0,ghostmap::X>(halox.left);
+            if (myFeature[0] == SKIN) bc.template applyBC_dirichlet<0,0,ghostmap::X>(halox.left, SICCloudData::post_shock_conservative);
+            /* if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0,ghostmap::X>(halox.left); */
             if (myFeature[1] == SKIN) bc.template applyBC_absorbing<0,1,ghostmap::X>(halox.right);
             if (myFeature[2] == SKIN) bc.template applyBC_absorbing<1,0,ghostmap::Y>(haloy.left);
             if (myFeature[3] == SKIN) bc.template applyBC_absorbing<1,1,ghostmap::Y>(haloy.right);

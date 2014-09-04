@@ -108,6 +108,30 @@ public:
         }
     }
 
+    template<int dir, int side, index_map map>
+    void applyBC_dirichlet(real_vector_t& halo, const Real * const dirichlet_ic)
+    {
+        _setup<dir>();
+
+        // length(dirichlet_ic) = TGrid::NVAR, in conservative variables
+#pragma omp parallel for
+        for (int p = 0; p < TGrid::NVAR; ++p)
+        {
+            Real * const phalo = halo[p];
+            const Real c = dirichlet_ic[p];
+
+            for(int iz=s[2]; iz<e[2]; iz++)
+                for(int iy=s[1]; iy<e[1]; iy++)
+                    for(int ix=s[0]; ix<e[0]; ix++)
+                    {
+                        // iz-startZ to operate on an arbitrary chunk
+                        phalo[map(ix, iy, iz-startZ)] = c;
+                    }
+        }
+    }
+
+
+
     /* template<int dir, int side> */
     /* void applyBC_absorbing_better_faces() */
     /* { */

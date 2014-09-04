@@ -29,6 +29,7 @@ namespace SICCloudData
     Real pressureRatio, rho0, c0, u0, p0, rhoB, uB, pB;
     Real rho1, u1, p1, mach;
     Real g1, g2, pc1, pc2;
+    Real post_shock_conservative[GridMPI::NVAR];
 }
 
 
@@ -51,6 +52,12 @@ void Sim_SICCloudMPI::_dump(const string basename)
     DumpHDF5_MPI<GridMPI, myPressureStreamer>(*mygrid, step, fname, dump_path);
     sprintf(fname, "%s_%04d-G", basename.c_str(), fcount);
     DumpHDF5_MPI<GridMPI, myGammaStreamer>(*mygrid, step, fname, dump_path);
+    sprintf(fname, "%s_%04d-P", basename.c_str(), fcount);
+    DumpHDF5_MPI<GridMPI, myPiStreamer>(*mygrid, step, fname, dump_path);
+    sprintf(fname, "%s_%04d-rho", basename.c_str(), fcount);
+    DumpHDF5_MPI<GridMPI, myRhoStreamer>(*mygrid, step, fname, dump_path);
+    sprintf(fname, "%s_%04d-velocity", basename.c_str(), fcount);
+    DumpHDF5_MPI<GridMPI, myVelocityStreamer>(*mygrid, step, fname, dump_path);
     ++fcount;
 }
 
@@ -120,6 +127,16 @@ void Sim_SICCloudMPI::_ic()
     SICCloudData::u1   = u0 + SICCloudData::c0*(psi - 1.0)*p0/(gamma*(p0 + pc)*SICCloudData::mach);
     SICCloudData::rho1 = rho0*(tmp1*tmp2 + 1.0)/(tmp1 + tmp2);
     SICCloudData::p1   = p1;
+
+    // this only works for normal shock in x-direction
+    SICCloudData::post_shock_conservative[0] = SICCloudData::rho1;
+    SICCloudData::post_shock_conservative[1] = SICCloudData::rho1*SICCloudData::u1;
+    SICCloudData::post_shock_conservative[2] = static_cast<Real>(0.0);
+    SICCloudData::post_shock_conservative[3] = static_cast<Real>(0.0);
+    const Real G1 = 1.0 / (gamma - 1.0);
+    SICCloudData::post_shock_conservative[4] = p1*G1 + pc*gamma*G1 + 0.5*SICCloudData::rho1*SICCloudData::u1*SICCloudData::u1; // v = w = 0 !
+    SICCloudData::post_shock_conservative[5] = G1;
+    SICCloudData::post_shock_conservative[6] = pc*gamma*G1;
 
     /* if (verbosity) */
     if (true)

@@ -248,6 +248,32 @@ struct myScalarStreamer
 };
 
 
+struct myVelocityStreamer
+{
+    static const int NCHANNELS = 3;
+    static const int NX = NodeBlock::sizeX;
+    static const int NY = NodeBlock::sizeY;
+    static const int NZ = NodeBlock::sizeZ;
+
+    typedef const Real * const const_ptr;
+    const_ptr r, u, v, w, e, G, P;
+
+    myVelocityStreamer(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
+
+    void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
+    {
+        const int idx = ID3(ix,iy,iz,NX,NY);
+        assert(idx < NX * NY * NZ);
+        const Real inv_r = 1.0 / r[idx];
+        out[0] = inv_r * u[idx];
+        out[1] = inv_r * v[idx];
+        out[2] = inv_r * w[idx];
+    }
+
+    static const char * getAttributeName() { return "Vector"; }
+};
+
+
 struct myPressureStreamer
 {
     static const int NCHANNELS = 1;
@@ -271,6 +297,29 @@ struct myPressureStreamer
 };
 
 
+struct myRhoStreamer
+{
+    static const int NCHANNELS = 1;
+    static const int NX = NodeBlock::sizeX;
+    static const int NY = NodeBlock::sizeY;
+    static const int NZ = NodeBlock::sizeZ;
+
+    typedef const Real * const const_ptr;
+    const_ptr r, u, v, w, e, G, P;
+
+    myRhoStreamer(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
+
+    void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
+    {
+        const int idx = ID3(ix,iy,iz,NX,NY);
+        assert(idx < NX * NY * NZ);
+        out[0] = r[idx];
+    }
+
+    static const char * getAttributeName() { return "Scalar"; }
+};
+
+
 struct myGammaStreamer
 {
     static const int NCHANNELS = 1;
@@ -288,6 +337,29 @@ struct myGammaStreamer
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
         out[0] = G[idx];
+    }
+
+    static const char * getAttributeName() { return "Scalar"; }
+};
+
+
+struct myPiStreamer
+{
+    static const int NCHANNELS = 1;
+    static const int NX = NodeBlock::sizeX;
+    static const int NY = NodeBlock::sizeY;
+    static const int NZ = NodeBlock::sizeZ;
+
+    typedef const Real * const const_ptr;
+    const_ptr r, u, v, w, e, G, P;
+
+    myPiStreamer(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
+
+    void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
+    {
+        const int idx = ID3(ix,iy,iz,NX,NY);
+        assert(idx < NX * NY * NZ);
+        out[0] = P[idx];
     }
 
     static const char * getAttributeName() { return "Scalar"; }
