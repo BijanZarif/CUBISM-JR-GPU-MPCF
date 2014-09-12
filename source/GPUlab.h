@@ -302,6 +302,7 @@ class GPUlab
         // PUBLIC ACCESSORS
         ///////////////////////////////////////////////////////////////////////
         void load_ghosts(const double t = 0);
+        /* inline void dump_chunk(const int complete = 0) { _dump_chunk(complete); } */
         double max_sos(float& sos);
         double process_all(const Real a, const Real b, const Real dtinvh);
 

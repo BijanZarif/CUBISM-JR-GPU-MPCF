@@ -577,14 +577,14 @@ void GPUlab::load_ghosts(const double t)
     if (myFeature[4] == FLESH) _copysend_halos(4, &haloz.send_left[0], haloz.Nhalo, 0);
     if (myFeature[5] == FLESH) _copysend_halos(5, &haloz.send_right[0],haloz.Nhalo, sizeZ-3);
 
-    // need more digging here! TODO: use MPI_Irecv ? even better: hide MPI
+    // TODO: use MPI_Irecv ? even better: hide MPI
     // latency with communicating per chunk on the host.  With this you can
     // hide MPI comm with GPU
-    if (myFeature[0] == FLESH) _issue_recv(&halox.recv_left[0],  halox.Allhalos, 0); // x/yhalos directly into pinned mem and H2D
+    if (myFeature[0] == FLESH) _issue_recv(&halox.recv_left[0],  halox.Allhalos, 0); //TODO:  x/yhalos directly into pinned mem and H2D
     if (myFeature[1] == FLESH) _issue_recv(&halox.recv_right[0], halox.Allhalos, 1);
     if (myFeature[2] == FLESH) _issue_recv(&haloy.recv_left[0],  haloy.Allhalos, 2);
     if (myFeature[3] == FLESH) _issue_recv(&haloy.recv_right[0], haloy.Allhalos, 3);
-    if (myFeature[4] == FLESH) _issue_recv(&haloz.recv_left[0],  haloz.Allhalos, 4); // receive into curr_buffer->zghost_l ? why not
+    if (myFeature[4] == FLESH) _issue_recv(&haloz.recv_left[0],  haloz.Allhalos, 4); // TODO: receive directly into curr_buffer->zghost_l ?
     if (myFeature[5] == FLESH) _issue_recv(&haloz.recv_right[0], haloz.Allhalos, 5);
 
     _apply_bc(t); // BC's apply to all myFeature == SKIN

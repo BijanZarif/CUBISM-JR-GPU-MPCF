@@ -8,6 +8,8 @@
 
 #include "Sim_SteadyStateMPI.h"
 #include <fstream>
+#include <vector>
+#include <string>
 #include <sstream>
 #include <mpi.h>
 
@@ -289,6 +291,64 @@ inline double eval_shifted(const vector<Tshape>& v_shapes, const Real pos[3])
 
     return 0.5 + 0.5 * cos(alpha);
 }
+
+class sensor : public shape
+{
+    Real origin[3], extent[3];
+
+public:
+    double probe, volume;
+
+    sensor() : shape() { }
+
+    void set(const Real _origin[3], const Real _extent[3], const Real h)
+    {
+        for(int i=0; i<3; ++i)
+        {
+            origin[i] = _origin[i];
+            extent[i] = _extent[i]==0? 2*h : _extent[i];
+            bbox_s[i] = origin[i];
+            bbox_e[i] = origin[i]+extent[i];
+        }
+
+        volume = extent[0]*extent[1]*extent[2];
+        probe=0;
+    }
+
+    static std::vector<sensor> make_many(const Real h, std::string filename="sensors.dat")
+    {
+        std::vector<sensor> v_shapes;
+
+        std::ifstream f_read_cloud(filename);
+
+        if (!f_read_cloud.good())
+        {
+            std::cout << "Watchout! cant read the file " << filename << ". Aborting now...\n";
+            abort();
+        }
+
+        while(true)
+        {
+            if (!f_read_cloud.good())
+                abort();
+
+            int idx;
+            Real origin[3], extent[3];
+            f_read_cloud >> idx >> origin[0] >> origin[1] >> origin[2] >> extent[0] >> extent[1] >> extent[2];
+
+            sensor cur_shape;
+            cur_shape.set(origin,extent, h);
+            v_shapes.push_back(cur_shape);
+
+            if (f_read_cloud.eof()) break;
+        }
+
+        f_read_cloud.close();
+
+        return v_shapes;
+    }
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 
 
@@ -296,15 +356,20 @@ class Sim_SICCloudMPI : public Sim_SteadyStateMPI
 {
     void _initialize_cloud();
     void _set_cloud(Seed<shape> **myseed);
+    void _set_sensors();
     void _ic_quad(const Seed<shape> * const myseed);
 
     protected:
         virtual void _allocGPU();
         virtual void _ic();
         virtual void _dump(const std::string basename = "data");
+        virtual void _dump_statistics(const int step_id, const Real t, const Real dt);
+        virtual void _dump_sensors(const int step_id, const Real t, const Real dt);
 
     public:
         Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot);
+
+        virtual void run();
 };
 
 

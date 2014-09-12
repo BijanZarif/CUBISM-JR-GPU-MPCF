@@ -54,11 +54,61 @@ void Sim_SICCloudMPI::_dump(const string basename)
     DumpHDF5_MPI<GridMPI, myGammaStreamer>(*mygrid, step, fname, dump_path);
     sprintf(fname, "%s_%04d-P", basename.c_str(), fcount);
     DumpHDF5_MPI<GridMPI, myPiStreamer>(*mygrid, step, fname, dump_path);
-    sprintf(fname, "%s_%04d-rho", basename.c_str(), fcount);
-    DumpHDF5_MPI<GridMPI, myRhoStreamer>(*mygrid, step, fname, dump_path);
-    sprintf(fname, "%s_%04d-velocity", basename.c_str(), fcount);
-    DumpHDF5_MPI<GridMPI, myVelocityStreamer>(*mygrid, step, fname, dump_path);
+    /* sprintf(fname, "%s_%04d-rho", basename.c_str(), fcount); */
+    /* DumpHDF5_MPI<GridMPI, myRhoStreamer>(*mygrid, step, fname, dump_path); */
+    /* sprintf(fname, "%s_%04d-velocity", basename.c_str(), fcount); */
+    /* DumpHDF5_MPI<GridMPI, myVelocityStreamer>(*mygrid, step, fname, dump_path); */
+    sprintf(fname, "%s_%04d-energy", basename.c_str(), fcount);
+    DumpHDF5_MPI<GridMPI, myEnergyStreamer>(*mygrid, step, fname, dump_path);
     ++fcount;
+}
+
+void Sim_SICCloudMPI::_dump_statistics(const int step_id, const Real t, const Real dt)
+{
+    double rInt=0., uInt=0., vInt=0., wInt=0., eInt=0., vol=0., ke=0., r2Int=0., mach_max=-HUGE_VAL, p_max=-HUGE_VAL;
+    const double h = mygrid->getH();
+    const double h3 = h*h*h;
+
+    const Real * const r = mygrid->pdata()[0];
+    const Real * const u = mygrid->pdata()[1];
+    const Real * const v = mygrid->pdata()[2];
+    const Real * const w = mygrid->pdata()[3];
+    const Real * const e = mygrid->pdata()[4];
+    const Real * const G = mygrid->pdata()[5];
+    const Real * const P = mygrid->pdata()[6];
+
+    const size_t N = mygrid->size();
+#pragma omp parallel for
+    for (size_t i=0; i < N; ++i)
+    {
+        rInt  += r[i];
+        uInt  += u[i];
+        vInt  += v[i];
+        wInt  += w[i];
+        eInt  += e[i];
+        const Real G1 = 1.0 / (MaterialDictionary::gamma1 - 1.0);
+        const Real G2 = 1.0 / (MaterialDictionary::gamma2 - 1.0);
+        vol   += G[i] > 0.5 * (G1 + G2) ? 1.0 : 0.0;
+        r2Int += r[i] * (1.0 - min(max((G[i] - static_cast<Real>(1.0/(MaterialDictionary::gamma1 - 2.0))) / (G1 - G2), static_cast<Real>(0.0)), static_cast<Real>(1.0)));
+        const Real ImI2 = (u[i]*u[i] + v[i]*v[i] + w[i]*w[i]);
+        ke += static_cast<Real>(0.5)/r[i] * ImI2;
+
+        const double pressure = (e[i] - static_cast<Real>(0.5)/r[i] * ImI2 - P[i]) / G[i];
+        const double c = sqrt((static_cast<Real>(1.0)/G[i] + static_cast<Real>(1.0)) * (pressure + P[i]/(G[i] + static_cast<Real>(1.0))) / r[i]);
+        const double IvI = sqrt(ImI2) / r[i];
+
+        mach_max = max(mach_max, IvI/c);
+        p_max    = max(p_max, pressure);
+    }
+
+    FILE * f = fopen("integrals.dat", "a");
+    fprintf(f, "%d %e %e %e %e %e %e %e %e %e %e %e %e %e\n", step_id, t, dt, rInt*h3, uInt*h3,
+            vInt*h3, wInt*h3, eInt*h3, vol*h3, ke*h3, r2Int*h3, mach_max, p_max, pow(0.75*vol*h3/M_PI,1./3.));
+    fclose(f);
+}
+
+void Sim_SICCloudMPI::_dump_sensors(const int step_id, const Real t, const Real dt)
+{
 }
 
 void Sim_SICCloudMPI::_ic()
@@ -72,14 +122,16 @@ void Sim_SICCloudMPI::_ic()
     // initial values correspond to sec 4.7 of "Finite-volume WENO scheme for
     // viscous compressible multicomponent flows" V.Coralic, T.Colonius, 2014
 
+    const Real p_scale = 1.01325e5; // atmospheric pressure scale
+
     // liquid
     SICCloudData::rho0 = parser("-rho0").asDouble(1000);
     SICCloudData::u0   = parser("-u0").asDouble(0);
-    SICCloudData::p0   = parser("-p0").asDouble(101325);
+    SICCloudData::p0   = parser("-p0").asDouble(101325/p_scale);
     // bubbles
     SICCloudData::rhoB = parser("-rhoB").asDouble(1);
     SICCloudData::uB   = parser("-uB").asDouble(0);
-    SICCloudData::pB   = parser("-pB").asDouble(101325);
+    SICCloudData::pB   = parser("-pB").asDouble(101325/p_scale);
     // pressure ratio over shock
     SICCloudData::pressureRatio = parser("-pressureratio").asDouble(400);
 
@@ -94,7 +146,7 @@ void Sim_SICCloudMPI::_ic()
 
     SICCloudData::g1  = parser("-g1").asDouble(6.12);
     SICCloudData::g2  = parser("-g2").asDouble(1.4);
-    SICCloudData::pc1 = parser("-pc1").asDouble(3.43e8);
+    SICCloudData::pc1 = parser("-pc1").asDouble(3.43e8/p_scale);
     SICCloudData::pc2 = parser("-pc2").asDouble(0.0);
     MaterialDictionary::gamma1 = SICCloudData::g1;
     MaterialDictionary::gamma2 = SICCloudData::g2;
@@ -128,18 +180,17 @@ void Sim_SICCloudMPI::_ic()
     SICCloudData::rho1 = rho0*(tmp1*tmp2 + 1.0)/(tmp1 + tmp2);
     SICCloudData::p1   = p1;
 
-    // this only works for normal shock in x-direction
+    // REALITY CHECK: this only works for normal shock in x-direction
     SICCloudData::post_shock_conservative[0] = SICCloudData::rho1;
     SICCloudData::post_shock_conservative[1] = SICCloudData::rho1*SICCloudData::u1;
     SICCloudData::post_shock_conservative[2] = static_cast<Real>(0.0);
     SICCloudData::post_shock_conservative[3] = static_cast<Real>(0.0);
     const Real G1 = 1.0 / (gamma - 1.0);
-    SICCloudData::post_shock_conservative[4] = p1*G1 + pc*gamma*G1 + 0.5*SICCloudData::rho1*SICCloudData::u1*SICCloudData::u1; // v = w = 0 !
+    SICCloudData::post_shock_conservative[4] = p1*G1 + pc*gamma*G1 + static_cast<Real>(0.5)*SICCloudData::rho1*SICCloudData::u1*SICCloudData::u1; // v = w = 0 !
     SICCloudData::post_shock_conservative[5] = G1;
     SICCloudData::post_shock_conservative[6] = pc*gamma*G1;
 
-    /* if (verbosity) */
-    if (true)
+    if (isroot)
     {
         cout << "INITIAL SHOCK" << endl;
         cout << '\t' << "p-Ratio         = " << SICCloudData::pressureRatio << endl;
@@ -168,6 +219,8 @@ void Sim_SICCloudMPI::_ic()
         cout << "\t\t\t" << "p   = " << SICCloudData::pB << endl << endl;
     }
 
+    // This sets the initial conditions. This method (_ic()) is called at the
+    // end of _setup().
     Seed<shape> *myseed = NULL;
     _set_cloud(&myseed);
     _ic_quad(myseed);
@@ -195,7 +248,7 @@ void Sim_SICCloudMPI::_initialize_cloud()
 
     f_read.close();
 
-    if (verbosity)
+    if (isroot && verbosity)
         printf("cloud data: N %d Nsmall %d Rmin %f Rmax %f s=%f,%f,%f e=%f,%f,%f\n",
                 SICCloudData::n_shapes, SICCloudData::n_small, SICCloudData::min_rad, SICCloudData::max_rad,
                 SICCloudData::seed_s[0], SICCloudData::seed_s[1], SICCloudData::seed_s[2],
@@ -244,6 +297,10 @@ void Sim_SICCloudMPI::_set_cloud(Seed<shape> **seed)
     MPI_Barrier(cart_world);
 }
 
+void Sim_SICCloudMPI::_set_sensors()
+{
+}
+
 static Real is_shock(const Real P[3])
 {
     const Real nx = SICCloudData::nx;
@@ -257,7 +314,6 @@ static Real is_shock(const Real P[3])
     const Real d = -(nx*(Sx-P[0]) + ny*(Sy-P[1]) + nz*(Sz-P[2]));
 
     return SimTools::heaviside(d);
-    /* return Simulation_Environment::heaviside_smooth(d); */
 }
 
 struct FluidElement
@@ -349,7 +405,7 @@ static T get_IC(const Real pos[3], const vector<shape> * const blockShapes)
 }
 
 template<typename T>
-static T integral(const double p[3], const Real h, const vector<shape> * const blockShapes) // h should be cubism h/2
+static T integral(const Real p[3], const Real h, const vector<shape> * const blockShapes) // h should be cubism h/2
 {
     T samples[3][3][3];
     T zintegrals[3][3];
@@ -375,28 +431,281 @@ static T integral(const double p[3], const Real h, const vector<shape> * const b
     return (1./6) * yzintegrals[0]+(2./3) * yzintegrals[1]+(1./6)* yzintegrals[2];
 }
 
+
+class SubGrid
+{
+    public:
+    class SubBlock
+    {
+        public:
+        static uint_t sizeX;
+        static uint_t sizeY;
+        static uint_t sizeZ;
+        static double extent_x;
+        static double extent_y;
+        static double extent_z;
+        static double h;
+
+        private:
+        const double origin[3];
+        const uint_t block_index[3];
+        GridMPI& grid;
+
+        public:
+        SubBlock(const double O[3], const uint_t idx[3], GridMPI& G) : origin{O[0], O[1], O[2]}, block_index{idx[0], idx[1], idx[2]}, grid(G) { }
+
+        inline void get_pos(const unsigned int ix, const unsigned int iy, const unsigned int iz, Real pos[3]) const
+        {
+            // local position, relative to origin, cell center
+            pos[0] = origin[0] + h * (ix+0.5);
+            pos[1] = origin[1] + h * (iy+0.5);
+            pos[2] = origin[2] + h * (iz+0.5);
+        }
+        inline void get_index(const unsigned int lix, const unsigned int liy, const unsigned int liz, uint_t gidx[3]) const
+        {
+            // returns global grid index
+            gidx[0] = block_index[0] * sizeX + lix;
+            gidx[1] = block_index[1] * sizeY + liy;
+            gidx[2] = block_index[2] * sizeZ + liz;
+        }
+        inline void get_origin(double O[3]) const
+        {
+            O[0] = origin[0];
+            O[1] = origin[1];
+            O[2] = origin[2];
+        }
+
+        void set(const int lix, const int liy, const int liz, const FluidElement& IC)
+        {
+            const int ix = block_index[0] * sizeX + lix;
+            const int iy = block_index[1] * sizeY + liy;
+            const int iz = block_index[2] * sizeZ + liz;
+
+            grid(ix, iy, iz, GridMPI::PRIM::R) = IC.rho;
+            grid(ix, iy, iz, GridMPI::PRIM::U) = IC.u;
+            grid(ix, iy, iz, GridMPI::PRIM::V) = IC.v;
+            grid(ix, iy, iz, GridMPI::PRIM::W) = IC.w;
+            grid(ix, iy, iz, GridMPI::PRIM::E) = IC.energy;
+            grid(ix, iy, iz, GridMPI::PRIM::G) = IC.G;
+            grid(ix, iy, iz, GridMPI::PRIM::P) = IC.P;
+        }
+    };
+
+
+    private:
+    const uint_t nblock_x, nblock_y, nblock_z;
+    vector<SubBlock *> blocks;
+
+
+    public:
+    SubGrid(GridMPI *grid, const uint_t ncX, const uint_t ncY, const uint_t ncZ) :
+        nblock_x(_BLOCKSIZEX_/ncX), nblock_y(_BLOCKSIZEY_/ncY), nblock_z(_BLOCKSIZEZ_/ncZ)
+    {
+        if (_BLOCKSIZEX_ % ncX != 0)
+        {
+            fprintf(stderr, "ERROR: subcellsX must be an integer multiple of _BLOCKSIZEX_");
+            abort();
+        }
+        if (_BLOCKSIZEY_ % ncY != 0)
+        {
+            fprintf(stderr, "ERROR: subcellsY must be an integer multiple of _BLOCKSIZEY_");
+            abort();
+        }
+        if (_BLOCKSIZEZ_ % ncZ != 0)
+        {
+            fprintf(stderr, "ERROR: subcellsZ must be an integer multiple of _BLOCKSIZEZ_");
+            abort();
+        }
+
+        const double h_ = grid->getH();
+        SubGrid::SubBlock::sizeX = ncX;
+        SubGrid::SubBlock::sizeY = ncY;
+        SubGrid::SubBlock::sizeZ = ncZ;
+        SubGrid::SubBlock::extent_x = ncX * h_;
+        SubGrid::SubBlock::extent_y = ncY * h_;
+        SubGrid::SubBlock::extent_z = ncZ * h_;
+        SubGrid::SubBlock::h = h_;
+
+        blocks.reserve(nblock_x * nblock_y * nblock_z);
+
+        double O[3];
+        grid->get_origin(O);
+        for (int biz=0; biz < nblock_z; ++biz)
+            for (int biy=0; biy < nblock_y; ++biy)
+                for (int bix=0; bix < nblock_x; ++bix)
+                {
+                    const double thisOrigin[3] = {
+                        O[0] + bix * SubGrid::SubBlock::extent_x,
+                        O[1] + biy * SubGrid::SubBlock::extent_y,
+                        O[2] + biz * SubGrid::SubBlock::extent_z };
+                    const uint_t thisIndex[3] = {bix, biy, biz};
+
+                    SubBlock *thisBlock = new SubBlock(thisOrigin, thisIndex, *grid);
+                    blocks.push_back(thisBlock);
+                }
+    }
+
+    ~SubGrid()
+    {
+        for (int i =0; i < (int)blocks.size(); ++i)
+            delete blocks[i];
+        blocks.clear();
+    }
+
+    SubBlock *operator[](const int block_id) { return blocks[block_id]; }
+    const size_t size() const { return blocks.size(); }
+};
+
+uint_t SubGrid::SubBlock::sizeX = 0;
+uint_t SubGrid::SubBlock::sizeY = 0;
+uint_t SubGrid::SubBlock::sizeZ = 0;
+double SubGrid::SubBlock::extent_x = 0.0;
+double SubGrid::SubBlock::extent_y = 0.0;
+double SubGrid::SubBlock::extent_z = 0.0;
+double SubGrid::SubBlock::h = 0.0;
+
+
 void Sim_SICCloudMPI::_ic_quad(const Seed<shape> * const seed)
 {
-    GridMPI& grid = *mygrid;
-    const Real h  = grid.getH();
-    vector<shape> v_shapes = seed->get_shapes();
+    // we use artifical subblocks that are smaller than the original block
+    parser.set_strict_mode();
+    const int subcells_x = parser("-subcellsX").asInt();
+    parser.unset_strict_mode();
+    const int subcells_y = parser("-subcellsY").asInt(subcells_x);
+    const int subcells_z = parser("-subcellsZ").asInt(subcells_x);
 
-    typedef GridMPI::PRIM var;
+    SubGrid subblocks(mygrid, subcells_x, subcells_y, subcells_z);
+
+    if (seed->get_shapes().size() == 0)
+    {
 #pragma omp parallel for
-    for (int iz = 0; iz < GridMPI::sizeZ; ++iz)
-        for (int iy = 0; iy < GridMPI::sizeY; ++iy)
-            for (int ix = 0; ix < GridMPI::sizeX; ++ix)
-            {
-                double p[3];
-                grid.get_pos(ix, iy, iz, p);
-                FluidElement IC = integral<FluidElement>(p, 0.5*h, &v_shapes);
+        for (int i=0; i < (int)subblocks.size(); ++i)
+        {
+            SubGrid::SubBlock& myblock = *(subblocks[i]);
 
-                grid(ix, iy, iz, var::R) = IC.rho;
-                grid(ix, iy, iz, var::U) = IC.u;
-                grid(ix, iy, iz, var::V) = IC.v;
-                grid(ix, iy, iz, var::W) = IC.w;
-                grid(ix, iy, iz, var::E) = IC.energy;
-                grid(ix, iy, iz, var::G) = IC.G;
-                grid(ix, iy, iz, var::P) = IC.P;
+            for (int iz=0; iz < SubGrid::SubBlock::sizeZ; ++iz)
+                for (int iy=0; iy < SubGrid::SubBlock::sizeY; ++iy)
+                    for (int ix=0; ix < SubGrid::SubBlock::sizeX; ++ix)
+                    {
+                        Real pos[3];
+                        myblock.get_pos(ix, iy, iz, pos);
+                        const FluidElement IC = get_IC<FluidElement>(pos, NULL);
+                        myblock.set(ix, iy, iz, IC);
+                    }
+        }
+    }
+    else
+    {
+        const Real h  = mygrid->getH();
+        const double myextent[3] = {
+            SubGrid::SubBlock::extent_x,
+            SubGrid::SubBlock::extent_y,
+            SubGrid::SubBlock::extent_z };
+
+#pragma omp parallel for
+        for (int i=0; i < (int)subblocks.size(); ++i)
+        {
+            SubGrid::SubBlock& myblock = *(subblocks[i]);
+
+            double block_origin[3];
+            myblock.get_origin(block_origin);
+
+            vector<shape> myshapes = seed->get_shapes().size() ? seed->retain_shapes(block_origin, myextent).get_shapes() : seed->get_shapes();
+            const bool isempty = myshapes.size() == 0;
+
+            if (isempty)
+            {
+                for (int iz=0; iz < SubGrid::SubBlock::sizeZ; ++iz)
+                    for (int iy=0; iy < SubGrid::SubBlock::sizeY; ++iy)
+                        for (int ix=0; ix < SubGrid::SubBlock::sizeX; ++ix)
+                        {
+                            Real pos[3];
+                            myblock.get_pos(ix, iy, iz, pos);
+                            const FluidElement IC = get_IC<FluidElement>(pos, NULL);
+                            myblock.set(ix, iy, iz, IC);
+                        }
             }
+            else
+            {
+                for (int iz=0; iz < SubGrid::SubBlock::sizeZ; ++iz)
+                    for (int iy=0; iy < SubGrid::SubBlock::sizeY; ++iy)
+                        for (int ix=0; ix < SubGrid::SubBlock::sizeX; ++ix)
+                        {
+                            Real pos[3];
+                            myblock.get_pos(ix, iy, iz, pos);
+                            const FluidElement IC = integral<FluidElement>(pos, 0.5*h, &myshapes);
+                            myblock.set(ix, iy, iz, IC);
+                        }
+            }
+        }
+    }
+}
+
+
+void Sim_SICCloudMPI::run()
+{
+    _setup();
+
+    parser.set_strict_mode();
+    const uint_t analysisperiod = parser("-analysisperiod").asInt();
+    parser.unset_strict_mode();
+
+    if (dryrun)
+    {
+        if (isroot) printf("Dry Run...\n");
+        return;
+    }
+    else
+    {
+        double dt, dt_max;
+
+        const uint_t step_start = step; // such that -nsteps is a relative measure (only relevant for restarts)
+        while (t < tend)
+        {
+            profiler.push_start("EVOLVE");
+            dt_max = (tend-t) < (tnextdump-t) ? (tend-t) : (tnextdump-t);
+            dt = (*stepper)(dt_max);
+            profiler.pop_stop();
+
+            t += dt;
+            ++step;
+
+            if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", step, t, dt);
+
+            if ((float)t == (float)tnextdump)
+            {
+                profiler.push_start("DUMP");
+                tnextdump += dumpinterval;
+                _dump();
+                profiler.pop_stop();
+            }
+
+            if (step % saveperiod == 0)
+            {
+                profiler.push_start("SAVE");
+                if (isroot) printf("Saving time step...\n");
+                _save();
+                profiler.pop_stop();
+            }
+
+            if (step % analysisperiod == 0)
+            {
+                profiler.push_start("ANALYSIS");
+                if (isroot) printf("Running analysis...\n");
+                _dump_statistics(step, t, dt);
+                profiler.pop_stop();
+            }
+
+            if (step % 10 == 0)
+                profiler.printSummary();
+
+            if ((step-step_start) == nsteps) break;
+        }
+
+        profiler.printSummary();
+
+        _dump();
+
+        return;
+    }
 }

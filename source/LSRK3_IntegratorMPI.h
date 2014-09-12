@@ -31,6 +31,7 @@ class LSRK3_IntegratorMPI
     {
         verbosity = parser("-verb").asInt(0);
         SOSkernel = parser("-SOSkernel").asString("cuda");
+        SimTools::EPSILON = static_cast<Real>(parser("-mollfactor").asInt(1)) * std::sqrt(3.) * h;
     }
 
     double operator()(const double dt_max);

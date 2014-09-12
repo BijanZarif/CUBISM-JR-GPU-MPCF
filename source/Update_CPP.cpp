@@ -14,6 +14,7 @@ using std::max;
 using std::min;
 using std::abs;
 
+
 void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N)
 {
     /* *
@@ -93,22 +94,32 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         v[i] = v_new;
         w[i] = w_new;
 
-        const Real ke = 0.5*(u_new*u_new + v_new*v_new + w_new*w_new)/r_new; // whatever ke we had before
+        const Real ke = static_cast<Real>(0.5)*(u_new*u_new + v_new*v_new + w_new*w_new)/r_new; // whatever ke we had before
         const Real pressure = (e_new - P_new - ke)/G_new; // whatever pressure we had before
 
-        /* if (P[i]/(static_cast<Real>(1.0) + G[i]) < -2*pressure) // if it was still bad with new P and new G */
-        /* { */
-        /*     /1* const Real difference = -16.86 * pressure * (static_cast<Real>(1.0) + G[i]) - P[i]; *1/ */
-        /*     /1* P[i] += abs(difference); // change P again *1/ */
-        /*     G[i] *= static_cast<Real>(0.2); */
-        /* } */
-        if (G[i] > 2.55) // if it was still bad with new P and new G
+        if (P[i]/(static_cast<Real>(1.0) + G[i]) < static_cast<Real>(-2.0)*pressure) // if it was still bad with new P and new G
         {
-            /* const Real diff_G = 0.7*G[i] - 2.55; */
-            const Real diff_P = -4 * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
-            G[i] = 2.5
-            P[i] += abs(diff_P); // change P again
+            const Real difference = static_cast<Real>(-8.0) * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
+            /* P[i] += abs(difference); // change P again */
+            P[i] += difference; // change P again
         }
+
+
+        /* const Real mygamma = (G[i] + static_cast<Real>(1.0)) / G[i]; */
+        /* if (mygamma < static_cast<Real>(1.38)) // if it was still bad with new P and new G */
+        /* { */
+        /*     const Real difference = -static_cast<Real>(4.0) * pressure * (static_cast<Real>(1.0) + G[i]) - P[i]; */
+        /*     P[i] += abs(difference); // change P again */
+        /* } */
+
+
+        /* if (G[i] > 2.55) // if it was still bad with new P and new G */
+        /* { */
+        /*     /1* const Real diff_G = 0.7*G[i] - 2.55; *1/ */
+        /*     const Real diff_P = -4 * pressure * (static_cast<Real>(1.0) + G[i]) - P[i]; */
+        /*     G[i] = 2.5 */
+        /*     P[i] += abs(diff_P); // change P again */
+        /* } */
 
         e[i] = pressure * G[i] + P[i] + ke; // update e
 #endif

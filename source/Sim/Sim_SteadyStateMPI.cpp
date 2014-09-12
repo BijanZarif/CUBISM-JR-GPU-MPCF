@@ -11,7 +11,6 @@
 #include <iomanip>
 
 #include "Sim_SteadyStateMPI.h"
-#include "LSRK3_IntegratorMPI.h"
 #include "HDF5Dumper_MPI.h"
 /* #include "SerializerIO_WaveletCompression_MPI_Simple.h" */
 
@@ -36,7 +35,7 @@ void Sim_SteadyStateMPI::_setup()
         CFL          = parser("-cfl").asDouble();
         nslices      = parser("-nslices").asInt();
         dumpinterval = parser("-dumpinterval").asDouble();
-        saveinterval = parser("-saveinterval").asInt();
+        saveperiod   = parser("-saveperiod").asInt();
         parser.unset_strict_mode();
     }
 
@@ -54,6 +53,18 @@ void Sim_SteadyStateMPI::_setup()
     tnextdump = dumpinterval;
     mygrid    = new GridMPI(npex, npey, npez);
     assert(mygrid != NULL);
+
+    // allocate GPU
+    if (!dryrun)
+    {
+        _allocGPU();
+        assert(myGPU != NULL);
+    }
+    else
+        if (isroot) printf("No GPU allocated...\n");
+
+    // allocate integrator
+    stepper = new LSRK3_IntegratorMPI(mygrid, myGPU, CFL, parser);
 
     // setup initial condition
     if (restart)
@@ -77,14 +88,6 @@ void Sim_SteadyStateMPI::_setup()
         _ic();
         _dump();
     }
-
-    if (!dryrun)
-    {
-        _allocGPU();
-        assert(myGPU != NULL);
-    }
-    else
-        if (isroot) printf("No GPU allocated...\n");
 }
 
 
@@ -211,31 +214,37 @@ void Sim_SteadyStateMPI::run()
     else
     {
         double dt, dt_max;
-        LSRK3_IntegratorMPI * const stepper = new LSRK3_IntegratorMPI(mygrid, myGPU, CFL, parser);
 
         const uint_t step_start = step; // such that -nsteps is a relative measure
         while (t < tend)
         {
+            profiler.push_start("EVOLVE");
             dt_max = (tend-t) < (tnextdump-t) ? (tend-t) : (tnextdump-t);
             dt = (*stepper)(dt_max);
+            profiler.pop_stop();
 
             t += dt;
             ++step;
 
-            if (isroot) printf("step id is %d, physical time %f (dt = %e)\n", step, t, dt);
+            if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", step, t, dt);
 
             if ((float)t == (float)tnextdump)
             {
+                profiler.push_start("DUMP");
                 tnextdump += dumpinterval;
                 _dump();
+                profiler.pop_stop();
             }
             /* if (step % 10 == 0) _dump(); */
 
-            if (step % saveinterval == 0)
+            if (step % saveperiod == 0)
             {
                 if (isroot) printf("Saving time step...\n");
                 _save();
             }
+
+            if (step % 10 == 0)
+                profiler.printSummary();
 
             if ((step-step_start) == nsteps) break;
         }
@@ -243,7 +252,7 @@ void Sim_SteadyStateMPI::run()
         profiler.printSummary();
 
         _dump();
-        delete stepper;
+
         return;
     }
 }

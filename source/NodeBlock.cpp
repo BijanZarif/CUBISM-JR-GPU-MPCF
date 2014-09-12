@@ -7,6 +7,7 @@
 #include "NodeBlock.h"
 #include <stdlib.h>
 #include <cmath>
+#include <omp.h>
 using namespace std;
 
 

@@ -112,6 +112,8 @@ class NodeBlock
         inline std::vector<Real *>& pdata() { return data; }
         inline std::vector<Real *>& ptmp()  { return tmp; }
 
+        inline size_t size() const { return _BLOCKSIZEX_ * _BLOCKSIZEY_ * _BLOCKSIZEZ_; }
+
         inline Real& operator()(const unsigned int ix, const unsigned int iy, const unsigned int iz, const PRIM p)
         {
             return data[p][_linaccess(ix, iy, iz)];

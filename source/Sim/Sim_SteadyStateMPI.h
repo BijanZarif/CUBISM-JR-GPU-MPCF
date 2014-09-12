@@ -13,6 +13,7 @@
 #include "Profiler.h"
 #include "GridMPI.h"
 #include "GPUlab.h"
+#include "LSRK3_IntegratorMPI.h"
 #include "BoundaryConditions.h"
 
 
@@ -24,7 +25,7 @@ class Sim_SteadyStateMPI : public Simulation
 
         // simulation parameter
         double t, tend, tnextdump, dumpinterval, CFL;
-        uint_t step, nsteps, nslices, saveinterval, fcount;
+        uint_t step, nsteps, nslices, saveperiod, fcount;
         int verbosity;
         bool restart, dryrun;
         char fname[256];
@@ -33,8 +34,9 @@ class Sim_SteadyStateMPI : public Simulation
         uint_t npex, npey, npez;
 
         // main ingredients
-        GridMPI *mygrid;
-        GPUlab  *myGPU;
+        GridMPI             *mygrid;
+        LSRK3_IntegratorMPI *stepper;
+        GPUlab              *myGPU;
 
         // helper
         ArgumentParser parser;
@@ -56,6 +58,7 @@ class Sim_SteadyStateMPI : public Simulation
         ~Sim_SteadyStateMPI()
         {
             delete mygrid;
+            delete stepper;
             delete myGPU;
         }
 
