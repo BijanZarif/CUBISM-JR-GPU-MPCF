@@ -52,14 +52,20 @@ extern cudaStream_t *stream;
 // compute events
 extern cudaEvent_t *event_compute;
 
+// array sizes
+// TODO: chnage names, these are crap
+extern size_t IN_BYTES;
+extern size_t OUT_BYTES;
+
 // texture references
-texture<float, 3, cudaReadModeElementType> tex00;
-texture<float, 3, cudaReadModeElementType> tex01;
-texture<float, 3, cudaReadModeElementType> tex02;
-texture<float, 3, cudaReadModeElementType> tex03;
-texture<float, 3, cudaReadModeElementType> tex04;
-texture<float, 3, cudaReadModeElementType> tex05;
-texture<float, 3, cudaReadModeElementType> tex06;
+texture<float, 1, cudaReadModeElementType> tex00;
+texture<float, 1, cudaReadModeElementType> tex01;
+texture<float, 1, cudaReadModeElementType> tex02;
+texture<float, 1, cudaReadModeElementType> tex03;
+texture<float, 1, cudaReadModeElementType> tex04;
+texture<float, 1, cudaReadModeElementType> tex05;
+texture<float, 1, cudaReadModeElementType> tex06;
+
 
 ///////////////////////////////////////////////////////////////////////////////
 //                             DEVICE FUNCTIONS                              //
@@ -480,14 +486,22 @@ void _CONV(DevicePointer data)
 }
 
 
-template <int texID> __device__ inline float myTex3D(const int ix, const int iy, const int iz);
-template <> __device__ inline float myTex3D<0>(const int ix, const int iy, const int iz) { return tex3D(tex00, ix, iy, iz); }
-template <> __device__ inline float myTex3D<1>(const int ix, const int iy, const int iz) { return tex3D(tex01, ix, iy, iz); }
-template <> __device__ inline float myTex3D<2>(const int ix, const int iy, const int iz) { return tex3D(tex02, ix, iy, iz); }
-template <> __device__ inline float myTex3D<3>(const int ix, const int iy, const int iz) { return tex3D(tex03, ix, iy, iz); }
-template <> __device__ inline float myTex3D<4>(const int ix, const int iy, const int iz) { return tex3D(tex04, ix, iy, iz); }
-template <> __device__ inline float myTex3D<5>(const int ix, const int iy, const int iz) { return tex3D(tex05, ix, iy, iz); }
-template <> __device__ inline float myTex3D<6>(const int ix, const int iy, const int iz) { return tex3D(tex06, ix, iy, iz); }
+/* template <int texID> __device__ inline float myTex3D(const int ix, const int iy, const int iz); */
+/* template <> __device__ inline float myTex3D<0>(const int ix, const int iy, const int iz) { return tex3D(tex00, ix, iy, iz); } */
+/* template <> __device__ inline float myTex3D<1>(const int ix, const int iy, const int iz) { return tex3D(tex01, ix, iy, iz); } */
+/* template <> __device__ inline float myTex3D<2>(const int ix, const int iy, const int iz) { return tex3D(tex02, ix, iy, iz); } */
+/* template <> __device__ inline float myTex3D<3>(const int ix, const int iy, const int iz) { return tex3D(tex03, ix, iy, iz); } */
+/* template <> __device__ inline float myTex3D<4>(const int ix, const int iy, const int iz) { return tex3D(tex04, ix, iy, iz); } */
+/* template <> __device__ inline float myTex3D<5>(const int ix, const int iy, const int iz) { return tex3D(tex05, ix, iy, iz); } */
+/* template <> __device__ inline float myTex3D<6>(const int ix, const int iy, const int iz) { return tex3D(tex06, ix, iy, iz); } */
+template <int texID> __device__ inline float myTex1Dlinear(const int index);
+template <> __device__ inline float myTex1Dlinear<0>(const int index) { return tex1Dfetch(tex00, index); }
+template <> __device__ inline float myTex1Dlinear<1>(const int index) { return tex1Dfetch(tex01, index); }
+template <> __device__ inline float myTex1Dlinear<2>(const int index) { return tex1Dfetch(tex02, index); }
+template <> __device__ inline float myTex1Dlinear<3>(const int index) { return tex1Dfetch(tex03, index); }
+template <> __device__ inline float myTex1Dlinear<4>(const int index) { return tex1Dfetch(tex04, index); }
+template <> __device__ inline float myTex1Dlinear<5>(const int index) { return tex1Dfetch(tex05, index); }
+template <> __device__ inline float myTex1Dlinear<6>(const int index) { return tex1Dfetch(tex06, index); }
 
 template <int texID, int gid0, int tid0, int gmap0, int tmap0, int ng> __device__
 inline void _load_boundary_X(const uint_t iy, const uint_t iz,
@@ -519,9 +533,10 @@ inline void _load_boundary_X(const uint_t iy, const uint_t iz,
     for (int i = 0; i < ng; ++i)
         stencil[gid0 + i] = ghost[GHOSTMAPX(gmap0+i, iy, giz)];
 
+    const int base = ID3(tmap0, iy, iz, NX, NY);
     const int ntex = _STENCIL_WIDTH_ - ng;
     for (int i = 0; i < ntex; ++i)
-        stencil[tid0 + i] = myTex3D<texID>(tmap0+i, iy, iz);
+        stencil[tid0 + i] = myTex1Dlinear<texID>(base+i);
 }
 
 template <int texID, int gid0, int tid0, int gmap0, int tmap0, int ng> __device__
@@ -556,7 +571,10 @@ inline void _load_boundary_Y(const uint_t ix, const uint_t iz,
 
     const int ntex = _STENCIL_WIDTH_ - ng;
     for (int i = 0; i < ntex; ++i)
-        stencil[tid0 + i] = myTex3D<texID>(ix, tmap0+i, iz);
+    {
+        const int index = ID3(ix, tmap0+i, iz, NX, NY);
+        stencil[tid0 + i] = myTex1Dlinear<texID>(index);
+    }
 }
 
 template <int texID> __device__
@@ -564,10 +582,11 @@ inline void _load_internal_X(const uint_t ix, const uint_t iy, const uint_t iz, 
 {
     // fixed stencil: - - - 0 + + + + + . . .
     assert(2 < ix);
+    const int base = ID3(ix, iy, iz, NX, NY);
     const int s_start = -3;
     const int s_end   = _STENCIL_WIDTH_ + s_start;
     for (int i=s_start; i < s_end; ++i)
-        *stencil++ = myTex3D<texID>(ix+i, iy, iz);
+        *stencil++ = myTex1Dlinear<texID>(base+i);
 }
 
 template <int texID> __device__
@@ -578,7 +597,10 @@ inline void _load_internal_Y(const uint_t ix, const uint_t iy, const uint_t iz, 
     const int s_start = -3;
     const int s_end   = _STENCIL_WIDTH_ + s_start;
     for (int i=s_start; i < s_end; ++i)
-        *stencil++ = myTex3D<texID>(ix, iy+i, iz);
+    {
+        const int index = ID3(ix, iy+i, iz, NX, NY);
+        *stencil++ = myTex1Dlinear<texID>(index);
+    }
 }
 
 template <int texID> __device__
@@ -589,7 +611,10 @@ inline void _load_internal_Z(const uint_t ix, const uint_t iy, const uint_t iz, 
     const int s_start = -3;
     const int s_end   = _STENCIL_WIDTH_ + s_start;
     for (int i=s_start; i < s_end; ++i)
-        *stencil++ = myTex3D<texID>(ix, iy, iz+i);
+    {
+        const int index = ID3(ix, iy, iz+i, NX, NY);
+        *stencil++ = myTex1Dlinear<texID>(index);
+    }
 }
 
 
@@ -1267,15 +1292,16 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
-            const Real r = tex3D(tex00, ix, iy, iz);
-            const Real G = tex3D(tex05, ix, iy, iz);
-            const Real u = tex3D(tex01, ix, iy, iz);
-            const Real v = tex3D(tex02, ix, iy, iz);
+            const int index = ID3(ix, iy, iz, NX, NY);
+            const Real r = tex1Dfetch(tex00, index);
+            const Real G = tex1Dfetch(tex05, index);
+            const Real u = tex1Dfetch(tex01, index);
+            const Real v = tex1Dfetch(tex02, index);
             const Real invr = 1.0f / r;
             const Real invG = 1.0f / G;
-            const Real w = tex3D(tex03, ix, iy, iz);
-            const Real e = tex3D(tex04, ix, iy, iz);
-            const Real P = tex3D(tex06, ix, iy, iz);
+            const Real w = tex1Dfetch(tex03, index);
+            const Real e = tex1Dfetch(tex04, index);
+            const Real P = tex1Dfetch(tex06, index);
 
             const Real p = (e - 0.5f*(u*u + v*v + w*w)*invr - P)*invG;
             const Real c = sqrtf(((p + P)*invG + p)*invr);
@@ -1298,20 +1324,6 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 ///////////////////////////////////////////////////////////////////////////////
 //                              KERNEL WRAPPERS                              //
 ///////////////////////////////////////////////////////////////////////////////
-static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex, cudaArray_t d_ptr)
-{
-    cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
-    tex->addressMode[0]       = cudaAddressModeClamp;
-    tex->addressMode[1]       = cudaAddressModeClamp;
-    tex->addressMode[2]       = cudaAddressModeClamp;
-    tex->channelDesc          = fmt;
-    tex->filterMode           = cudaFilterModePoint;
-    tex->mipmapFilterMode     = cudaFilterModePoint;
-    tex->normalized           = false;
-    cudaBindTextureToArray(tex, d_ptr, &fmt);
-}
-
-
 void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
         const uint_t gbuf_id, const int chunk_id)
 {
@@ -1355,22 +1367,31 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
 
     // TODO: is there a faster solution than this??
     // copy to tex buffers
-    for (uint_t i = 0; i < VSIZE; ++i)
-    {
-        cudaMemcpy3DParms copyParams = {0};
-        copyParams.extent            = make_cudaExtent(NX, NY, nslices+6);
-        copyParams.kind              = cudaMemcpyDeviceToDevice;
-        copyParams.srcPtr            = make_cudaPitchedPtr((void *)mybuf->d_inout[i], NX * sizeof(Real), NX, NY);
-        copyParams.dstArray          = mybuf->d_GPU3D[i];
-        cudaMemcpy3DAsync(&copyParams, stream[s_id]);
-    }
-    _bindTexture(&tex00, mybuf->d_GPU3D[0]);
-    _bindTexture(&tex01, mybuf->d_GPU3D[1]);
-    _bindTexture(&tex02, mybuf->d_GPU3D[2]);
-    _bindTexture(&tex03, mybuf->d_GPU3D[3]);
-    _bindTexture(&tex04, mybuf->d_GPU3D[4]);
-    _bindTexture(&tex05, mybuf->d_GPU3D[5]);
-    _bindTexture(&tex06, mybuf->d_GPU3D[6]);
+    /* for (uint_t i = 0; i < VSIZE; ++i) */
+    /* { */
+    /*     cudaMemcpy3DParms copyParams = {0}; */
+    /*     copyParams.extent            = make_cudaExtent(NX, NY, nslices+6); */
+    /*     copyParams.kind              = cudaMemcpyDeviceToDevice; */
+    /*     copyParams.srcPtr            = make_cudaPitchedPtr((void *)mybuf->d_inout[i], NX * sizeof(Real), NX, NY); */
+    /*     copyParams.dstArray          = mybuf->d_GPU3D[i]; */
+    /*     cudaMemcpy3DAsync(&copyParams, stream[s_id]); */
+    /* } */
+    /* _bindTexture(&tex00, mybuf->d_GPU3D[0]); */
+    /* _bindTexture(&tex01, mybuf->d_GPU3D[1]); */
+    /* _bindTexture(&tex02, mybuf->d_GPU3D[2]); */
+    /* _bindTexture(&tex03, mybuf->d_GPU3D[3]); */
+    /* _bindTexture(&tex04, mybuf->d_GPU3D[4]); */
+    /* _bindTexture(&tex05, mybuf->d_GPU3D[5]); */
+    /* _bindTexture(&tex06, mybuf->d_GPU3D[6]); */
+    const cudaChannelFormatDesc FMT = cudaCreateChannelDesc<Real>();
+    cudaBindTexture(NULL, &tex00, inout.r, &FMT, IN_BYTES);
+    cudaBindTexture(NULL, &tex01, inout.u, &FMT, IN_BYTES);
+    cudaBindTexture(NULL, &tex02, inout.v, &FMT, IN_BYTES);
+    cudaBindTexture(NULL, &tex03, inout.w, &FMT, IN_BYTES);
+    cudaBindTexture(NULL, &tex04, inout.e, &FMT, IN_BYTES);
+    cudaBindTexture(NULL, &tex05, inout.G, &FMT, IN_BYTES);
+    cudaBindTexture(NULL, &tex06, inout.P, &FMT, IN_BYTES);
+
 
     // my reconstruction
     DevicePointer recon_m(d_recon_m);
@@ -1391,57 +1412,57 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     _WENO_X<5><<<X_grid, X_blocks, 0, stream[s_id]>>>(d_recon_m[5], d_recon_p[5], mybuf->d_xgl[5], mybuf->d_xgr[5]);
     _WENO_X<6><<<X_grid, X_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6], mybuf->d_xgl[6], mybuf->d_xgr[6]);
 
-    // hllc fluxes
-    _HLLC_X<<<X_grid, X_blocks, 0, stream[s_id]>>>(recon_m, recon_p);
+    /* // hllc fluxes */
+    /* _HLLC_X<<<X_grid, X_blocks, 0, stream[s_id]>>>(recon_m, recon_p); */
 
-    // flux divegence X + extra term contribution. Need extra kernel because of
-    // y is the fastest moving index for the above kernels (most efficient WENO
-    // computation, no warp divergence in branches), but fastest index in
-    // output array is x. Shared memory is used to transpose the data
-    // slice-wise.
-    // NOTE: fluxes computed in _HLLC kernels are stored in the recon_ arrays,
-    // as shown below. hllc_vel is stored in recon_p.v
-    DevicePointer fluxes(recon_m.r, recon_m.u, recon_m.v, recon_m.w, recon_m.e, recon_p.r, recon_p.u);
-    const dim3 xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1);
-    const dim3 xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, nslices);
-    _XEXTRATERM_HLLC<<<xtraGrid, xtraBlocks, 0, stream[s_id]>>>(inout, fluxes, recon_m.G, recon_p.G, recon_m.P, recon_p.P, recon_p.v, d_sumG, d_sumP, d_divU);
+    /* // flux divegence X + extra term contribution. Need extra kernel because of */
+    /* // y is the fastest moving index for the above kernels (most efficient WENO */
+    /* // computation, no warp divergence in branches), but fastest index in */
+    /* // output array is x. Shared memory is used to transpose the data */
+    /* // slice-wise. */
+    /* // NOTE: fluxes computed in _HLLC kernels are stored in the recon_ arrays, */
+    /* // as shown below. hllc_vel is stored in recon_p.v */
+    /* DevicePointer fluxes(recon_m.r, recon_m.u, recon_m.v, recon_m.w, recon_m.e, recon_p.r, recon_p.u); */
+    /* const dim3 xtraBlocks(_TILE_DIM_, _BLOCK_ROWS_, 1); */
+    /* const dim3 xtraGrid((NX + _TILE_DIM_ - 1)/_TILE_DIM_, (NY + _TILE_DIM_ - 1)/_TILE_DIM_, nslices); */
+    /* _XEXTRATERM_HLLC<<<xtraGrid, xtraBlocks, 0, stream[s_id]>>>(inout, fluxes, recon_m.G, recon_p.G, recon_m.P, recon_p.P, recon_p.v, d_sumG, d_sumP, d_divU); */
 
-    // ========================================================================
-    // Y
-    // ========================================================================
-    const dim3 Y_blocks(_WARPSIZE_, 1, 4);
-    const dim3 Y_grid((NX + _WARPSIZE_ - 1)/_WARPSIZE_, NYP1, (nslices + 4 - 1)/4);
+    /* // ======================================================================== */
+    /* // Y */
+    /* // ======================================================================== */
+    /* const dim3 Y_blocks(_WARPSIZE_, 1, 4); */
+    /* const dim3 Y_grid((NX + _WARPSIZE_ - 1)/_WARPSIZE_, NYP1, (nslices + 4 - 1)/4); */
 
-    // reconstruct
-    _WENO_Y<0><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[0], d_recon_p[0], mybuf->d_ygl[0], mybuf->d_ygr[0]);
-    _WENO_Y<1><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[1], d_recon_p[1], mybuf->d_ygl[1], mybuf->d_ygr[1]);
-    _WENO_Y<2><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[2], d_recon_p[2], mybuf->d_ygl[2], mybuf->d_ygr[2]);
-    _WENO_Y<3><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[3], d_recon_p[3], mybuf->d_ygl[3], mybuf->d_ygr[3]);
-    _WENO_Y<4><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[4], d_recon_p[4], mybuf->d_ygl[4], mybuf->d_ygr[4]);
-    _WENO_Y<5><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[5], d_recon_p[5], mybuf->d_ygl[5], mybuf->d_ygr[5]);
-    _WENO_Y<6><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6], mybuf->d_ygl[6], mybuf->d_ygr[6]);
+    /* // reconstruct */
+    /* _WENO_Y<0><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[0], d_recon_p[0], mybuf->d_ygl[0], mybuf->d_ygr[0]); */
+    /* _WENO_Y<1><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[1], d_recon_p[1], mybuf->d_ygl[1], mybuf->d_ygr[1]); */
+    /* _WENO_Y<2><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[2], d_recon_p[2], mybuf->d_ygl[2], mybuf->d_ygr[2]); */
+    /* _WENO_Y<3><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[3], d_recon_p[3], mybuf->d_ygl[3], mybuf->d_ygr[3]); */
+    /* _WENO_Y<4><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[4], d_recon_p[4], mybuf->d_ygl[4], mybuf->d_ygr[4]); */
+    /* _WENO_Y<5><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[5], d_recon_p[5], mybuf->d_ygl[5], mybuf->d_ygr[5]); */
+    /* _WENO_Y<6><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6], mybuf->d_ygl[6], mybuf->d_ygr[6]); */
 
-    // hllc fluxes
-    _HLLC_Y<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(recon_m, recon_p, inout, d_sumG, d_sumP, d_divU);
+    /* // hllc fluxes */
+    /* _HLLC_Y<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(recon_m, recon_p, inout, d_sumG, d_sumP, d_divU); */
 
-    // ========================================================================
-    // Z
-    // ========================================================================
-    const dim3 Z_blocks(_WARPSIZE_, 4, 1);
-    const dim3 Z_grid_WENO((NX + _WARPSIZE_ - 1)/_WARPSIZE_, (NY + 8 - 1)/8, nslices + 1); // we do twice the amount of work in WENO_Z kernel
+    /* // ======================================================================== */
+    /* // Z */
+    /* // ======================================================================== */
+    /* const dim3 Z_blocks(_WARPSIZE_, 4, 1); */
+    /* const dim3 Z_grid_WENO((NX + _WARPSIZE_ - 1)/_WARPSIZE_, (NY + 8 - 1)/8, nslices + 1); // we do twice the amount of work in WENO_Z kernel */
 
-    // reconstruct
-    _WENO_Z<0><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[0], d_recon_p[0]);
-    _WENO_Z<1><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[1], d_recon_p[1]);
-    _WENO_Z<2><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[2], d_recon_p[2]);
-    _WENO_Z<3><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[3], d_recon_p[3]);
-    _WENO_Z<4><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[4], d_recon_p[4]);
-    _WENO_Z<5><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[5], d_recon_p[5]);
-    _WENO_Z<6><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6]);
+    /* // reconstruct */
+    /* _WENO_Z<0><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[0], d_recon_p[0]); */
+    /* _WENO_Z<1><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[1], d_recon_p[1]); */
+    /* _WENO_Z<2><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[2], d_recon_p[2]); */
+    /* _WENO_Z<3><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[3], d_recon_p[3]); */
+    /* _WENO_Z<4><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[4], d_recon_p[4]); */
+    /* _WENO_Z<5><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[5], d_recon_p[5]); */
+    /* _WENO_Z<6><<<Z_grid_WENO, Z_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6]); */
 
-    // hllc fluxes
-    const dim3 Z_grid((NX + _WARPSIZE_ - 1)/_WARPSIZE_, (NY + 4 - 1)/4, nslices);
-    _HLLC_Z<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(recon_m, recon_p, inout, d_sumG, d_sumP, d_divU);
+    /* // hllc fluxes */
+    /* const dim3 Z_grid((NX + _WARPSIZE_ - 1)/_WARPSIZE_, (NY + 4 - 1)/4, nslices); */
+    /* _HLLC_Z<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(recon_m, recon_p, inout, d_sumG, d_sumP, d_divU); */
 
     cudaEventRecord(event_compute[s_id], stream[s_id]);
 }
@@ -1463,13 +1484,21 @@ void GPU::MaxSpeedOfSound(const uint_t nslices, const uint_t gbuf_id, const int 
     // my data
     GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
 
-    _bindTexture(&tex00, mybuf->d_GPU3D[0]);
-    _bindTexture(&tex01, mybuf->d_GPU3D[1]);
-    _bindTexture(&tex02, mybuf->d_GPU3D[2]);
-    _bindTexture(&tex03, mybuf->d_GPU3D[3]);
-    _bindTexture(&tex04, mybuf->d_GPU3D[4]);
-    _bindTexture(&tex05, mybuf->d_GPU3D[5]);
-    _bindTexture(&tex06, mybuf->d_GPU3D[6]);
+    const cudaChannelFormatDesc FMT = cudaCreateChannelDesc<Real>();
+    cudaBindTexture(NULL, &tex00, mybuf->d_inout[0], &FMT, OUT_BYTES);
+    cudaBindTexture(NULL, &tex01, mybuf->d_inout[1], &FMT, OUT_BYTES);
+    cudaBindTexture(NULL, &tex02, mybuf->d_inout[2], &FMT, OUT_BYTES);
+    cudaBindTexture(NULL, &tex03, mybuf->d_inout[3], &FMT, OUT_BYTES);
+    cudaBindTexture(NULL, &tex04, mybuf->d_inout[4], &FMT, OUT_BYTES);
+    cudaBindTexture(NULL, &tex05, mybuf->d_inout[5], &FMT, OUT_BYTES);
+    cudaBindTexture(NULL, &tex06, mybuf->d_inout[6], &FMT, OUT_BYTES);
+    /* _bindTexture(&tex00, mybuf->d_GPU3D[0]); */
+    /* _bindTexture(&tex01, mybuf->d_GPU3D[1]); */
+    /* _bindTexture(&tex02, mybuf->d_GPU3D[2]); */
+    /* _bindTexture(&tex03, mybuf->d_GPU3D[3]); */
+    /* _bindTexture(&tex04, mybuf->d_GPU3D[4]); */
+    /* _bindTexture(&tex05, mybuf->d_GPU3D[5]); */
+    /* _bindTexture(&tex06, mybuf->d_GPU3D[6]); */
 
     // my launch config
     const dim3 grid((NX + _NTHREADS_ -1) / _NTHREADS_, NY, 1);

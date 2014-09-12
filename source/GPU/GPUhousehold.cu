@@ -33,6 +33,19 @@ cudaEvent_t *event_h2d;
 cudaEvent_t *event_d2h;
 cudaEvent_t *event_compute;
 
+// textures
+extern const cudaChannelFormatDesc FMT;
+extern texture<float, 1, cudaReadModeElementType> tex00;
+extern texture<float, 1, cudaReadModeElementType> tex01;
+extern texture<float, 1, cudaReadModeElementType> tex02;
+extern texture<float, 1, cudaReadModeElementType> tex03;
+extern texture<float, 1, cudaReadModeElementType> tex04;
+extern texture<float, 1, cudaReadModeElementType> tex05;
+extern texture<float, 1, cudaReadModeElementType> tex06;
+
+// array size
+size_t IN_BYTES;
+size_t OUT_BYTES;
 
 ///////////////////////////////////////////////////////////////////////////////
 // IMPLEMENTATION
@@ -62,8 +75,13 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
     // processing slice size (normal to z-direction)
     const uint_t SLICE_GPU = NX * NY;
 
+    // GPU input size
+    const uint_t inputSize = SLICE_GPU * (nslices+6);
+    IN_BYTES = inputSize * sizeof(Real);
+
     // GPU output size
     const uint_t outputSize = SLICE_GPU * nslices;
+    OUT_BYTES = outputSize * sizeof(Real);
 
     // fluxes
     const uint_t xflxSize = (NX+1)*NY*nslices;
@@ -85,15 +103,15 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
     }
 
     // extraterm for advection
-    cudaMalloc(&d_sumG, outputSize * sizeof(Real));
-    cudaMalloc(&d_sumP, outputSize * sizeof(Real));
-    cudaMalloc(&d_divU, outputSize * sizeof(Real));
-    computational_bytes += 3 * outputSize * sizeof(Real);
+    cudaMalloc(&d_sumG, OUT_BYTES);
+    cudaMalloc(&d_sumP, OUT_BYTES);
+    cudaMalloc(&d_divU, OUT_BYTES);
+    computational_bytes += 3 * OUT_BYTES;
 
     // Communication buffers
     size_t ghost_bytes  = 0;
     size_t trans_bytes  = 0;
-    cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
+    const cudaChannelFormatDesc FMT = cudaCreateChannelDesc<Real>();
     for (int i = 0; i < _NUM_GPU_BUF_; ++i)
     {
         GPU_COMM * const mybuf = &gpu_comm[i];
@@ -107,11 +125,11 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
             ghost_bytes += 2 * xgSize * sizeof(Real) + 2 * ygSize * sizeof(Real);
 
             // GPU transition buffer
-            cudaMalloc(&(mybuf->d_inout[var]), SLICE_GPU*(nslices+6)*sizeof(Real));
-            trans_bytes += SLICE_GPU * (nslices+6) * sizeof(Real);
+            cudaMalloc(&(mybuf->d_inout[var]), IN_BYTES);
+            trans_bytes += IN_BYTES;
 
             // GPU tex buffer (+6 slices for zghosts)
-            cudaMalloc3DArray(&(mybuf->d_GPU3D[var]), &fmt, make_cudaExtent(NX, NY, nslices+6));
+            cudaMalloc3DArray(&(mybuf->d_GPU3D[var]), &FMT, make_cudaExtent(NX, NY, nslices+6));
             computational_bytes += NX * NY * (nslices+6) * sizeof(Real);
         }
     }
@@ -141,6 +159,50 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
         cudaEventCreate(&event_d2h[i]);
         cudaEventCreate(&event_compute[i]);
     }
+
+    // set texture reference properties
+    for (int i=0; i < 3; ++i)
+    {
+        tex00.addressMode[i] = cudaAddressModeClamp;
+        tex01.addressMode[i] = cudaAddressModeClamp;
+        tex02.addressMode[i] = cudaAddressModeClamp;
+        tex03.addressMode[i] = cudaAddressModeClamp;
+        tex04.addressMode[i] = cudaAddressModeClamp;
+        tex05.addressMode[i] = cudaAddressModeClamp;
+        tex06.addressMode[i] = cudaAddressModeClamp;
+    }
+
+    tex00.channelDesc = FMT;
+    tex01.channelDesc = FMT;
+    tex02.channelDesc = FMT;
+    tex03.channelDesc = FMT;
+    tex04.channelDesc = FMT;
+    tex05.channelDesc = FMT;
+    tex06.channelDesc = FMT;
+
+    tex00.filterMode = cudaFilterModePoint;
+    tex01.filterMode = cudaFilterModePoint;
+    tex02.filterMode = cudaFilterModePoint;
+    tex03.filterMode = cudaFilterModePoint;
+    tex04.filterMode = cudaFilterModePoint;
+    tex05.filterMode = cudaFilterModePoint;
+    tex06.filterMode = cudaFilterModePoint;
+
+    tex00.mipmapFilterMode = cudaFilterModePoint;
+    tex01.mipmapFilterMode = cudaFilterModePoint;
+    tex02.mipmapFilterMode = cudaFilterModePoint;
+    tex03.mipmapFilterMode = cudaFilterModePoint;
+    tex04.mipmapFilterMode = cudaFilterModePoint;
+    tex05.mipmapFilterMode = cudaFilterModePoint;
+    tex06.mipmapFilterMode = cudaFilterModePoint;
+
+    tex00.normalized = false;
+    tex01.normalized = false;
+    tex02.normalized = false;
+    tex03.normalized = false;
+    tex04.normalized = false;
+    tex05.normalized = false;
+    tex06.normalized = false;
 
     // Stats
     if (isroot)
@@ -289,7 +351,9 @@ void GPU::h2d_3DArray(const real_vector_t& src, const uint_t nslices,
 
     GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
     for (int i = 0; i < VSIZE; ++i)
-        _h2d_3DArray(mybuf->d_GPU3D[i], src[i], nslices, s_id);
+        cudaMemcpyAsync(mybuf->d_inout[i], src[i], NX*NY*nslices*sizeof(Real), cudaMemcpyHostToDevice, stream[s_id]);
+    /* for (int i = 0; i < VSIZE; ++i) */
+    /*     _h2d_3DArray(mybuf->d_GPU3D[i], src[i], nslices, s_id); */
     GPU::profiler.pop_stopCUDA();
 
     cudaEventRecord(event_h2d[s_id], stream[s_id]);
