@@ -20,13 +20,13 @@ Real MaxSpeedOfSound_CPP::compute(const real_vector_t& src) const
     const int N = _BLOCKSIZEX_ * _BLOCKSIZEY_ * _BLOCKSIZEZ_;
     Real sos = 0;
 
-    Real * const r_p = src[0];
-    Real * const u_p = src[1];
-    Real * const v_p = src[2];
-    Real * const w_p = src[3];
-    Real * const e_p = src[4];
-    Real * const G_p = src[5];
-    Real * const P_p = src[6];
+    const Real * const r_p = src[0];
+    const Real * const u_p = src[1];
+    const Real * const v_p = src[2];
+    const Real * const w_p = src[3];
+    const Real * const e_p = src[4];
+    const Real * const G_p = src[5];
+    const Real * const P_p = src[6];
 
     for(int i=0; i<N; ++i)
     {

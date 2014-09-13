@@ -7,9 +7,13 @@
 #include "LSRK3_IntegratorMPI.h"
 #include "Timer.h"
 #include "MaxSpeedOfSound.h"
+#ifdef _QPXEMU_
+#include "MaxSpeedOfSound_QPX.h"
+#endif
 
 #include <cassert>
 #include <stdio.h>
+#include <stdlib.h>
 #include <mpi.h>
 
 
@@ -31,6 +35,15 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
         tsos = GPU->max_sos(sos);
     else if (SOSkernel == "cpp")
         tsos = _maxSOS<MaxSpeedOfSound_CPP>(grid, sos);
+#ifdef _QPXEMU_
+    else if (SOSkernel == "qpx")
+        tsos = _maxSOS<MaxSpeedOfSound_QPX>(grid, sos);
+#endif
+    else
+    {
+        fprintf(stderr, "SOS kernel = %s... Not supported!\n", SOSkernel.c_str());
+        abort();
+    }
     assert(sos > 0);
     /* if (verbosity) printf("sos = %f (took %f sec)\n", sos, tsos); */
     printf("sos = %f (took %f sec)\n", sos, tsos);

@@ -39,6 +39,9 @@ void Sim_SteadyStateMPI::_setup()
         parser.unset_strict_mode();
     }
 
+    // with IO
+    bIO = parser("-IO").asBool(true);
+
     // parse optional aruments
     verbosity = parser("-verb").asInt(0);
     restart   = parser("-restart").asBool(false);
@@ -75,7 +78,7 @@ void Sim_SteadyStateMPI::_setup()
             --fcount; // last dump before restart condition incremented fcount.
             // Decrement by one and dump restart IC, which increments fcount
             // again to start with the correct count.
-            _dump("restart_ic");
+            if (bIO) _dump("restart_ic");
         }
         else
         {
@@ -86,7 +89,7 @@ void Sim_SteadyStateMPI::_setup()
     else
     {
         _ic();
-        _dump();
+        if (bIO) _dump();
     }
 }
 
@@ -228,14 +231,14 @@ void Sim_SteadyStateMPI::run()
 
             if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", step, t, dt);
 
-            if ((float)t == (float)tnextdump)
+            if (bIO && (float)t == (float)tnextdump)
             {
                 profiler.push_start("DUMP");
                 tnextdump += dumpinterval;
                 _dump();
                 profiler.pop_stop();
             }
-            /* if (step % 10 == 0) _dump(); */
+            /* if (bIO && step % 10 == 0) _dump(); */
 
             if (step % saveperiod == 0)
             {
@@ -251,7 +254,7 @@ void Sim_SteadyStateMPI::run()
 
         profiler.printSummary();
 
-        _dump();
+        if (bIO) _dump();
 
         return;
     }

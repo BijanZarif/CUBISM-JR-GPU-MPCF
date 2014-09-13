@@ -27,7 +27,7 @@ class Sim_SteadyStateMPI : public Simulation
         double t, tend, tnextdump, dumpinterval, CFL;
         uint_t step, nsteps, nslices, saveperiod, fcount;
         int verbosity;
-        bool restart, dryrun;
+        bool restart, dryrun, bIO;
         char fname[256];
 
         // MPI cartesian grid extent

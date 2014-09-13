@@ -90,8 +90,6 @@ ifeq "$(fftw)"  "1"
 	LIBS += -L$(fftw-lib) -lfftw3 -lfftw3_mpi #-ldfftw -ldfftw_mpi
 endif
 
-# CUFLAGS += --maxrregcount 50
-
 ##################
 VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU ../source/Sim
 .DEFAULT_GOAL := mpcf-cluster
@@ -105,27 +103,8 @@ OBJECTS += Sim_SteadyStateMPI.o Sim_SodMPI.o Sim_2DSBIMPI.o Sim_StaticIC.o Sim_S
 # CUDA
 OBJECTS += cudaHostAllocator.o GPUhousehold.o GPUkernels.o Profiler.o
 
-ifeq "$(fftw)"  "1"
-	OBJECTS += PoissonSolverScalarFFTW_MPI.o
-endif
-
-#../../Cubism/makefiles/
-# OBJECTS += Profiler.o Histogram.o
-
-ifeq "$(qpx)" "1"
-	OBJECTS += ../../MPCFcore/makefiles/WenoSOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/HLLESOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/DivSOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/Convection_QPX_HLLC.o
-	OBJECTS += ../../MPCFcore/makefiles/HLLCSOA2D_QPX.o
-endif
-
 ifeq "$(qpxemu)" "1"
-	OBJECTS += ../../MPCFcore/makefiles/WenoSOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/HLLESOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/DivSOA2D_QPX.o
-	OBJECTS += ../../MPCFcore/makefiles/Convection_QPX_HLLC.o
-	OBJECTS += ../../MPCFcore/makefiles/HLLCSOA2D_QPX.o
+	OBJECTS += Update_QPX.o
 endif
 
 all: mpcf-cluster

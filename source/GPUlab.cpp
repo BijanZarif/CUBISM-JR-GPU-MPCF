@@ -10,6 +10,10 @@
 #include "Convection_CUDA.h"
 #include "Update_CPP.h"
 
+#ifdef _QPXEMU_
+#include "Update_QPX.h"
+#endif
+
 #include <string>
 using std::string;
 
@@ -229,6 +233,7 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
         case INTERMEDIATE:
         case LAST:
             Update_CPP update(a, b, dtinvh);
+            /* Update_QPX update(a, b, dtinvh); */
             /* GPU::wait_d2h(prev_chunk_id); */
             GPU::wait_d2h(0); // stream 0
             update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
@@ -724,6 +729,7 @@ double GPUlab::process_all(const Real a, const Real b, const Real dtinvh)
     // 5.)
     ///////////////////////////////////////////////////////////////
     Update_CPP update(a, b, dtinvh);
+    /* Update_QPX update(a, b, dtinvh); */
     /* GPU::wait_d2h(prev_chunk_id); */
     GPU::wait_d2h(0); // stream 0
     update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
