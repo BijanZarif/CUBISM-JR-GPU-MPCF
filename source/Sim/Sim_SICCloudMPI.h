@@ -10,6 +10,7 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <iostream>
 #include <sstream>
 #include <mpi.h>
 
@@ -157,7 +158,7 @@ class shape
 
             if (!f_read_cloud.good())
             {
-                cout << "Watchout! cant read the file " << filename << ". Aborting now...\n";
+                std::cout << "Watchout! cant read the file " << filename << ". Aborting now...\n";
                 abort();
             }
 
@@ -168,7 +169,7 @@ class shape
                 istringstream line(line_content);
                 line >> idx >> c[0] >> c[1] >> c[2] >> rad;
 
-                /* cout << "shape " << idx << " " <<  c[0] << " " << c[1] << " " << c[2] << " " << rad << endl; */
+                /* std::cout << "shape " << idx << " " <<  c[0] << " " << c[1] << " " << c[2] << " " << rad << std::endl; */
 
                 shape cur_shape;
                 cur_shape.set(c,rad);
@@ -209,11 +210,11 @@ class Seed
     {
         v_shapes = Tshape::make_many(h, filename);
 
-        cout << "number of shapes are " << v_shapes.size() << endl;
+        std::cout << "number of shapes are " << v_shapes.size() << std::endl;
 
         if (v_shapes.size() != ntocheck)
         {
-            cout << "PROBLEM! ntocheck is " << ntocheck << " which does not correspond to the number of shapes!!!\n";
+            std::cout << "PROBLEM! ntocheck is " << ntocheck << " which does not correspond to the number of shapes!!!\n";
         }
     }
 
