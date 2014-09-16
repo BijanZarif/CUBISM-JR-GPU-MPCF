@@ -12,8 +12,8 @@ using namespace std;
 
 void Sim_SodMPI::_allocGPU()
 {
-    if (isroot) printf("Allocating GPUlabSod...\n");
-    myGPU = new GPUlabSod(*mygrid, nslices, verbosity);
+    if (isroot) printf("Allocating GPUlabMPISod...\n");
+    myGPU = new GPUlabMPISod(*mygrid, nslices, verbosity);
 }
 
 void Sim_SodMPI::_ic()

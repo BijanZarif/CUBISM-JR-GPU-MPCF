@@ -67,18 +67,18 @@ void Sim_2DSBIMPI::_allocGPU()
 {
     if (dims[1] == Coord::X)
     {
-        if (isroot) printf("Allocating GPUlab2DSBI_xreflect...\n");
-        myGPU = new GPUlab2DSBI_xreflect(*mygrid, nslices, verbosity);
+        if (isroot) printf("Allocating GPUlabMPI2DSBI_xreflect...\n");
+        myGPU = new GPUlabMPI2DSBI_xreflect(*mygrid, nslices, verbosity);
     }
     else if (dims[1] == Coord::Y)
     {
-        if (isroot) printf("Allocating GPUlab2DSBI_yreflect...\n");
-        myGPU = new GPUlab2DSBI_yreflect(*mygrid, nslices, verbosity);
+        if (isroot) printf("Allocating GPUlabMPI2DSBI_yreflect...\n");
+        myGPU = new GPUlabMPI2DSBI_yreflect(*mygrid, nslices, verbosity);
     }
     else if (dims[1] == Coord::Z)
     {
-        if (isroot) printf("Allocating GPUlab2DSBI_zreflect...\n");
-        myGPU = new GPUlab2DSBI_zreflect(*mygrid, nslices, verbosity);
+        if (isroot) printf("Allocating GPUlabMPI2DSBI_zreflect...\n");
+        myGPU = new GPUlabMPI2DSBI_zreflect(*mygrid, nslices, verbosity);
     }
 }
 

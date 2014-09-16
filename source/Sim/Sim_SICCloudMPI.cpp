@@ -39,8 +39,8 @@ Sim_SICCloudMPI::Sim_SICCloudMPI(const int argc, const char ** argv, const int i
 
 void Sim_SICCloudMPI::_allocGPU()
 {
-    if (isroot) printf("Allocating GPUlabSICCloud...\n");
-    myGPU = new GPUlabSICCloud(*mygrid, nslices, verbosity, isroot);
+    if (isroot) printf("Allocating GPUlabMPISICCloud...\n");
+    myGPU = new GPUlabMPISICCloud(*mygrid, nslices, verbosity, isroot);
 }
 
 void Sim_SICCloudMPI::_dump(const string basename)

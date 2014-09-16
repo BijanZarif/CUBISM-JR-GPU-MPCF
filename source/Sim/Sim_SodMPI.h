@@ -24,7 +24,7 @@ class Sim_SodMPI : public Sim_SteadyStateMPI
 };
 
 
-class GPUlabSod : public GPUlab
+class GPUlabMPISod : public GPUlabMPI
 {
     protected:
         void _apply_bc(const double t = 0)
@@ -39,5 +39,5 @@ class GPUlabSod : public GPUlab
         }
 
     public:
-        GPUlabSod(GridMPI& grid, const uint_t nslices, const int verb) : GPUlab(grid, nslices, verb) { }
+        GPUlabMPISod(GridMPI& grid, const uint_t nslices, const int verb) : GPUlabMPI(grid, nslices, verb) { }
 };

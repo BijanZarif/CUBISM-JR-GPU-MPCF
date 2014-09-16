@@ -95,7 +95,7 @@ VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU ../s
 .DEFAULT_GOAL := mpcf-cluster
 
 # core
-OBJECTS = main.o Types.o NodeBlock.o GPUlab.o LSRK3_IntegratorMPI.o
+OBJECTS = main.o Types.o NodeBlock.o GPUlabMPI.o LSRK3_IntegratorMPI.o
 # kernels
 OBJECTS += MaxSpeedOfSound.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CPP.o
 # Simulations

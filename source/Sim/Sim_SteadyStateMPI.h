@@ -12,7 +12,7 @@
 #include "Types.h"
 #include "Profiler.h"
 #include "GridMPI.h"
-#include "GPUlab.h"
+#include "GPUlabMPI.h"
 #include "LSRK3_IntegratorMPI.h"
 #include "BoundaryConditions.h"
 
@@ -36,7 +36,7 @@ class Sim_SteadyStateMPI : public Simulation
         // main ingredients
         GridMPI             *mygrid;
         LSRK3_IntegratorMPI *stepper;
-        GPUlab              *myGPU;
+        GPUlabMPI              *myGPU;
 
         // helper
         ArgumentParser parser;
@@ -66,7 +66,7 @@ class Sim_SteadyStateMPI : public Simulation
 };
 
 
-class GPUlabSteadyState : public GPUlab
+class GPUlabMPISteadyState : public GPUlabMPI
 {
     protected:
         void _apply_bc(const double t = 0)
@@ -81,5 +81,5 @@ class GPUlabSteadyState : public GPUlab
         }
 
     public:
-        GPUlabSteadyState(GridMPI& grid, const uint_t nslices, const int verb) : GPUlab(grid, nslices, verb) { }
+        GPUlabMPISteadyState(GridMPI& grid, const uint_t nslices, const int verb) : GPUlabMPI(grid, nslices, verb) { }
 };

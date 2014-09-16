@@ -24,7 +24,7 @@ class Sim_2DSBIMPI : public Sim_SteadyStateMPI
 };
 
 
-class GPUlab2DSBI_xreflect : public GPUlab
+class GPUlabMPI2DSBI_xreflect : public GPUlabMPI
 {
     protected:
         void _apply_bc(const double t = 0)
@@ -39,11 +39,11 @@ class GPUlab2DSBI_xreflect : public GPUlab
         }
 
     public:
-        GPUlab2DSBI_xreflect(GridMPI& grid, const uint_t nslices, const int verb) : GPUlab(grid, nslices, verb) { }
+        GPUlabMPI2DSBI_xreflect(GridMPI& grid, const uint_t nslices, const int verb) : GPUlabMPI(grid, nslices, verb) { }
 };
 
 
-class GPUlab2DSBI_yreflect : public GPUlab
+class GPUlabMPI2DSBI_yreflect : public GPUlabMPI
 {
     protected:
         void _apply_bc(const double t = 0)
@@ -58,11 +58,11 @@ class GPUlab2DSBI_yreflect : public GPUlab
         }
 
     public:
-        GPUlab2DSBI_yreflect(GridMPI& grid, const uint_t nslices, const int verb) : GPUlab(grid, nslices, verb) { }
+        GPUlabMPI2DSBI_yreflect(GridMPI& grid, const uint_t nslices, const int verb) : GPUlabMPI(grid, nslices, verb) { }
 };
 
 
-class GPUlab2DSBI_zreflect : public GPUlab
+class GPUlabMPI2DSBI_zreflect : public GPUlabMPI
 {
     protected:
         void _apply_bc(const double t = 0)
@@ -77,5 +77,5 @@ class GPUlab2DSBI_zreflect : public GPUlab
         }
 
     public:
-        GPUlab2DSBI_zreflect(GridMPI& grid, const uint_t nslices, const int verb) : GPUlab(grid, nslices, verb) { }
+        GPUlabMPI2DSBI_zreflect(GridMPI& grid, const uint_t nslices, const int verb) : GPUlabMPI(grid, nslices, verb) { }
 };

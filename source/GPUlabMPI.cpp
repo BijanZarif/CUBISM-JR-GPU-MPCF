@@ -1,10 +1,10 @@
 /* *
- * GPUlab.cpp
+ * GPUlabMPI.cpp
  *
  * Created by Fabian Wermelinger on 5/28/14.
  * Copyright 2014 ETH Zurich. All rights reserved.
  * */
-#include "GPUlab.h"
+#include "GPUlabMPI.h"
 #include "Timer.h"
 #include "MaxSpeedOfSound_CUDA.h"
 #include "Convection_CUDA.h"
@@ -27,7 +27,7 @@ using std::string;
 #endif
 
 
-GPUlab::GPUlab(GridMPI& G, const uint_t nslices_, const int verbosity, const bool isroot_) :
+GPUlabMPI::GPUlabMPI(GridMPI& G, const uint_t nslices_, const int verbosity, const bool isroot_) :
     isroot(isroot_),
     GPU_input_size( SLICE_GPU * (nslices_+6) ),
     GPU_output_size( SLICE_GPU * nslices_ ),
@@ -42,13 +42,13 @@ GPUlab::GPUlab(GridMPI& G, const uint_t nslices_, const int verbosity, const boo
 {
     if (nslices_last != 0) // can be solved later
     {
-        fprintf(stderr, "[GPUlab ERROR: CURRENTLY nslices MUST BE AN INTEGER MULTIPLE of GridMPI::sizeZ\n");
+        fprintf(stderr, "[GPUlabMPI ERROR: CURRENTLY nslices MUST BE AN INTEGER MULTIPLE of GridMPI::sizeZ\n");
         exit(1);
     }
 
     if (0 < nslices_last && nslices_last < 3)
     {
-        fprintf(stderr, "[GPUlab ERROR: Too few slices in the last chunk (have %d slices, should be 3 or higher)\n", nslices_last);
+        fprintf(stderr, "[GPUlabMPI ERROR: Too few slices in the last chunk (have %d slices, should be 3 or higher)\n", nslices_last);
         exit(1);
     }
 
@@ -82,7 +82,7 @@ GPUlab::GPUlab(GridMPI& G, const uint_t nslices_, const int verbosity, const boo
 // PRIVATE
 ///////////////////////////////////////////////////////////////////////////////
 template <index_map map>
-void GPUlab::_copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE)
+void GPUlabMPI::_copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE)
 {
     assert(Nhalos == (xE-xS)*(yE-yS)*(zE-zS));
 
@@ -101,7 +101,7 @@ void GPUlab::_copysend_halos(const int sender, Real * const cpybuf, const uint_t
 }
 
 
-void GPUlab::_copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int zS)
+void GPUlabMPI::_copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int zS)
 {
     assert(Nhalos == 3*SLICE_GPU);
 
@@ -118,21 +118,21 @@ void GPUlab::_copysend_halos(const int sender, Real * const cpybuf, const uint_t
 }
 
 
-void GPUlab::_alloc_GPU()
+void GPUlabMPI::_alloc_GPU()
 {
     GPU::alloc((void**) &maxSOS, nslices, isroot);
     gpu_allocation = ALLOCATED;
 }
 
 
-void GPUlab::_free_GPU()
+void GPUlabMPI::_free_GPU()
 {
     GPU::dealloc(isroot);
     gpu_allocation = FREE;
 }
 
 
-void GPUlab::_reset()
+void GPUlabMPI::_reset()
 {
     if (nchunks == 1)
     {
@@ -150,7 +150,7 @@ void GPUlab::_reset()
 }
 
 
-void GPUlab::_process_chunk_sos(const real_vector_t& src)
+void GPUlabMPI::_process_chunk_sos(const real_vector_t& src)
 {
     /* *
      * Processes a chunk for the maxSOS computation:
@@ -203,7 +203,7 @@ void GPUlab::_process_chunk_sos(const real_vector_t& src)
 }
 
 
-void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, real_vector_t& src, real_vector_t& tmp)
+void GPUlabMPI::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, real_vector_t& src, real_vector_t& tmp)
 {
     /* *
      * Process chunk for the RHS computation:
@@ -324,7 +324,7 @@ void GPUlab::_process_chunk_flow(const Real a, const Real b, const Real dtinvh, 
 }
 
 
-void GPUlab::_init_next_chunk()
+void GPUlabMPI::_init_next_chunk()
 {
     // TODO: the information below should be part of the buffer type
     prev_slices   = curr_slices;
@@ -356,7 +356,7 @@ void GPUlab::_init_next_chunk()
 }
 
 
-void GPUlab::_dump_chunk(const int complete)
+void GPUlabMPI::_dump_chunk(const int complete)
 {
     static unsigned int ndumps = 0;
     printf("Dumping Chunk %d (total dumps %d)...\n", curr_chunk_id, ++ndumps);
@@ -529,7 +529,7 @@ void GPUlab::_dump_chunk(const int complete)
 }
 
 
-void GPUlab::_print_array(const Real * const in, const uint_t size)
+void GPUlabMPI::_print_array(const Real * const in, const uint_t size)
 {
     for (uint_t i = 0; i < size; ++i)
         printf("%f ", in[i]);
@@ -537,7 +537,7 @@ void GPUlab::_print_array(const Real * const in, const uint_t size)
 }
 
 
-void GPUlab::_show_feature()
+void GPUlabMPI::_show_feature()
 {
     int c[3];
     grid.peindex(c);
@@ -549,7 +549,7 @@ void GPUlab::_show_feature()
 }
 
 
-void GPUlab::_start_info_current_chunk(const std::string title)
+void GPUlabMPI::_start_info_current_chunk(const std::string title)
 {
     std::string state;
     switch (chunk_state)
@@ -572,7 +572,7 @@ void GPUlab::_start_info_current_chunk(const std::string title)
 ///////////////////////////////////////////////////////////////////////////////
 // PUBLIC
 ///////////////////////////////////////////////////////////////////////////////
-void GPUlab::load_ghosts(const double t)
+void GPUlabMPI::load_ghosts(const double t)
 {
     // TODO: THIS NEEDS THOROUGH TESTING!
 
@@ -597,7 +597,7 @@ void GPUlab::load_ghosts(const double t)
 }
 
 
-double GPUlab::max_sos(float& sos)
+double GPUlabMPI::max_sos(float& sos)
 {
     /* *
      * 1.) Init maxSOS = 0 (mapped integer -> zero-copy)
@@ -653,7 +653,7 @@ double GPUlab::max_sos(float& sos)
 }
 
 
-double GPUlab::process_all(const Real a, const Real b, const Real dtinvh)
+double GPUlabMPI::process_all(const Real a, const Real b, const Real dtinvh)
 {
     /* *
      * 1.) Extract x/yghosts for current chunk and upload to GPU

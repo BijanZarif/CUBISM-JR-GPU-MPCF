@@ -374,7 +374,7 @@ class Sim_SICCloudMPI : public Sim_SteadyStateMPI
 };
 
 
-class GPUlabSICCloud : public GPUlab
+class GPUlabMPISICCloud : public GPUlabMPI
 {
     protected:
         void _apply_bc(const double t = 0)
@@ -390,5 +390,5 @@ class GPUlabSICCloud : public GPUlab
         }
 
     public:
-        GPUlabSICCloud(GridMPI& grid, const uint_t nslices, const int verb, const bool isroot_) : GPUlab(grid, nslices, verb, isroot_) { }
+        GPUlabMPISICCloud(GridMPI& grid, const uint_t nslices, const int verb, const bool isroot_) : GPUlabMPI(grid, nslices, verb, isroot_) { }
 };

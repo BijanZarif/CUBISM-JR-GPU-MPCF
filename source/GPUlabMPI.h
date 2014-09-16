@@ -1,5 +1,5 @@
 /* *
- * GPUlab.h
+ * GPUlabMPI.h
  *
  * Created by Fabian Wermelinger on 5/28/14.
  * Copyright 2014 ETH Zurich. All rights reserved.
@@ -30,7 +30,7 @@
 #endif
 
 
-class GPUlab
+class GPUlabMPI
 {
     public:
 
@@ -297,8 +297,8 @@ class GPUlab
 
     public:
 
-        GPUlab(GridMPI& G, const uint_t nslices, const int verbosity=0, const bool isroot_=true);
-        virtual ~GPUlab() { _free_GPU(); }
+        GPUlabMPI(GridMPI& G, const uint_t nslices, const int verbosity=0, const bool isroot_=true);
+        virtual ~GPUlabMPI() { _free_GPU(); }
 
         ///////////////////////////////////////////////////////////////////////
         // PUBLIC ACCESSORS
