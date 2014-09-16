@@ -52,14 +52,14 @@ void Sim_SICCloudMPI::_dump(const string basename)
     DumpHDF5_MPI<GridMPI, myPressureStreamer>(*mygrid, step, fname, dump_path);
     sprintf(fname, "%s_%04d-G", basename.c_str(), fcount);
     DumpHDF5_MPI<GridMPI, myGammaStreamer>(*mygrid, step, fname, dump_path);
-    sprintf(fname, "%s_%04d-P", basename.c_str(), fcount);
-    DumpHDF5_MPI<GridMPI, myPiStreamer>(*mygrid, step, fname, dump_path);
+    /* sprintf(fname, "%s_%04d-P", basename.c_str(), fcount); */
+    /* DumpHDF5_MPI<GridMPI, myPiStreamer>(*mygrid, step, fname, dump_path); */
     /* sprintf(fname, "%s_%04d-rho", basename.c_str(), fcount); */
     /* DumpHDF5_MPI<GridMPI, myRhoStreamer>(*mygrid, step, fname, dump_path); */
     /* sprintf(fname, "%s_%04d-velocity", basename.c_str(), fcount); */
     /* DumpHDF5_MPI<GridMPI, myVelocityStreamer>(*mygrid, step, fname, dump_path); */
-    sprintf(fname, "%s_%04d-energy", basename.c_str(), fcount);
-    DumpHDF5_MPI<GridMPI, myEnergyStreamer>(*mygrid, step, fname, dump_path);
+    /* sprintf(fname, "%s_%04d-energy", basename.c_str(), fcount); */
+    /* DumpHDF5_MPI<GridMPI, myEnergyStreamer>(*mygrid, step, fname, dump_path); */
     ++fcount;
 }
 
