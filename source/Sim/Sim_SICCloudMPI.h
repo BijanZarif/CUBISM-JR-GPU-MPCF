@@ -390,5 +390,5 @@ class GPUlabSICCloud : public GPUlab
         }
 
     public:
-        GPUlabSICCloud(GridMPI& grid, const uint_t nslices, const int verb) : GPUlab(grid, nslices, verb) { }
+        GPUlabSICCloud(GridMPI& grid, const uint_t nslices, const int verb, const bool isroot_) : GPUlab(grid, nslices, verb, isroot_) { }
 };

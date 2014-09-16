@@ -67,7 +67,7 @@ void Sim_SteadyStateMPI::_setup()
         if (isroot) printf("No GPU allocated...\n");
 
     // allocate integrator
-    stepper = new LSRK3_IntegratorMPI(mygrid, myGPU, CFL, parser);
+    stepper = new LSRK3_IntegratorMPI(mygrid, myGPU, CFL, parser, isroot);
 
     // setup initial condition
     if (restart)
@@ -82,7 +82,7 @@ void Sim_SteadyStateMPI::_setup()
         }
         else
         {
-            printf("Loading restart file was not successful... Abort\n");
+            if (isroot) printf("Loading restart file was not successful... Abort\n");
             abort();
         }
     }

@@ -40,7 +40,7 @@ Sim_SICCloudMPI::Sim_SICCloudMPI(const int argc, const char ** argv, const int i
 void Sim_SICCloudMPI::_allocGPU()
 {
     if (isroot) printf("Allocating GPUlabSICCloud...\n");
-    myGPU = new GPUlabSICCloud(*mygrid, nslices, verbosity);
+    myGPU = new GPUlabSICCloud(*mygrid, nslices, verbosity, isroot);
 }
 
 void Sim_SICCloudMPI::_dump(const string basename)
@@ -233,7 +233,7 @@ void Sim_SICCloudMPI::_initialize_cloud()
 
     if (!f_read.good())
     {
-        cout << "Error: Can not find cloud_config.dat. Abort...\n";
+        cerr << "Error: Can not find cloud_config.dat. Abort...\n";
         abort();
     }
 
@@ -692,17 +692,17 @@ void Sim_SICCloudMPI::run()
             {
                 profiler.push_start("ANALYSIS");
                 if (isroot) printf("Running analysis...\n");
-                _dump_statistics(step, t, dt);
+                _dump_statistics(step, t, dt); // TODO: make this work with MPI
                 profiler.pop_stop();
             }
 
-            if (step % 10 == 0)
+            if (isroot && step % 10 == 0)
                 profiler.printSummary();
 
             if ((step-step_start) == nsteps) break;
         }
 
-        profiler.printSummary();
+        if (isroot) profiler.printSummary();
 
         _dump();
 

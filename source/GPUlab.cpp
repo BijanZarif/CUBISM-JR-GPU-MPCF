@@ -27,7 +27,8 @@ using std::string;
 #endif
 
 
-GPUlab::GPUlab(GridMPI& G, const uint_t nslices_, const int verbosity) :
+GPUlab::GPUlab(GridMPI& G, const uint_t nslices_, const int verbosity, const bool isroot_) :
+    isroot(isroot_),
     GPU_input_size( SLICE_GPU * (nslices_+6) ),
     GPU_output_size( SLICE_GPU * nslices_ ),
     nslices(nslices_), nslices_last( sizeZ % nslices_ ), nchunks( (sizeZ + nslices_ - 1) / nslices_ ),
@@ -52,7 +53,7 @@ GPUlab::GPUlab(GridMPI& G, const uint_t nslices_, const int verbosity) :
     }
 
     chatty = QUIET;
-    if (2 == verbosity) chatty = VERBOSE;
+    if (isroot && 2 == verbosity) chatty = VERBOSE;
 
     _alloc_GPU();
 
@@ -119,14 +120,14 @@ void GPUlab::_copysend_halos(const int sender, Real * const cpybuf, const uint_t
 
 void GPUlab::_alloc_GPU()
 {
-    GPU::alloc((void**) &maxSOS, nslices);
+    GPU::alloc((void**) &maxSOS, nslices, isroot);
     gpu_allocation = ALLOCATED;
 }
 
 
 void GPUlab::_free_GPU()
 {
-    GPU::dealloc();
+    GPU::dealloc(isroot);
     gpu_allocation = FREE;
 }
 

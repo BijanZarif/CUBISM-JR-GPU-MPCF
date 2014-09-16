@@ -46,6 +46,8 @@ class GPUlab
         enum {ALLOCATED, FREE} gpu_allocation;
         enum {QUIET=0, VERBOSE} chatty;
 
+        const bool isroot;
+
         // GPU BUFFER SIZES
         const uint_t GPU_input_size;
         const uint_t GPU_output_size;
@@ -295,7 +297,7 @@ class GPUlab
 
     public:
 
-        GPUlab(GridMPI& G, const uint_t nslices, const int verbosity=0);
+        GPUlab(GridMPI& G, const uint_t nslices, const int verbosity=0, const bool isroot_=true);
         virtual ~GPUlab() { _free_GPU(); }
 
         ///////////////////////////////////////////////////////////////////////
