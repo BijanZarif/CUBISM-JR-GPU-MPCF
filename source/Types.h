@@ -391,8 +391,7 @@ struct myPiStreamer
 
 struct mySaveStreamer
 {
-    /* static const int NCHANNELS = 9; */
-    static const int NCHANNELS = NodeBlock::NVAR;
+    static const int NCHANNELS = 9;
     static const int NX = NodeBlock::sizeX;
     static const int NY = NodeBlock::sizeY;
     static const int NZ = NodeBlock::sizeZ;
@@ -413,8 +412,8 @@ struct mySaveStreamer
         out[4] = e[idx];
         out[5] = G[idx];
         out[6] = P[idx];
-        /* out[7] = 0.; */
-        /* out[8] = 0.; */
+        out[7] = 0.;
+        out[8] = 0.;
     }
 
     void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz)
@@ -430,6 +429,5 @@ struct mySaveStreamer
         P[idx] = input[6];
     }
 
-    /* static const char * getAttributeName() { return "Tensor"; } */
-    static const char * getAttributeName() { return "Save_Data"; }
+    static const char * getAttributeName() { return "Tensor"; }
 };
