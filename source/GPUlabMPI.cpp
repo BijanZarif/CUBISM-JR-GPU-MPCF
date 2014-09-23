@@ -33,8 +33,8 @@ GPUlabMPI::GPUlabMPI(GridMPI& G, const uint_t nslices_, const int verbosity, con
     GPU_output_size( SLICE_GPU * nslices_ ),
     nslices(nslices_), nslices_last( sizeZ % nslices_ ), nchunks( (sizeZ + nslices_ - 1) / nslices_ ),
     cart_world(G.getCartComm()), request(6), status(6),
-    BUFFER1(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 0), // per chunk
-    BUFFER2(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 0), // per chunk
+    BUFFER1(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 0), // per chunk, uses GPU buffer 0
+    BUFFER2(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 1), // per chunk, uses GPU buffer 1
     grid(G),
     halox(3*sizeY*sizeZ), // all domain (buffer zone for halo extraction + MPI send/recv)
     haloy(sizeX*3*sizeZ), // all domain
@@ -223,8 +223,8 @@ void GPUlabMPI::_process_chunk_flow(const Real a, const Real b, const Real dtinv
     Convection_CUDA convection;
 
     if (chatty) printf("\t[LAUNCH CONVECTION KERNEL CHUNK %d]\n", curr_chunk_id);
-    /* convection.compute(curr_slices, 0, curr_buffer->buf_id, curr_chunk_id); */
-    convection.compute(curr_slices, 0, curr_buffer->buf_id, 0); // use stream 0
+    convection.compute(curr_slices, 0, curr_buffer->buf_id, curr_chunk_id);
+    /* convection.compute(curr_slices, 0, curr_buffer->buf_id, 0); // use stream 0 */
 
     ///////////////////////////////////////////////////////////////////////////
     // 2.)
@@ -235,8 +235,8 @@ void GPUlabMPI::_process_chunk_flow(const Real a, const Real b, const Real dtinv
         case LAST:
             Update_CPP update(a, b, dtinvh);
             /* Update_QPX update(a, b, dtinvh); */
-            /* GPU::wait_d2h(prev_chunk_id); */
-            GPU::wait_d2h(0); // stream 0
+            GPU::wait_d2h(prev_chunk_id);
+            /* GPU::wait_d2h(0); // stream 0 */
             update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
             break;
     }
@@ -294,8 +294,8 @@ void GPUlabMPI::_process_chunk_flow(const Real a, const Real b, const Real dtinv
     ///////////////////////////////////////////////////////////////////////////
     // 5.)
     ///////////////////////////////////////////////////////////////////////////
-    /* GPU::d2h_divF(prev_buffer->GPUout, GPU_output_size, prev_buffer->buf_id, prev_chunk_id); */
-    GPU::d2h_divF(prev_buffer->GPUout, GPU_output_size, prev_buffer->buf_id, 0); // stream 0
+    GPU::d2h_divF(prev_buffer->GPUout, GPU_output_size, prev_buffer->buf_id, prev_chunk_id);
+    /* GPU::d2h_divF(prev_buffer->GPUout, GPU_output_size, prev_buffer->buf_id, 0); // stream 0 */
 
     ///////////////////////////////////////////////////////////////////////////
     // 6.)
@@ -308,16 +308,16 @@ void GPUlabMPI::_process_chunk_flow(const Real a, const Real b, const Real dtinv
             assert(curr_buffer->Nyghost == 3 * sizeX * curr_slices);
             /* _copy_xyghosts(); */
             _CONV_copy_xyghosts();
-            /* GPU::h2d_input( */
-            /*         curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r, */
-            /*         curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r, */
-            /*         curr_buffer->GPUin, nslices+6, */
-            /*         curr_buffer->buf_id, curr_chunk_id); */
             GPU::h2d_input(
                     curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r,
                     curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r,
                     curr_buffer->GPUin, nslices+6,
-                    curr_buffer->buf_id, 0); // stream 0
+                    curr_buffer->buf_id, curr_chunk_id);
+            /* GPU::h2d_input( */
+            /*         curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r, */
+            /*         curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r, */
+            /*         curr_buffer->GPUin, nslices+6, */
+            /*         curr_buffer->buf_id, 0); // stream 0 */
 
             break;
     }
@@ -347,7 +347,7 @@ void GPUlabMPI::_init_next_chunk()
         chunk_state = INTERMEDIATE;
     }
 
-    // use a new host buffer
+    // swap host buffer
     _swap_buffer();
 
     // set the number of ghosts in x/y direction for this buffer
@@ -709,16 +709,16 @@ double GPUlabMPI::process_all(const Real a, const Real b, const Real dtinvh)
     ///////////////////////////////////////////////////////////////
     // 3.)
     ///////////////////////////////////////////////////////////////
-    /* GPU::h2d_input( */
-    /*         curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r, */
-    /*         curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r, */
-    /*         curr_buffer->GPUin, nslices+6, */
-    /*         curr_buffer->buf_id, curr_chunk_id); */
     GPU::h2d_input(
             curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r,
             curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r,
             curr_buffer->GPUin, nslices+6,
-            curr_buffer->buf_id, 0); // stream 0
+            curr_buffer->buf_id, curr_chunk_id);
+    /* GPU::h2d_input( */
+    /*         curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r, */
+    /*         curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r, */
+    /*         curr_buffer->GPUin, nslices+6, */
+    /*         curr_buffer->buf_id, 0); // stream 0 */
 
     ///////////////////////////////////////////////////////////////
     // 4.)
@@ -731,8 +731,8 @@ double GPUlabMPI::process_all(const Real a, const Real b, const Real dtinvh)
     ///////////////////////////////////////////////////////////////
     Update_CPP update(a, b, dtinvh);
     /* Update_QPX update(a, b, dtinvh); */
-    /* GPU::wait_d2h(prev_chunk_id); */
-    GPU::wait_d2h(0); // stream 0
+    GPU::wait_d2h(prev_chunk_id);
+    /* GPU::wait_d2h(0); // stream 0 */
     update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
 
     if (chatty) _end_info_current_chunk();

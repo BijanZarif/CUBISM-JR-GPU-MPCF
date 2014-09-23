@@ -1488,11 +1488,11 @@ void GPU::MaxSpeedOfSound(const uint_t nslices, const uint_t gbuf_id, const int 
 ///////////////////////////////////////////////////////////////////////////
 void GPU::TestKernel()
 {
-    const uint_t gbuf_id = 0;
-    const uint_t s_id = 0;
+    /* const uint_t gbuf_id = 0; */
+    /* const uint_t s_id = 0; */
 
-    // my data
-    GPU_COMM * const mybuf = &gpu_comm[gbuf_id];
+    /* // my data */
+    /* GPU_COMM * const mybuf = &gpu_comm[gbuf_id]; */
 
     /* _bindTexture(&texR00, mybuf->d_GPU3D[0]); */
     /* _bindTexture(&texU00, mybuf->d_GPU3D[1]); */

@@ -1,14 +1,14 @@
 /* File        : GPU.cuh */
 /* Creator     : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Thu 14 Aug 2014 09:06:16 AM CEST */
-/* Modified    : Mon 01 Sep 2014 03:43:29 PM CEST */
+/* Modified    : Tue 23 Sep 2014 09:59:59 AM CEST */
 /* Description : GPU only, shared */
 #pragma once
 
 #include "GPU.h" // includes Types.h
 #include <vector>
 
-#define _NUM_GPU_BUF_ 1
+#define _NUM_GPU_BUF_ 2 // for use with concurrent streams
 #define _NUM_STREAMS_ 3
 
 #define NX _BLOCKSIZEX_
