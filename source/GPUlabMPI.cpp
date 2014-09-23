@@ -40,7 +40,7 @@ GPUlabMPI::GPUlabMPI(GridMPI& G, const uint_t nslices_, const int verbosity, con
     haloy(sizeX*3*sizeZ), // all domain
     haloz(sizeX*sizeY*3)  // all domain
 {
-    if (nslices_last != 0) // can be solved later
+    if (nslices_last != 0) // can be generalized later
     {
         fprintf(stderr, "[GPUlabMPI ERROR: CURRENTLY nslices MUST BE AN INTEGER MULTIPLE of GridMPI::sizeZ\n");
         exit(1);

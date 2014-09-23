@@ -360,17 +360,17 @@ class Sim_SICCloudMPI : public Sim_SteadyStateMPI
     void _set_sensors();
     void _ic_quad(const Seed<shape> * const myseed);
 
-    protected:
-        virtual void _allocGPU();
-        virtual void _ic();
-        virtual void _dump(const std::string basename = "data");
-        virtual void _dump_statistics(const int step_id, const Real t, const Real dt);
-        virtual void _dump_sensors(const int step_id, const Real t, const Real dt);
+protected:
+    virtual void _allocGPU();
+    virtual void _ic();
+    virtual void _dump(const std::string basename = "data");
+    virtual void _dump_statistics(const int step_id, const Real t, const Real dt);
+    virtual void _dump_sensors(const int step_id, const Real t, const Real dt);
 
-    public:
-        Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot);
+public:
+    Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot);
 
-        virtual void run();
+    virtual void run();
 };
 
 

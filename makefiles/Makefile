@@ -92,7 +92,7 @@ endif
 
 ##################
 VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU ../source/Sim
-.DEFAULT_GOAL := mpcf-cluster
+.DEFAULT_GOAL := mpcf-cluster-gpu
 
 # core
 OBJECTS = main.o Types.o NodeBlock.o GPUlabMPI.o LSRK3_IntegratorMPI.o
@@ -107,9 +107,9 @@ ifeq "$(qpxemu)" "1"
 	OBJECTS += Update_QPX.o
 endif
 
-all: mpcf-cluster
+all: mpcf-cluster-gpu
 
-mpcf-cluster: $(OBJECTS)
+mpcf-cluster-gpu: $(OBJECTS)
 	$(CC) $(OPTFLAGS) $(extra) $^ -o $@ $(LIBS)
 
 %.o: %.cpp
@@ -132,7 +132,7 @@ show:
 	@echo "EXTRA    = $(extra)"
 
 clean:
-	rm -f *.o mpcf-cluster *~
+	rm -f *.o mpcf-cluster-gpu *~
 
 cleanall:
 	make clean;

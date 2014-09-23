@@ -1,4 +1,4 @@
 *.h5
 *.xmf
-mpcf-cluster
+mpcf-cluster-gpu
 *.o

@@ -36,7 +36,7 @@ class Sim_SteadyStateMPI : public Simulation
         // main ingredients
         GridMPI             *mygrid;
         LSRK3_IntegratorMPI *stepper;
-        GPUlabMPI              *myGPU;
+        GPUlabMPI           *myGPU;
 
         // helper
         ArgumentParser parser;
@@ -55,7 +55,7 @@ class Sim_SteadyStateMPI : public Simulation
     public:
 
         Sim_SteadyStateMPI(const int argc, const char ** argv, const int isroot);
-        ~Sim_SteadyStateMPI()
+        virtual ~Sim_SteadyStateMPI()
         {
             delete mygrid;
             delete stepper;

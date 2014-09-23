@@ -65,7 +65,7 @@ void Sim_SICCloudMPI::_dump(const string basename)
 
 void Sim_SICCloudMPI::_dump_statistics(const int step_id, const Real t, const Real dt)
 {
-    double rInt=0., uInt=0., vInt=0., wInt=0., eInt=0., vol=0., ke=0., r2Int=0., mach_max=-HUGE_VAL, p_max=-HUGE_VAL;
+    double rInt=0., uInt=0., vInt=0., wInt=0., eInt=0., vol=0., ke=0., r2Int=0., mach_max=-HUGE_VAL, p_max=-HUGE_VAL, p_avg=0.;
     const double h = mygrid->getH();
     const double h3 = h*h*h;
 
@@ -97,13 +97,18 @@ void Sim_SICCloudMPI::_dump_statistics(const int step_id, const Real t, const Re
         const double c = sqrt((static_cast<Real>(1.0)/G[i] + static_cast<Real>(1.0)) * (pressure + P[i]/(G[i] + static_cast<Real>(1.0))) / r[i]);
         const double IvI = sqrt(ImI2) / r[i];
 
+        p_avg += pressure;
         mach_max = max(mach_max, IvI/c);
         p_max    = max(p_max, pressure);
     }
 
+    double extent[3];
+    mygrid->get_gextent(extent);
+    const double volume = extent[0] * extent[1] * extent[2];
+
     FILE * f = fopen("integrals.dat", "a");
-    fprintf(f, "%d %e %e %e %e %e %e %e %e %e %e %e %e %e\n", step_id, t, dt, rInt*h3, uInt*h3,
-            vInt*h3, wInt*h3, eInt*h3, vol*h3, ke*h3, r2Int*h3, mach_max, p_max, pow(0.75*vol*h3/M_PI,1./3.));
+    fprintf(f, "%d %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n", step_id, t, dt, rInt*h3, uInt*h3,
+            vInt*h3, wInt*h3, eInt*h3, vol*h3, ke*h3, r2Int*h3, mach_max, p_max, pow(0.75*vol*h3/M_PI,1./3.), p_avg*h3/volume);
     fclose(f);
 }
 
@@ -310,7 +315,8 @@ static Real is_shock(const Real P[3])
     const Real Sy = SICCloudData::Sy;
     const Real Sz = SICCloudData::Sz;
 
-    // no need to divide by n*n, since n*n = 1
+    // no need to divide by n*n, since n*n = 1; d is the projection distance of
+    // point P onto the planar initial shock.
     const Real d = -(nx*(Sx-P[0]) + ny*(Sy-P[1]) + nz*(Sz-P[2]));
 
     return SimTools::heaviside(d);
@@ -660,6 +666,9 @@ void Sim_SICCloudMPI::run()
         double dt, dt_max;
 
         const uint_t step_start = step; // such that -nsteps is a relative measure (only relevant for restarts)
+
+        /* _dump_statistics(step, t, 0.0); */
+
         while (t < tend)
         {
             profiler.push_start("EVOLVE");
