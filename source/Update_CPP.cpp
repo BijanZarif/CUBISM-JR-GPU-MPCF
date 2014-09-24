@@ -108,13 +108,13 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         /*     P[i] += difference; // change P again */
         /* } */
 
-        if (P[i] < static_cast<Real>(-5.0)*G[i]*pressure) // if it was still bad with new P and new G
+        if (P[i] < static_cast<Real>(-1.4)*G[i]*pressure) // if it was still bad with new P and new G
         {
             ++been_here;
             /* const Real difference = static_cast<Real>(-8.0)*G[i]*pressure - P[i]; */
 
             // factor of 2 increase? from 256 nodes to 512, does it scale?
-            const Real difference = static_cast<Real>(-16.0)*G[i]*pressure - P[i];
+            const Real difference = static_cast<Real>(-10.0)*G[i]*pressure - P[i];
             P[i] += difference; // change P again
         }
 
