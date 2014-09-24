@@ -108,7 +108,7 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         /*     P[i] += difference; // change P again */
         /* } */
 
-        if (P[i] < static_cast<Real>(-2.5)*G[i]*pressure) // if it was still bad with new P and new G
+        if (P[i] < static_cast<Real>(-5.0)*G[i]*pressure) // if it was still bad with new P and new G
         {
             ++been_here;
             /* const Real difference = static_cast<Real>(-8.0)*G[i]*pressure - P[i]; */
