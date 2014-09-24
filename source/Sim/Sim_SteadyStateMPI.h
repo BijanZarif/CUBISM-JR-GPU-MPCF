@@ -48,8 +48,8 @@ class Sim_SteadyStateMPI : public Simulation
 
         virtual void _dump(const std::string basename = "data");
 
-        void _save();
-        bool _restart();
+        virtual void _save();
+        virtual bool _restart();
 
 
     public:

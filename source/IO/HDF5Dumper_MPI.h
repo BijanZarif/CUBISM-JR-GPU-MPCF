@@ -63,21 +63,6 @@ void DumpHDF5_MPI(TGrid &grid, const int iCounter, const string f_name, const st
     static const unsigned int eY = TGrid::sizeY;
     static const unsigned int eZ = TGrid::sizeZ;
 
-    /* hsize_t count[4] = { */
-    /*     TGrid::sizeX, */
-    /*     TGrid::sizeY, */
-    /*     TGrid::sizeZ, NCHANNELS}; */
-
-    /* hsize_t dims[4] = { */
-    /*     grid.getBlocksPerDimension(0)*TGrid::sizeX, */
-    /*     grid.getBlocksPerDimension(1)*TGrid::sizeY, */
-    /*     grid.getBlocksPerDimension(2)*TGrid::sizeZ, NCHANNELS}; */
-
-    /* hsize_t offset[4] = { */
-    /*     coords[0]*TGrid::sizeX, */
-    /*     coords[1]*TGrid::sizeY, */
-    /*     coords[2]*TGrid::sizeZ, 0}; */
-
     hsize_t count[4] = {
         TGrid::sizeZ,
         TGrid::sizeY,
@@ -101,17 +86,12 @@ void DumpHDF5_MPI(TGrid &grid, const int iCounter, const string f_name, const st
     file_id = H5Fcreate(filename, H5F_ACC_TRUNC, H5P_DEFAULT, fapl_id);
     status = H5Pclose(fapl_id);
 
-
     Streamer streamer(grid.pdata());
 #pragma omp parallel for
-            /* for(unsigned int ix=sX; ix<eX; ix++) */
-        /* for(unsigned int iy=sY; iy<eY; iy++) */
-    /* for(unsigned int iz=sZ; iz<eZ; iz++) */
     for(unsigned int iz=sZ; iz<eZ; iz++)
         for(unsigned int iy=sY; iy<eY; iy++)
             for(unsigned int ix=sX; ix<eX; ix++)
             {
-                /* const unsigned int idx = NCHANNELS * (iz + NZ * (iy + NY * ix)); */
                 const unsigned int idx = NCHANNELS * (ix + NX * (iy + NY * iz));
                 assert(idx < NX * NY * NZ * NCHANNELS);
 

@@ -15,6 +15,9 @@ using std::min;
 using std::abs;
 
 
+uint_t been_here = 0;
+
+
 void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N)
 {
     /* *
@@ -97,11 +100,21 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         const Real ke = static_cast<Real>(0.5)*(u_new*u_new + v_new*v_new + w_new*w_new)/r_new; // whatever ke we had before
         const Real pressure = (e_new - P_new - ke)/G_new; // whatever pressure we had before
 
-        if (P[i]/(static_cast<Real>(1.0) + G[i]) < static_cast<Real>(-2.0)*pressure) // if it was still bad with new P and new G
+        /* if (P[i]/(static_cast<Real>(1.0) + G[i]) < static_cast<Real>(-2.0)*pressure) // if it was still bad with new P and new G */
+        /* { */
+        /*     /1* const Real difference = static_cast<Real>(-8.0) * pressure * (static_cast<Real>(1.0) + G[i]) - P[i]; *1/ */
+        /*     const Real difference = static_cast<Real>(-8.0) * pressure * (static_cast<Real>(1.0) + G[i]) - P[i]; */
+        /*     /1* P[i] += abs(difference); // change P again *1/ */
+        /*     P[i] += difference; // change P again */
+        /* } */
+
+        if (P[i] < static_cast<Real>(-2.5)*G[i]*pressure) // if it was still bad with new P and new G
         {
-            /* const Real difference = static_cast<Real>(-8.0) * pressure * (static_cast<Real>(1.0) + G[i]) - P[i]; */
-            const Real difference = static_cast<Real>(-8.0) * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
-            /* P[i] += abs(difference); // change P again */
+            ++been_here;
+            /* const Real difference = static_cast<Real>(-8.0)*G[i]*pressure - P[i]; */
+
+            // factor of 2 increase? from 256 nodes to 512, does it scale?
+            const Real difference = static_cast<Real>(-16.0)*G[i]*pressure - P[i];
             P[i] += difference; // change P again
         }
 

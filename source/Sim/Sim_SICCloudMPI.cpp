@@ -16,6 +16,8 @@
 #include <cmath>
 using namespace std;
 
+extern uint_t been_here;
+
 namespace SICCloudData
 {
     int n_shapes = 0;
@@ -116,8 +118,15 @@ void Sim_SICCloudMPI::_dump_sensors(const int step_id, const Real t, const Real 
 {
 }
 
-void Sim_SICCloudMPI::_ic()
+void Sim_SICCloudMPI::_set_constants()
 {
+    /* *
+     * Note that if a simulation is restarted, the same initial values should
+     * be provided as arguments as if it was the first run. This is because
+     * boundary conditions (such as Dirichlet inflow) depend on the initial
+     * values, e.g. post shock conditions. It is up to the user to take care of
+     * this situation!
+     * */
     if (isroot)
     {
         printf("=====================================================================\n");
@@ -140,30 +149,15 @@ void Sim_SICCloudMPI::_ic()
     // pressure ratio over shock
     SICCloudData::pressureRatio = parser("-pressureratio").asDouble(400);
 
-    // shock orienation
-    SICCloudData::nx = parser("-shockNx").asDouble(1.0);
-    SICCloudData::ny = parser("-shockNy").asDouble(0.0);
-    SICCloudData::nz = parser("-shockNz").asDouble(0.0);
-    // point on shock
-    SICCloudData::Sx = parser("-shockSx").asDouble(0.05);
-    SICCloudData::Sy = parser("-shockSy").asDouble(0.0);
-    SICCloudData::Sz = parser("-shockSz").asDouble(0.0);
-
     SICCloudData::g1  = parser("-g1").asDouble(6.12);
     SICCloudData::g2  = parser("-g2").asDouble(1.4);
     SICCloudData::pc1 = parser("-pc1").asDouble(3.43e8/p_scale);
     SICCloudData::pc2 = parser("-pc2").asDouble(0.0);
+    // set in global material dictionary
     MaterialDictionary::gamma1 = SICCloudData::g1;
     MaterialDictionary::gamma2 = SICCloudData::g2;
     MaterialDictionary::pc1 = SICCloudData::pc1;
     MaterialDictionary::pc2 = SICCloudData::pc2;
-
-    // normalize shock normal vector
-    const Real mag = sqrt(pow(SICCloudData::nx, 2) + pow(SICCloudData::ny, 2) + pow(SICCloudData::nz, 2));
-    assert(mag > 0);
-    SICCloudData::nx /= mag;
-    SICCloudData::ny /= mag;
-    SICCloudData::nz /= mag;
 
     /* *
      * Compute post shock states based on Appendix A of E. Johnsen "Numerical
@@ -194,13 +188,39 @@ void Sim_SICCloudMPI::_ic()
     SICCloudData::post_shock_conservative[4] = p1*G1 + pc*gamma*G1 + static_cast<Real>(0.5)*SICCloudData::rho1*SICCloudData::u1*SICCloudData::u1; // v = w = 0 !
     SICCloudData::post_shock_conservative[5] = G1;
     SICCloudData::post_shock_conservative[6] = pc*gamma*G1;
+}
+
+void Sim_SICCloudMPI::_ic()
+{
+    _set_constants(); // set case constants
+
+    /* *
+     * Initial shock orientation is only needed to set up the initial
+     * condition, not for restarts
+     * */
+
+    // shock orienation
+    SICCloudData::nx = parser("-shockNx").asDouble(1.0);
+    SICCloudData::ny = parser("-shockNy").asDouble(0.0);
+    SICCloudData::nz = parser("-shockNz").asDouble(0.0);
+    // point on shock
+    SICCloudData::Sx = parser("-shockSx").asDouble(0.05);
+    SICCloudData::Sy = parser("-shockSy").asDouble(0.0);
+    SICCloudData::Sz = parser("-shockSz").asDouble(0.0);
+
+    // normalize shock normal vector
+    const Real mag = sqrt(pow(SICCloudData::nx, 2) + pow(SICCloudData::ny, 2) + pow(SICCloudData::nz, 2));
+    assert(mag > 0);
+    SICCloudData::nx /= mag;
+    SICCloudData::ny /= mag;
+    SICCloudData::nz /= mag;
 
     if (isroot)
     {
         cout << "INITIAL SHOCK" << endl;
         cout << '\t' << "p-Ratio         = " << SICCloudData::pressureRatio << endl;
         cout << '\t' << "Mach            = " << SICCloudData::mach << endl;
-        cout << '\t' << "Shock speed     = " << u0 + SICCloudData::c0*SICCloudData::mach<< endl;
+        cout << '\t' << "Shock speed     = " << SICCloudData::u0 + SICCloudData::c0*SICCloudData::mach<< endl;
         cout << '\t' << "Shock direction = (" << SICCloudData::nx << ", " << SICCloudData::ny << ", " << SICCloudData::nz << ")" << endl;
         cout << '\t' << "Point on shock  = (" << SICCloudData::Sx << ", " << SICCloudData::Sy << ", " << SICCloudData::Sz << ")" << endl << endl;
         cout << "INITIAL MATERIALS" << endl;
@@ -225,11 +245,17 @@ void Sim_SICCloudMPI::_ic()
     }
 
     // This sets the initial conditions. This method (_ic()) is called at the
-    // end of _setup().
+    // end of the general _setup() method defined in the parent class
     Seed<shape> *myseed = NULL;
     _set_cloud(&myseed);
     _ic_quad(myseed);
     delete myseed;
+}
+
+bool Sim_SICCloudMPI::_restart()
+{
+    _set_constants();
+    return Sim_SteadyStateMPI::_restart();
 }
 
 void Sim_SICCloudMPI::_initialize_cloud()
@@ -699,6 +725,7 @@ void Sim_SICCloudMPI::run()
 
             if (step % analysisperiod == 0)
             {
+                if (isroot) printf("Been here = %d\n", been_here);
                 profiler.push_start("ANALYSIS");
                 if (isroot) printf("Running analysis...\n");
                 _dump_statistics(step, t, dt); // TODO: make this work with MPI

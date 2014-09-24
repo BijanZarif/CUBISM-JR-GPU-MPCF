@@ -177,7 +177,14 @@ void Sim_SteadyStateMPI::_save()
         saveinfo << setprecision(16) << scientific << (tnextdump - dumpinterval) << endl; // last dump time
         saveinfo.close();
     }
-    DumpHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, step, "save.data", dump_path);
+    /* DumpHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, step, "save.data", dump_path); */
+
+    // save in 4 parts to allow data sets exceeding 2GB for a single process
+    // http://www.hdfgroup.org/hdf5-quest.html#p2gb
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part1>(*mygrid, step, "save.data.part1", dump_path);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part2>(*mygrid, step, "save.data.part2", dump_path);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, step, "save.data.part3", dump_path);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, step, "save.data.part4", dump_path);
 }
 
 
@@ -194,7 +201,14 @@ bool Sim_SteadyStateMPI::_restart()
         double last_dumptime;
         saveinfo >> last_dumptime;
         tnextdump = last_dumptime + dumpinterval;
-        ReadHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, "save.data", dump_path);
+        /* ReadHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, "save.data", dump_path); */
+
+        // 4 parts
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part1>(*mygrid, "save.data.part1", dump_path);
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part2>(*mygrid, "save.data.part2", dump_path);
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, "save.data.part3", dump_path);
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, "save.data.part4", dump_path);
+
         // since t >= last_dumptime and dumpinterval might be anything new:
         while (t > tnextdump)
             tnextdump += dumpinterval;

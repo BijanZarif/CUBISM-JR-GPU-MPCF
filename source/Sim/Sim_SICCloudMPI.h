@@ -355,6 +355,7 @@ public:
 
 class Sim_SICCloudMPI : public Sim_SteadyStateMPI
 {
+    void _set_constants();
     void _initialize_cloud();
     void _set_cloud(Seed<shape> **myseed);
     void _set_sensors();
@@ -366,6 +367,7 @@ protected:
     virtual void _dump(const std::string basename = "data");
     virtual void _dump_statistics(const int step_id, const Real t, const Real dt);
     virtual void _dump_sensors(const int step_id, const Real t, const Real dt);
+    virtual bool _restart();
 
 public:
     Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot);

@@ -277,6 +277,7 @@ class GPUlabMPI
     protected:
 
         enum {SKIN, FLESH} myFeature[6];
+
         GridMPI& grid;
 
         // TODO: This data should go into the host_buffer struct
