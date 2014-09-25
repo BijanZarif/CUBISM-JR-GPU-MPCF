@@ -25,6 +25,28 @@ typedef unsigned int uint_t;
 
 enum Coord {X=0, Y, Z};
 
+struct FluidElement
+{
+    Real rho, u, v, w, energy, G, P;
+    FluidElement() : rho(-1), u(0), v(0), w(0), energy(-1), G(-1), P(-1) { }
+    FluidElement(const FluidElement& e): rho(e.rho), u(e.u), v(e.v), w(e.w), energy(e.energy), G(e.G), P(e.P) { }
+    FluidElement& operator=(const FluidElement& e)
+    {
+        if (this != &e) {rho = e.rho; u = e.u; v = e.v; w = e.w; energy = e.energy; G = e.G; P = e.P;}
+        return *this;
+    }
+    FluidElement operator+(const FluidElement& e) const
+    {
+        FluidElement sum(e);
+        sum.rho += rho; sum.u += u; sum.v += v; sum.w += w; sum.energy += energy; sum.G += G; sum.P += P;
+        return sum;
+    }
+    friend FluidElement operator*(const Real s, const FluidElement& e);
+};
+
+FluidElement operator*(const Real s, const FluidElement& e);
+
+
 ///////////////////////////////////////////////////////////////////////////////
 // INDEX MAPPINGS USED FOR HOST AND DEVICE GHOST BUFFERS
 ///////////////////////////////////////////////////////////////////////////////
@@ -167,31 +189,21 @@ class SimTools
 struct StreamerGridPointIterative //dummy
 {
     static const int channels = 7;
-    static const int NX = NodeBlock::sizeX;
-    static const int NY = NodeBlock::sizeY;
-    static const int NZ = NodeBlock::sizeZ;
-
-    inline int _id(const int ix, const int iy, const int iz) const { assert(ID3(ix,iy,iz,NX,NY) < NX*NY*NZ); return ID3(ix,iy,iz,NX,NY); }
-
-    typedef const Real * const const_ptr;
-    const_ptr r, u, v, w, e, G, P;
-
-    StreamerGridPointIterative() : r(NULL), u(NULL), v(NULL), w(NULL), e(NULL), G(NULL), P(NULL) {} // can not access data, only name().. not a clean solution!
-    StreamerGridPointIterative(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
 
     template<int channel>
-    inline Real operate(const int ix, const int iy, const int iz) { abort(); return 0; }
+    static inline Real operate(const FluidElement& input) { abort(); return 0; }
+
 
     const char * name() { return "StreamerGridPointIterative" ; }
 };
 
-template<> inline Real StreamerGridPointIterative::operate<0>(const int ix, const int iy, const int iz) { return r[_id(ix,iy,iz)]; }
-template<> inline Real StreamerGridPointIterative::operate<1>(const int ix, const int iy, const int iz) { const int idx = _id(ix,iy,iz); return u[idx]/r[idx]; }
-template<> inline Real StreamerGridPointIterative::operate<2>(const int ix, const int iy, const int iz) { const int idx = _id(ix,iy,iz); return v[idx]/r[idx]; }
-template<> inline Real StreamerGridPointIterative::operate<3>(const int ix, const int iy, const int iz) { const int idx = _id(ix,iy,iz); return w[idx]/r[idx]; }
-template<> inline Real StreamerGridPointIterative::operate<4>(const int ix, const int iy, const int iz) { const int idx = _id(ix,iy,iz); return (e[idx]-0.5*(u[idx]*u[idx]+v[idx]*v[idx]+w[idx]*w[idx])/r[idx] - P[idx])/G[idx]; }
-template<> inline Real StreamerGridPointIterative::operate<5>(const int ix, const int iy, const int iz) { return G[_id(ix,iy,iz)]; }
-template<> inline Real StreamerGridPointIterative::operate<6>(const int ix, const int iy, const int iz) { return P[_id(ix,iy,iz)]; }
+template<> inline Real StreamerGridPointIterative::operate<0>(const FluidElement& e) { return e.rho; }
+template<> inline Real StreamerGridPointIterative::operate<1>(const FluidElement& e) { return e.u/e.rho; }
+template<> inline Real StreamerGridPointIterative::operate<2>(const FluidElement& e) { return e.v/e.rho; }
+template<> inline Real StreamerGridPointIterative::operate<3>(const FluidElement& e) { return e.w/e.rho; }
+template<> inline Real StreamerGridPointIterative::operate<4>(const FluidElement& e) { return (e.energy-static_cast<Real>(0.5)*(e.u*e.u+e.v*e.v+e.w*e.w)/e.rho - e.P)/e.G; }
+template<> inline Real StreamerGridPointIterative::operate<5>(const FluidElement& e) { return e.G; }
+template<> inline Real StreamerGridPointIterative::operate<6>(const FluidElement& e) { return e.P; }
 
 
 struct myTensorialStreamer

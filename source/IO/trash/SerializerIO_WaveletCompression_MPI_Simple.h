@@ -3,41 +3,25 @@
  *  ... te lo do io il simple, porco porco
  *
  *  Created by Diego Rossinelli on 3/4/13.
- *  Modified by Fabian Wermelinger on 9/24/14
- *  Copyright 2013 ETH Zurich. All rights reserved.
+ *  Modified by Fabian Wermelinger on 6/21/14
+ *  Copyright 2013/14 ETH Zurich. All rights reserved.
  *
  */
 
 #pragma once
-/* *
- * Emulates a FluidBlock using an artificial subgrid. Currently only works for
- * cubic superblocks, for which _BLOCKSIZEX_ = _BLOCKSIZEY_ = _BLOCKSIZEZ_ and
- * _BLOCKSIZEX_ % _SUBBLOCKSIZE_ = 0
- * */
-
-// This code requires that sub-blocks are cubic with edge length of
-// _SUBBLOCKSIZE_
-#ifndef _SUBBLOCKSIZE_
-#define _SUBBLOCKSIZE_ 16
-#endif
 
 #include <typeinfo>
 #include <sstream>
 #include <numeric>
 #include <omp.h>
-#include <mpi.h>
 
 using namespace std;
-
-#include "Timer.h"
 
 #include "WaveletSerializationTypes.h"
 #include "FullWaveletTransform.h"
 #include "WaveletCompressor.h"
 
 #include "CompressionEncoders.h"
-#include "Types.h"
-
 
 template<typename GridType, typename IterativeStreamer>
 class SerializerIO_WaveletCompression_MPI_SimpleBlocking
@@ -47,7 +31,7 @@ protected:
     enum
     {
         NCHANNELS = IterativeStreamer::channels,
-        NPTS = _SUBBLOCKSIZE_ * _SUBBLOCKSIZE_ * _SUBBLOCKSIZE_
+        NPTS = _BLOCKSIZE_ * _BLOCKSIZE_ * _BLOCKSIZE_
     };
 
     enum //some considerations about the per-thread working set
@@ -160,15 +144,21 @@ protected:
     }
 
     template<int channel>
-    void _compress(const vector<MenialBlock*>& vInfo, const int NBLOCKS, IterativeStreamer streamer)
+    /* void _compress(const vector<BlockInfo>& vInfo, const int NBLOCKS, IterativeStreamer streamer) */
+    void _compress(const GridType& inputGrid, IterativeStreamer streamer)
     {
 #pragma omp parallel
         {
-          const int tid = omp_get_thread_num();
+            const int tid = omp_get_thread_num();
 
-          CompressionBuffer & mybuf = workbuffer[tid];
+            CompressionBuffer & mybuf = workbuffer[tid];
 
             int mybytes = 0, myhotblocks = 0;
+
+            int mycoords[3];
+            inputGrid.peindex(mycoords);
+
+            const int NBLOCKS = 1;
 
             float tfwt = 0, tencode = 0;
             Timer timer;
@@ -181,16 +171,16 @@ protected:
 
                 //wavelet compression
                 {
-                    MenialBlock& b = *vInfo[i];
+                    /* FluidBlock& b = *(FluidBlock*)vInfo[i].ptrBlock; */
 
                     WaveletCompressor compressor;
 
                     Real * const mysoabuffer = &compressor.uncompressed_data()[0][0][0];
 
-                    for(int iz=0; iz<MenialBlock::sizeZ; iz++)
-                        for(int iy=0; iy<MenialBlock::sizeY; iy++)
-                            for(int ix=0; ix<MenialBlock::sizeX; ix++)
-                                mysoabuffer[ix + _SUBBLOCKSIZE_ * (iy + _SUBBLOCKSIZE_ * iz)] = streamer.template operate<channel>(b(ix, iy, iz));
+                    for(int iz=0; iz<GridType::sizeZ; iz++)
+                        for(int iy=0; iy<GridType::sizeY; iy++)
+                            for(int ix=0; ix<GridType::sizeX; ix++)
+                                mysoabuffer[ix + _BLOCKSIZE_ * (iy + _BLOCKSIZE_ * iz)] = streamer.template operate<channel>(ix, iy, iz);
 
                     //wavelet digestion
                     const int nbytes = (int)compressor.compress(this->threshold, this->halffloat);
@@ -205,7 +195,8 @@ protected:
 
                 //building the meta data
                 {
-                    BlockMetadata curr = { i, myhotblocks, vInfo[i]->get_block_index(0), vInfo[i]->get_block_index(1), vInfo[i]->get_block_index(2)};
+                    BlockMetadata curr = { i, myhotblocks, mycoords[0], mycoords[1], mycoords[2] };
+                    /* BlockMetadata curr = { i, myhotblocks, vInfo[i].index[0], vInfo[i].index[1], vInfo[i].index[2]}; */
                     mybuf.hotblocks[myhotblocks] = curr;
                     myhotblocks++;
                 }
@@ -215,13 +206,14 @@ protected:
             }
 
             if (mybytes > 0)
-                tencode = _encode_and_flush(mybuf.compressedbuffer, mybytes, BUFFERSIZE, mybuf. hotblocks, myhotblocks);
+                tencode = _encode_and_flush(mybuf.compressedbuffer, mybytes, BUFFERSIZE, mybuf.hotblocks, myhotblocks);
 
             workload_total[tid] = timer.stop();
             workload_fwt[tid] = tfwt;
             workload_encode[tid] = tencode;
         }
     }
+
 
     virtual void _to_file(const MPI_Comm& mycomm, const string fileName)
     {
@@ -343,8 +335,10 @@ protected:
     template<int channel>
     void _write(GridType & inputGrid, string fileName, IterativeStreamer streamer)
     {
-        const vector<MenialBlock*>& infos = inputGrid.getBlocksInfo();
-        const int NBLOCKS = infos.size();
+        //MPI grid, that is
+        /* const vector<BlockInfo> infos = inputGrid.getBlocksInfo(); */
+        /* const int NBLOCKS = infos.size(); */
+        const int NBLOCKS = 1;
 
         //prepare the headers
         {
@@ -356,13 +350,16 @@ protected:
                 const int ytotalbpd = inputGrid.getBlocksPerDimension(1);
                 const int ztotalbpd = inputGrid.getBlocksPerDimension(2);
 
-                const int xbpd = inputGrid.getResidentBlocksPerDimension(0);
-                const int ybpd = inputGrid.getResidentBlocksPerDimension(1);
-                const int zbpd = inputGrid.getResidentBlocksPerDimension(2);
+                const int xbpd = 1; //only one block in each subdomain
+                const int ybpd = 1;
+                const int zbpd = 1;
+                /* const int xbpd = inputGrid.getResidentBlocksPerDimension(0); */
+                /* const int ybpd = inputGrid.getResidentBlocksPerDimension(1); */
+                /* const int zbpd = inputGrid.getResidentBlocksPerDimension(2); */
 
-                const double xExtent = inputGrid.getH()*xtotalbpd*_SUBBLOCKSIZE_;
-                const double yExtent = inputGrid.getH()*ytotalbpd*_SUBBLOCKSIZE_;
-                const double zExtent = inputGrid.getH()*ztotalbpd*_SUBBLOCKSIZE_;
+                const double xExtent = inputGrid.getH()*(xtotalbpd*_BLOCKSIZE_ - 1);
+                const double yExtent = inputGrid.getH()*(ytotalbpd*_BLOCKSIZE_ - 1);
+                const double zExtent = inputGrid.getH()*(ztotalbpd*_BLOCKSIZE_ - 1);
 
                 std::stringstream ss;
 
@@ -380,7 +377,7 @@ protected:
                 ss << "sizeofBlockMetadata: " << sizeof(BlockMetadata) << "\n";
                 ss << "sizeofHeaderLUT: " << sizeof(HeaderLUT) << "\n";
                 ss << "sizeofCompressedBlock: " << sizeof(CompressedBlock) << "\n";
-                ss << "Blocksize: " << _SUBBLOCKSIZE_ << "\n";
+                ss << "Blocksize: " << _BLOCKSIZE_ << "\n";
                 ss << "Blocks: " << xtotalbpd << " x "  << ytotalbpd << " x " << ztotalbpd  << "\n";
                 ss << "Extent: " << xExtent << " " << yExtent << " " << zExtent << "\n";
                 ss << "SubdomainBlocks: " << xbpd << " x "  << ybpd << " x " << zbpd  << "\n";
@@ -413,7 +410,8 @@ protected:
 
             lut_compression.clear();
 
-            _compress<channel>(infos, infos.size(), streamer);
+            /* _compress<channel>(infos, infos.size(), streamer); */
+            _compress<channel>(inputGrid, streamer);
 
             //manipulate the file data (allmydata, lut_compression, myblockindices)
             //so that they are file-friendly
@@ -432,6 +430,8 @@ protected:
             }
         }
 
+        /* const MPI::Intracomm& mycomm = inputGrid.getCartComm(); */
+        /* const size_t mygid = mycomm.Get_rank(); */
         const MPI_Comm& mycomm = inputGrid.getCartComm();
         int mygid;
         int mycoords[3];
@@ -450,6 +450,7 @@ protected:
             int comm_size;
             MPI_Comm_size(mycomm, &comm_size);
 
+            /* mycomm.Reduce(&written_bytes, &aggregate_written_bytes, 1, MPI_UINT64_T, MPI::SUM, 0); */
             MPI_Reduce(&written_bytes, &aggregate_written_bytes, 1, MPI_UINT64_T, MPI_SUM, 0, mycomm);
             const bool isroot = mygid == 0;
             if (mygid == 0)
@@ -528,7 +529,7 @@ protected:
 
                 int bsize = -1;
                 fscanf(file, "Blocksize: %d\n", &bsize);
-                assert(bsize == _SUBBLOCKSIZE_);
+                assert(bsize == _BLOCKSIZE_);
                 fscanf(file, "Blocks: %d x %d x %d\n", totalbpd, totalbpd + 1, totalbpd + 2);
                 fscanf(file, "SubdomainBlocks: %d x %d x %d\n", bpd, bpd + 1, bpd + 2);
 
@@ -739,7 +740,7 @@ protected:
 
             }
 
-            Real MYBLOCK[_SUBBLOCKSIZE_][_SUBBLOCKSIZE_][_SUBBLOCKSIZE_];
+            Real MYBLOCK[_BLOCKSIZE_][_BLOCKSIZE_][_BLOCKSIZE_];
 
             {
                 int nbytes = *(int *)&waveletbuf[readbytes];
@@ -756,9 +757,9 @@ protected:
             }
 
             printf("OK FINAL TEST: THE DATA\n");
-            for(int iz = 0; iz< _SUBBLOCKSIZE_; ++iz)
-                for(int iy = 0; iy< _SUBBLOCKSIZE_; ++iy)
-                    for(int ix = 0; ix< _SUBBLOCKSIZE_; ++ix)
+            for(int iz = 0; iz< _BLOCKSIZE_; ++iz)
+                for(int iy = 0; iy< _BLOCKSIZE_; ++iy)
+                    for(int ix = 0; ix< _BLOCKSIZE_; ++ix)
                         printf("%d %d %d: %e\n", ix, iy, iz, MYBLOCK[iz][iy][ix]);
 
             fclose(f);
@@ -782,16 +783,20 @@ public:
     }
 
     template< int channel >
-    void Write(GridType & inputGrid, string fileName, IterativeStreamer streamer = IterativeStreamer())
+    void Write(GridType & inputGrid, string fileName)
     {
+        IterativeStreamer streamer(inputGrid.pdata());
+
         std::stringstream ss;
         ss << "." << streamer.name() << ".channel"  << channel;
 
         _write<channel>(inputGrid, fileName + ss.str(), streamer);
     }
 
-    void Read(string fileName, IterativeStreamer streamer = IterativeStreamer())
+    void Read(string fileName)
     {
+        IterativeStreamer streamer();
+
         for(int channel = 0; channel < NCHANNELS; ++channel)
         {
             std::stringstream ss;
@@ -801,6 +806,7 @@ public:
         }
     }
 };
+
 
 template<typename GridType, typename IterativeStreamer>
 class SerializerIO_WaveletCompression_MPI_Simple : public SerializerIO_WaveletCompression_MPI_SimpleBlocking<GridType, IterativeStreamer>
@@ -815,12 +821,14 @@ class SerializerIO_WaveletCompression_MPI_Simple : public SerializerIO_WaveletCo
         //wait for pending requests
         assert(pending_requests.size() > 0); //bah ouaie ou quois, tu vois bon voila
         MPI_Waitall(pending_requests.size(), &pending_requests.front(), &pending_status.front());
+        /* MPI::Request::Waitall(pending_requests.size(), &pending_requests.front()); */
         pending_requests.clear();
         pending_status.clear();
 
         //close the split collective io
         MPI_Status status;
         MPI_File_write_ordered_end(myopenfile, &this->allmydata.front(), &status);
+        /* myopenfile.Write_ordered_end(&this->allmydata.front()); */
 
         //e buonanotte
         MPI_File_close(&myopenfile);

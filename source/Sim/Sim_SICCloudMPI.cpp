@@ -14,6 +14,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <cmath>
+#include <sstream>
 using namespace std;
 
 extern uint_t been_here;
@@ -36,13 +37,71 @@ namespace SICCloudData
 
 
 Sim_SICCloudMPI::Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot) :
-    Sim_SteadyStateMPI(argc, argv, isroot)
-{ }
+    Sim_SteadyStateMPI(argc, argv, isroot), bVP(true)
+{
+    // we use artifical subblocks that are smaller than the original block
+    parser.set_strict_mode();
+    const int subcells_x = parser("-subcellsX").asInt();
+    parser.unset_strict_mode();
+    const int subcells_y = parser("-subcellsY").asInt(subcells_x);
+    const int subcells_z = parser("-subcellsZ").asInt(subcells_x);
+
+    // wavelet dumps only work if subcells_x = subcells_y = subcells_z =
+    // _SUBBLOCKSIZE_
+    if (subcells_x != _SUBBLOCKSIZE_ && subcells_y != _SUBBLOCKSIZE_ && subcells_z !=_SUBBLOCKSIZE_)
+    {
+        bVP = false;
+        if (isroot) printf("WARNING: VP dumps disabled due to dimension mismatch!\n");
+    }
+
+    subblocks.mesh(mygrid, subcells_x, subcells_y, subcells_z);
+}
 
 void Sim_SICCloudMPI::_allocGPU()
 {
     if (isroot) printf("Allocating GPUlabMPISICCloud...\n");
     myGPU = new GPUlabMPISICCloud(*mygrid, nslices, verbosity, isroot);
+}
+
+void Sim_SICCloudMPI::_vp(const std::string basename)
+{
+    if (bVP)
+    {
+        if (isroot) cout << "dumping MPI VP ...\n" ;
+
+        const string path = parser("-fpath").asString(".");
+
+        stringstream streamer;
+        streamer<<path;
+        streamer<<"/";
+        streamer<<basename;
+        streamer.setf(ios::dec | ios::right);
+        streamer.width(5);
+        streamer.fill('0');
+        streamer<<step;
+
+        mywaveletdumper.verbose();
+        mywaveletdumper.set_threshold(5e-3);
+        mywaveletdumper.Write<4>(subblocks, streamer.str());
+        mywaveletdumper.set_threshold(1e-3);
+        mywaveletdumper.Write<5>(subblocks, streamer.str());
+        //mywaveletdumper.Write<6>(subblocks, streamer.str());
+
+        //used for debug
+#if 0
+        {
+            //mywaveletdumper.force_close();
+            if (isroot)
+            {
+                printf("\n\nREADING BEGINS===================\n");
+                //just checking
+                mywaveletdumper.Read(streamer.str());
+                printf("\n\nREADING ENDS===================\n");
+            }
+        }
+#endif
+        if (isroot) cout << "done" << endl;
+    }
 }
 
 void Sim_SICCloudMPI::_dump(const string basename)
@@ -348,32 +407,6 @@ static Real is_shock(const Real P[3])
     return SimTools::heaviside(d);
 }
 
-struct FluidElement
-{
-    Real rho, u, v, w, energy, G, P;
-    FluidElement() : rho(-1), u(0), v(0), w(0), energy(-1), G(-1), P(-1) { }
-    FluidElement(const FluidElement& e): rho(e.rho), u(e.u), v(e.v), w(e.w), energy(e.energy), G(e.G), P(e.P) { }
-    FluidElement& operator=(const FluidElement& e)
-    {
-        if (this != &e) {rho = e.rho; u = e.u; v = e.v; w = e.w; energy = e.energy; G = e.G; P = e.P;}
-        return *this;
-    }
-    FluidElement operator+(const FluidElement& e) const
-    {
-        FluidElement sum(e);
-        sum.rho += rho; sum.u += u; sum.v += v; sum.w += w; sum.energy += energy; sum.G += G; sum.P += P;
-        return sum;
-    }
-    friend FluidElement operator*(const Real s, const FluidElement& e);
-};
-
-FluidElement operator*(const Real s, const FluidElement& e)
-{
-    FluidElement prod(e);
-    prod.rho *= s; prod.u *= s; prod.v *= s; prod.w *= s; prod.energy *= s; prod.G *= s; prod.P *= s;
-    return prod;
-}
-
 template <typename T>
 static T set_IC(const Real shock, const Real bubble)
 {
@@ -464,160 +497,18 @@ static T integral(const Real p[3], const Real h, const vector<shape> * const blo
 }
 
 
-class SubGrid
-{
-    public:
-    class SubBlock
-    {
-        public:
-        static uint_t sizeX;
-        static uint_t sizeY;
-        static uint_t sizeZ;
-        static double extent_x;
-        static double extent_y;
-        static double extent_z;
-        static double h;
-
-        private:
-        const double origin[3];
-        const uint_t block_index[3];
-        GridMPI& grid;
-
-        public:
-        SubBlock(const double O[3], const uint_t idx[3], GridMPI& G) : origin{O[0], O[1], O[2]}, block_index{idx[0], idx[1], idx[2]}, grid(G) { }
-
-        inline void get_pos(const unsigned int ix, const unsigned int iy, const unsigned int iz, Real pos[3]) const
-        {
-            // local position, relative to origin, cell center
-            pos[0] = origin[0] + h * (ix+0.5);
-            pos[1] = origin[1] + h * (iy+0.5);
-            pos[2] = origin[2] + h * (iz+0.5);
-        }
-        inline void get_index(const unsigned int lix, const unsigned int liy, const unsigned int liz, uint_t gidx[3]) const
-        {
-            // returns global grid index
-            gidx[0] = block_index[0] * sizeX + lix;
-            gidx[1] = block_index[1] * sizeY + liy;
-            gidx[2] = block_index[2] * sizeZ + liz;
-        }
-        inline void get_origin(double O[3]) const
-        {
-            O[0] = origin[0];
-            O[1] = origin[1];
-            O[2] = origin[2];
-        }
-
-        void set(const int lix, const int liy, const int liz, const FluidElement& IC)
-        {
-            const int ix = block_index[0] * sizeX + lix;
-            const int iy = block_index[1] * sizeY + liy;
-            const int iz = block_index[2] * sizeZ + liz;
-
-            grid(ix, iy, iz, GridMPI::PRIM::R) = IC.rho;
-            grid(ix, iy, iz, GridMPI::PRIM::U) = IC.u;
-            grid(ix, iy, iz, GridMPI::PRIM::V) = IC.v;
-            grid(ix, iy, iz, GridMPI::PRIM::W) = IC.w;
-            grid(ix, iy, iz, GridMPI::PRIM::E) = IC.energy;
-            grid(ix, iy, iz, GridMPI::PRIM::G) = IC.G;
-            grid(ix, iy, iz, GridMPI::PRIM::P) = IC.P;
-        }
-    };
-
-
-    private:
-    const uint_t nblock_x, nblock_y, nblock_z;
-    vector<SubBlock *> blocks;
-
-
-    public:
-    SubGrid(GridMPI *grid, const uint_t ncX, const uint_t ncY, const uint_t ncZ) :
-        nblock_x(_BLOCKSIZEX_/ncX), nblock_y(_BLOCKSIZEY_/ncY), nblock_z(_BLOCKSIZEZ_/ncZ)
-    {
-        if (_BLOCKSIZEX_ % ncX != 0)
-        {
-            fprintf(stderr, "ERROR: subcellsX must be an integer multiple of _BLOCKSIZEX_");
-            abort();
-        }
-        if (_BLOCKSIZEY_ % ncY != 0)
-        {
-            fprintf(stderr, "ERROR: subcellsY must be an integer multiple of _BLOCKSIZEY_");
-            abort();
-        }
-        if (_BLOCKSIZEZ_ % ncZ != 0)
-        {
-            fprintf(stderr, "ERROR: subcellsZ must be an integer multiple of _BLOCKSIZEZ_");
-            abort();
-        }
-
-        const double h_ = grid->getH();
-        SubGrid::SubBlock::sizeX = ncX;
-        SubGrid::SubBlock::sizeY = ncY;
-        SubGrid::SubBlock::sizeZ = ncZ;
-        SubGrid::SubBlock::extent_x = ncX * h_;
-        SubGrid::SubBlock::extent_y = ncY * h_;
-        SubGrid::SubBlock::extent_z = ncZ * h_;
-        SubGrid::SubBlock::h = h_;
-
-        blocks.reserve(nblock_x * nblock_y * nblock_z);
-
-        double O[3];
-        grid->get_origin(O);
-        for (int biz=0; biz < nblock_z; ++biz)
-            for (int biy=0; biy < nblock_y; ++biy)
-                for (int bix=0; bix < nblock_x; ++bix)
-                {
-                    const double thisOrigin[3] = {
-                        O[0] + bix * SubGrid::SubBlock::extent_x,
-                        O[1] + biy * SubGrid::SubBlock::extent_y,
-                        O[2] + biz * SubGrid::SubBlock::extent_z };
-                    const uint_t thisIndex[3] = {bix, biy, biz};
-
-                    SubBlock *thisBlock = new SubBlock(thisOrigin, thisIndex, *grid);
-                    blocks.push_back(thisBlock);
-                }
-    }
-
-    ~SubGrid()
-    {
-        for (int i =0; i < (int)blocks.size(); ++i)
-            delete blocks[i];
-        blocks.clear();
-    }
-
-    SubBlock *operator[](const int block_id) { return blocks[block_id]; }
-    const size_t size() const { return blocks.size(); }
-};
-
-uint_t SubGrid::SubBlock::sizeX = 0;
-uint_t SubGrid::SubBlock::sizeY = 0;
-uint_t SubGrid::SubBlock::sizeZ = 0;
-double SubGrid::SubBlock::extent_x = 0.0;
-double SubGrid::SubBlock::extent_y = 0.0;
-double SubGrid::SubBlock::extent_z = 0.0;
-double SubGrid::SubBlock::h = 0.0;
-
-
 void Sim_SICCloudMPI::_ic_quad(const Seed<shape> * const seed)
 {
-    // we use artifical subblocks that are smaller than the original block
-    parser.set_strict_mode();
-    const int subcells_x = parser("-subcellsX").asInt();
-    parser.unset_strict_mode();
-    const int subcells_y = parser("-subcellsY").asInt(subcells_x);
-    const int subcells_z = parser("-subcellsZ").asInt(subcells_x);
-
-    SubGrid subblocks(mygrid, subcells_x, subcells_y, subcells_z);
-
     if (seed->get_shapes().size() == 0)
     {
 #pragma omp parallel for
         for (int i=0; i < (int)subblocks.size(); ++i)
         {
-            SubGrid::SubBlock& myblock = *(subblocks[i]);
+            MenialBlock& myblock = *(subblocks[i]);
 
-            for (int iz=0; iz < SubGrid::SubBlock::sizeZ; ++iz)
-                for (int iy=0; iy < SubGrid::SubBlock::sizeY; ++iy)
-                    for (int ix=0; ix < SubGrid::SubBlock::sizeX; ++ix)
+            for (int iz=0; iz < MenialBlock::sizeZ; ++iz)
+                for (int iy=0; iy < MenialBlock::sizeY; ++iy)
+                    for (int ix=0; ix < MenialBlock::sizeX; ++ix)
                     {
                         Real pos[3];
                         myblock.get_pos(ix, iy, iz, pos);
@@ -630,14 +521,14 @@ void Sim_SICCloudMPI::_ic_quad(const Seed<shape> * const seed)
     {
         const Real h  = mygrid->getH();
         const double myextent[3] = {
-            SubGrid::SubBlock::extent_x,
-            SubGrid::SubBlock::extent_y,
-            SubGrid::SubBlock::extent_z };
+            MenialBlock::extent_x,
+            MenialBlock::extent_y,
+            MenialBlock::extent_z };
 
 #pragma omp parallel for
         for (int i=0; i < (int)subblocks.size(); ++i)
         {
-            SubGrid::SubBlock& myblock = *(subblocks[i]);
+            MenialBlock& myblock = *(subblocks[i]);
 
             double block_origin[3];
             myblock.get_origin(block_origin);
@@ -647,9 +538,9 @@ void Sim_SICCloudMPI::_ic_quad(const Seed<shape> * const seed)
 
             if (isempty)
             {
-                for (int iz=0; iz < SubGrid::SubBlock::sizeZ; ++iz)
-                    for (int iy=0; iy < SubGrid::SubBlock::sizeY; ++iy)
-                        for (int ix=0; ix < SubGrid::SubBlock::sizeX; ++ix)
+                for (int iz=0; iz < MenialBlock::sizeZ; ++iz)
+                    for (int iy=0; iy < MenialBlock::sizeY; ++iy)
+                        for (int ix=0; ix < MenialBlock::sizeX; ++ix)
                         {
                             Real pos[3];
                             myblock.get_pos(ix, iy, iz, pos);
@@ -659,9 +550,9 @@ void Sim_SICCloudMPI::_ic_quad(const Seed<shape> * const seed)
             }
             else
             {
-                for (int iz=0; iz < SubGrid::SubBlock::sizeZ; ++iz)
-                    for (int iy=0; iy < SubGrid::SubBlock::sizeY; ++iy)
-                        for (int ix=0; ix < SubGrid::SubBlock::sizeX; ++ix)
+                for (int iz=0; iz < MenialBlock::sizeZ; ++iz)
+                    for (int iy=0; iy < MenialBlock::sizeY; ++iy)
+                        for (int ix=0; ix < MenialBlock::sizeX; ++ix)
                         {
                             Real pos[3];
                             myblock.get_pos(ix, iy, iz, pos);
@@ -712,6 +603,7 @@ void Sim_SICCloudMPI::run()
                 profiler.push_start("DUMP");
                 tnextdump += dumpinterval;
                 _dump();
+                _vp();
                 profiler.pop_stop();
             }
 

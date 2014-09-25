@@ -1,6 +1,6 @@
 /*
  *  WaveletCompressor.h
- *  
+ *
  *
  *  Created by Diego Rossinelli on 3/4/13.
  *  Copyright 2013 ETH Zurich. All rights reserved.
@@ -23,50 +23,50 @@ template<int DATASIZE1D, typename DataType>
 class WaveletCompressorGeneric
 {
 protected:
-	
-	enum 
-	{ 
+
+	enum
+	{
 		BS3 = DATASIZE1D * DATASIZE1D * DATASIZE1D,
 		BITSETSIZE = (BS3 + 7) / 8,
 		BUFMAXSIZE = BITSETSIZE + sizeof(DataType) * BS3
 	};
-	
+
 	WaveletsOnInterval::FullTransform<DATASIZE1D, lifting_scheme> full;
 
 private:
-	
+
 	unsigned char bufcompression[BUFMAXSIZE];
-	
+
 	size_t bufsize;
-	
-public: 
-	
-	WaveletsOnInterval::FwtAp (& uncompressed_data()) [DATASIZE1D][DATASIZE1D][DATASIZE1D] { return full.data; } 
+
+public:
+
+	WaveletsOnInterval::FwtAp (& uncompressed_data()) [DATASIZE1D][DATASIZE1D][DATASIZE1D] { return full.data; }
 
 	virtual void * compressed_data() { return bufcompression; }
-		
+
 	virtual	size_t compress(const float threshold, const bool float16);
-	
+
 	virtual void decompress(const bool float16, size_t bytes);
-	
+
 	virtual void decompress(const bool float16, size_t ninputbytes, DataType data[DATASIZE1D][DATASIZE1D][DATASIZE1D])
 	{
 		decompress(float16, ninputbytes);
-		
+
 		this->copy_to(data);
 	}
-	
+
 	void copy_to(DataType data[DATASIZE1D][DATASIZE1D][DATASIZE1D])
 	{
 		DataType * const dst = &data[0][0][0];
 		const WaveletsOnInterval::FwtAp * const src = &full.data[0][0][0];
 		for(int i = 0; i < BS3; ++i)
-		{ 
+		{
 			dst[i] = src[i];
 			assert(!std::isnan(dst[i]));
 		}
 	}
-	
+
 	void copy_from(const DataType data[DATASIZE1D][DATASIZE1D][DATASIZE1D])
 	{
 		const DataType * const src = &data[0][0][0];
@@ -91,7 +91,7 @@ public:
 	size_t compress(const float threshold, const bool float16)
 	{
 		int compressedbytes = 0;
-		
+
 		const size_t ninputbytes = WaveletCompressorGeneric<DATASIZE1D, DataType>::compress(threshold, float16);
 
 #if defined(_USE_ZLIB_)
@@ -146,7 +146,7 @@ public:
                 }
 
 		inflateEnd(&datastream);
-		
+
 		WaveletCompressorGeneric<DATASIZE1D, DataType>::decompress(float16, decompressedbytes);
 #else /* _USE_LZ4 */
                 decompressedbytes = LZ4_uncompress_unknownOutputSize((char *)bufzlib, (char*) WaveletCompressorGeneric<DATASIZE1D, DataType>::compressed_data(),
@@ -160,7 +160,7 @@ public:
 	}
 };
 
-#ifdef _BLOCKSIZE_
-typedef WaveletCompressorGeneric<_BLOCKSIZE_, Real> WaveletCompressor;
-typedef WaveletCompressorGeneric_zlib<_BLOCKSIZE_, Real> WaveletCompressor_zlib;
+#ifdef _SUBBLOCKSIZE_
+typedef WaveletCompressorGeneric<_SUBBLOCKSIZE_, Real> WaveletCompressor;
+typedef WaveletCompressorGeneric_zlib<_SUBBLOCKSIZE_, Real> WaveletCompressor_zlib;
 #endif
