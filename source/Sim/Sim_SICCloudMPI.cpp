@@ -37,7 +37,11 @@ namespace SICCloudData
 void Sim_SICCloudMPI::_allocGPU()
 {
     if (isroot) printf("Allocating GPUlabMPISICCloud...\n");
-    myGPU = new GPUlabMPISICCloud(*mygrid, nslices, verbosity, isroot);
+    // if we want to do a state update, allocate a capable lab
+    bool state = false;
+    if (parser("-state").asBool(false)) state = true;
+
+    myGPU = new GPUlabMPISICCloud(*mygrid, nslices, verbosity, isroot, state);
 }
 
 void Sim_SICCloudMPI::_vp(const std::string basename)

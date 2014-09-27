@@ -402,5 +402,5 @@ class GPUlabMPISICCloud : public GPUlabMPI
         }
 
     public:
-        GPUlabMPISICCloud(GridMPI& grid, const uint_t nslices, const int verb, const bool isroot_) : GPUlabMPI(grid, nslices, verb, isroot_) { }
+        GPUlabMPISICCloud(GridMPI& grid, const uint_t nslices, const int verb, const bool isroot_, const bool state_) : GPUlabMPI(grid, nslices, verb, isroot_, state_) { }
 };

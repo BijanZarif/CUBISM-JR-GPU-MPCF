@@ -35,5 +35,5 @@ public:
     }
 
     void compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N);
-    void state(real_vector_t& src);
+    void state(real_vector_t& src, const uint_t offset, const uint_t N);
 };

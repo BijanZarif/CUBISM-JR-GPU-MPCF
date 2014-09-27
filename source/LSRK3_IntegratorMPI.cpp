@@ -7,8 +7,11 @@
 #include "LSRK3_IntegratorMPI.h"
 #include "Timer.h"
 #include "MaxSpeedOfSound.h"
+#include "Update_CPP.h"
+
 #ifdef _QPXEMU_
 #include "MaxSpeedOfSound_QPX.h"
+#include "Update_QPX.h"
 #endif
 
 #include <cassert>
@@ -31,13 +34,10 @@ static double _maxSOS(const GridMPI * const grid, float& sos)
 double LSRK3_IntegratorMPI::operator()(const double dt_max)
 {
     double tsos;
-    if (SOSkernel == "cuda")
-        tsos = GPU->max_sos(sos);
-    else if (SOSkernel == "cpp")
-        tsos = _maxSOS<MaxSpeedOfSound_CPP>(grid, sos);
+    if (SOSkernel == "cuda") tsos = GPU->max_sos(sos);
+    else if (SOSkernel == "cpp") tsos = _maxSOS<MaxSpeedOfSound_CPP>(grid, sos);
 #ifdef _QPXEMU_
-    else if (SOSkernel == "qpx")
-        tsos = _maxSOS<MaxSpeedOfSound_QPX>(grid, sos);
+    else if (SOSkernel == "qpx") tsos = _maxSOS<MaxSpeedOfSound_QPX>(grid, sos);
 #endif
     else
     {
@@ -57,23 +57,18 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
     /* MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, grid->getCartComm()); */
 
     // 2.) Compute RHS and update using LSRK3
-    double trk1, trk2, trk3;
-    {// stage 1
-        GPU->load_ghosts();
-        trk1 = GPU->process_all(0, 1./4, dt/h);
-        if (isroot && verbosity) printf("RK stage 1 takes %f sec\n", trk1);
+    double trk3;
+    if (UPkernel == "cpp") trk3 = _RKstepGPU<Update_CPP>(dt/h);
+#ifdef _QPXEMU_
+    else if (UPkernel == "qpx") trk3 = _RKstepGPU<Update_QPX>(dt/h);
+#endif
+    else
+    {
+        fprintf(stderr, "UP kernel = %s... Not supported!\n", UPkernel.c_str());
+        abort();
     }
-    {// stage 2
-        GPU->load_ghosts();
-        trk2 = GPU->process_all(-17./32, 8./9, dt/h);
-        if (isroot && verbosity) printf("RK stage 2 takes %f sec\n", trk2);
-    }
-    {// stage 3
-        GPU->load_ghosts();
-        trk3 = GPU->process_all(-32./27, 3./4, dt/h);
-        if (isroot && verbosity) printf("RK stage 3 takes %f sec\n", trk3);
-    }
-    if (isroot) printf("netto step takes %f sec\n", tsos + trk1 + trk2 + trk3);
+
+    if (isroot) printf("netto step takes %f sec\n", tsos + trk3);
 
     return dt;
 }
