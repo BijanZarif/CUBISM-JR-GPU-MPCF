@@ -398,8 +398,8 @@ static Real is_shock(const Real P[3])
     const Real Sy = SICCloudData::Sy;
     const Real Sz = SICCloudData::Sz;
 
-    // no need to divide by n*n, since n*n = 1; d is the projection distance of
-    // point P onto the planar initial shock.
+    // no need to divide by n*n, since n*n = 1; d is the distance of the
+    // projection of point P onto the planar initial shock.
     const Real d = -(nx*(Sx-P[0]) + ny*(Sy-P[1]) + nz*(Sz-P[2]));
 
     return SimTools::heaviside(d);
