@@ -1,12 +1,13 @@
 /* File        : SubGridWrapper.cpp */
 /* Creator     : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Wed 24 Sep 2014 02:12:49 PM CEST */
-/* Modified    : Thu 25 Sep 2014 01:53:55 PM CEST */
+/* Modified    : Thu 25 Sep 2014 03:38:15 PM CEST */
 /* Description : */
 #include "SubGridWrapper.h"
 #include <cstdio>
 #include <cstdlib>
 
+GridMPI* SubGridWrapper::SubBlock::supergrid = 0;
 
 uint_t SubGridWrapper::SubBlock::sizeX = 0;
 uint_t SubGridWrapper::SubBlock::sizeY = 0;
@@ -16,7 +17,7 @@ double SubGridWrapper::SubBlock::extent_y = 0.0;
 double SubGridWrapper::SubBlock::extent_z = 0.0;
 double SubGridWrapper::SubBlock::h = 0.0;
 
-void SubGridWrapper::mesh(GridMPI *grid, const uint_t ncX, const uint_t ncY, const uint_t ncZ)
+void SubGridWrapper::make_submesh(GridMPI *grid, const uint_t ncX, const uint_t ncY, const uint_t ncZ)
 {
     if (_BLOCKSIZEX_ % ncX != 0)
     {
@@ -60,16 +61,18 @@ void SubGridWrapper::mesh(GridMPI *grid, const uint_t ncX, const uint_t ncY, con
                     O[0] + bix * SubGridWrapper::SubBlock::extent_x,
                     O[1] + biy * SubGridWrapper::SubBlock::extent_y,
                     O[2] + biz * SubGridWrapper::SubBlock::extent_z };
+
                 const uint_t thisIndex[3] = {bix, biy, biz};
 
-                SubBlock *thisBlock = new SubBlock(thisOrigin, thisIndex, *grid);
+                SubBlock thisBlock(thisOrigin, thisIndex);
                 blocks.push_back(thisBlock);
             }
+
+    SubGridWrapper::SubBlock::assign_supergrid(grid);
 }
 
 SubGridWrapper::~SubGridWrapper()
 {
-    for (int i =0; i < (int)blocks.size(); ++i)
-        delete blocks[i];
+    SubGridWrapper::SubBlock::assign_supergrid(0);
     blocks.clear();
 }

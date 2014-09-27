@@ -9,6 +9,7 @@
 #include <string>
 #include <fstream>
 #include <iomanip>
+#include <cmath>
 
 #include "Sim_SteadyStateMPI.h"
 #include "HDF5Dumper_MPI.h"
@@ -41,13 +42,14 @@ void Sim_SteadyStateMPI::_setup()
 
     // with IO
     bIO = parser("-IO").asBool(true);
+    bHDF= parser("-HDF").asBool(true);
 
     // parse optional aruments
     verbosity = parser("-verb").asInt(0);
     restart   = parser("-restart").asBool(false);
     nsteps    = parser("-nsteps").asInt(0);
 
-    // MPI
+    // MPI processes arranged on cartesian grid
     npex = parser("-npex").asInt(1);
     npey = parser("-npey").asInt(1);
     npez = parser("-npez").asInt(1);
@@ -56,6 +58,9 @@ void Sim_SteadyStateMPI::_setup()
     tnextdump = dumpinterval;
     mygrid    = new GridMPI(npex, npey, npez);
     assert(mygrid != NULL);
+
+    // smooth length
+    SimTools::EPSILON = static_cast<Real>(parser("-mollfactor").asInt(1)) * std::sqrt(3.) * mygrid->getH();
 
     // allocate GPU
     if (!dryrun)
@@ -101,7 +106,7 @@ void Sim_SteadyStateMPI::_allocGPU()
 }
 
 
-void Sim_SteadyStateMPI::_ic()
+void Sim_SteadyStateMPI::_set_constants()
 {
     if (isroot)
     {
@@ -109,6 +114,12 @@ void Sim_SteadyStateMPI::_ic()
         printf("                            Steady State                             \n");
         printf("=====================================================================\n");
     }
+}
+
+void Sim_SteadyStateMPI::_ic()
+{
+    _set_constants();
+
     // default initial condition
     const double r  = parser("-rho").asDouble(1.0);
     const double u  = parser("-u").asDouble(0.0);
@@ -117,13 +128,7 @@ void Sim_SteadyStateMPI::_ic()
     const double p  = parser("-p").asDouble(1.0);
     const double g  = parser("-g").asDouble(1.4);
     const double pc = parser("-pc").asDouble(0.0);
-    /* const double r  = parser("-rho").asDouble(1.5); */
-    /* const double u  = parser("-u").asDouble(1.0); */
-    /* const double v  = parser("-v").asDouble(1.0); */
-    /* const double w  = parser("-w").asDouble(1.0); */
-    /* const double p  = parser("-p").asDouble(1.0); */
-    /* const double g  = parser("-g").asDouble(1.5); */
-    /* const double pc = parser("-pc").asDouble(1.0); */
+    MaterialDictionary::rho1 = r;
     MaterialDictionary::gamma1 = g;
     MaterialDictionary::pc1 = pc;
 

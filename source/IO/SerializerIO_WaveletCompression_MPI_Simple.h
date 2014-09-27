@@ -160,7 +160,7 @@ protected:
     }
 
     template<int channel>
-    void _compress(const vector<MenialBlock*>& vInfo, const int NBLOCKS, IterativeStreamer streamer)
+    void _compress(const vector<MenialBlock>& vInfo, const int NBLOCKS, IterativeStreamer streamer)
     {
 #pragma omp parallel
         {
@@ -181,7 +181,7 @@ protected:
 
                 //wavelet compression
                 {
-                    MenialBlock& b = *vInfo[i];
+                    const MenialBlock& b = vInfo[i];
 
                     WaveletCompressor compressor;
 
@@ -205,7 +205,7 @@ protected:
 
                 //building the meta data
                 {
-                    BlockMetadata curr = { i, myhotblocks, vInfo[i]->get_block_index(0), vInfo[i]->get_block_index(1), vInfo[i]->get_block_index(2)};
+                    BlockMetadata curr = { i, myhotblocks, vInfo[i].get_block_index(0), vInfo[i].get_block_index(1), vInfo[i].get_block_index(2)};
                     mybuf.hotblocks[myhotblocks] = curr;
                     myhotblocks++;
                 }
@@ -343,7 +343,7 @@ protected:
     template<int channel>
     void _write(GridType & inputGrid, string fileName, IterativeStreamer streamer)
     {
-        const vector<MenialBlock*>& infos = inputGrid.getBlocksInfo();
+        const vector<MenialBlock>& infos = inputGrid.getBlocksInfo();
         const int NBLOCKS = infos.size();
 
         //prepare the headers

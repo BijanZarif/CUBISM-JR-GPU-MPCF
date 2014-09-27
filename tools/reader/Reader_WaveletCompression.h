@@ -25,11 +25,11 @@ typedef float Real;
 typedef double Real;
 #endif
 
-#include "../../MPCFnode/source/WaveletCompressor.h"
+#include "WaveletCompressor.h"
 
-#include "../../MPCFcluster/source/WaveletSerializationTypes.h"
-#include "../../MPCFcluster/source/CompressionEncoders.h"
-#include "../../MPCFnode/source/FullWaveletTransform.h"
+#include "WaveletSerializationTypes.h"
+#include "CompressionEncoders.h"
+#include "FullWaveletTransform.h"
 
 //MACRO TAKEN FROM http://stackoverflow.com/questions/3767869/adding-message-to-assert
 #   define MYASSERT(condition, message) \

@@ -1,7 +1,7 @@
 /* File        : SubGridWrapper.h */
 /* Creator     : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Wed 24 Sep 2014 01:51:15 PM CEST */
-/* Modified    : Thu 25 Sep 2014 02:10:49 PM CEST */
+/* Modified    : Thu 25 Sep 2014 03:44:40 PM CEST */
 /* Description : Emulates smaller sub-blocks, based on GridMPI. */
 #pragma once
 
@@ -19,7 +19,8 @@ public:
     {
         const double origin[3];
         const uint_t block_index[3];
-        GridMPI& grid;
+
+        static GridMPI* supergrid;
 
     public:
         static uint_t sizeX;
@@ -30,7 +31,9 @@ public:
         static double extent_z;
         static double h;
 
-        SubBlock(const double O[3], const uint_t idx[3], GridMPI& G) : origin{O[0], O[1], O[2]}, block_index{idx[0], idx[1], idx[2]}, grid(G) { }
+        static void assign_supergrid(GridMPI* const G) { supergrid = G; }
+
+        SubBlock(const double O[3], const uint_t idx[3]) : origin{O[0], O[1], O[2]}, block_index{idx[0], idx[1], idx[2]} { }
 
         inline void get_pos(const unsigned int ix, const unsigned int iy, const unsigned int iz, Real pos[3]) const
         {
@@ -60,13 +63,13 @@ public:
             const int iy = block_index[1] * sizeY + liy;
             const int iz = block_index[2] * sizeZ + liz;
 
-            grid(ix, iy, iz, GridMPI::PRIM::R) = IC.rho;
-            grid(ix, iy, iz, GridMPI::PRIM::U) = IC.u;
-            grid(ix, iy, iz, GridMPI::PRIM::V) = IC.v;
-            grid(ix, iy, iz, GridMPI::PRIM::W) = IC.w;
-            grid(ix, iy, iz, GridMPI::PRIM::E) = IC.energy;
-            grid(ix, iy, iz, GridMPI::PRIM::G) = IC.G;
-            grid(ix, iy, iz, GridMPI::PRIM::P) = IC.P;
+            (*supergrid)(ix, iy, iz, GridMPI::PRIM::R) = IC.rho;
+            (*supergrid)(ix, iy, iz, GridMPI::PRIM::U) = IC.u;
+            (*supergrid)(ix, iy, iz, GridMPI::PRIM::V) = IC.v;
+            (*supergrid)(ix, iy, iz, GridMPI::PRIM::W) = IC.w;
+            (*supergrid)(ix, iy, iz, GridMPI::PRIM::E) = IC.energy;
+            (*supergrid)(ix, iy, iz, GridMPI::PRIM::G) = IC.G;
+            (*supergrid)(ix, iy, iz, GridMPI::PRIM::P) = IC.P;
         }
 
         FluidElement operator()(const int lix, const int liy, const int liz) const
@@ -77,13 +80,13 @@ public:
 
             FluidElement ret;
 
-            ret.rho    = grid(ix, iy, iz, GridMPI::PRIM::R);
-            ret.u      = grid(ix, iy, iz, GridMPI::PRIM::U);
-            ret.v      = grid(ix, iy, iz, GridMPI::PRIM::V);
-            ret.w      = grid(ix, iy, iz, GridMPI::PRIM::W);
-            ret.energy = grid(ix, iy, iz, GridMPI::PRIM::E);
-            ret.G      = grid(ix, iy, iz, GridMPI::PRIM::G);
-            ret.P      = grid(ix, iy, iz, GridMPI::PRIM::P);
+            ret.rho    = (*supergrid)(ix, iy, iz, GridMPI::PRIM::R);
+            ret.u      = (*supergrid)(ix, iy, iz, GridMPI::PRIM::U);
+            ret.v      = (*supergrid)(ix, iy, iz, GridMPI::PRIM::V);
+            ret.w      = (*supergrid)(ix, iy, iz, GridMPI::PRIM::W);
+            ret.energy = (*supergrid)(ix, iy, iz, GridMPI::PRIM::E);
+            ret.G      = (*supergrid)(ix, iy, iz, GridMPI::PRIM::G);
+            ret.P      = (*supergrid)(ix, iy, iz, GridMPI::PRIM::P);
 
             return ret;
         }
@@ -91,23 +94,23 @@ public:
 
 
 private:
-    /* const uint_t nblock_x, nblock_y, nblock_z; */
     uint_t nblocks[3];
-    std::vector<SubBlock *> blocks;
+    std::vector<SubBlock> blocks;
 
     GridMPI* G;
 
 public:
     SubGridWrapper() { }
-    ~SubGridWrapper();
+    virtual ~SubGridWrapper();
 
-    void mesh(GridMPI *grid, const uint_t ncX, const uint_t ncY, const uint_t ncZ);
+    void make_submesh(GridMPI *grid, const uint_t ncX, const uint_t ncY, const uint_t ncZ);
 
-    inline SubBlock *operator[](const int block_id) { return blocks[block_id]; }
+    inline SubBlock& operator[](const int block_id) { return blocks[block_id]; }
+    inline SubBlock operator[](const int block_id) const { return blocks[block_id]; }
     inline size_t size() const { return blocks.size(); }
 
     // adapts CUBISM interface
-    inline const std::vector<SubBlock*>& getBlocksInfo() const { return blocks; }
+    inline const std::vector<SubBlock>& getBlocksInfo() const { return blocks; }
     inline double getH() const { return G->getH(); }
     inline void peindex(int mypeindex[3]) const { G->peindex(mypeindex); }
     inline MPI_Comm getCartComm() const { return G->getCartComm(); }

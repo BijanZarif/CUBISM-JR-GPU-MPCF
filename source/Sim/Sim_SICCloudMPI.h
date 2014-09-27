@@ -358,7 +358,6 @@ public:
 
 class Sim_SICCloudMPI : public Sim_SteadyStateMPI
 {
-    void _set_constants();
     void _initialize_cloud();
     void _set_cloud(Seed<shape> **myseed);
     void _set_sensors();
@@ -370,6 +369,7 @@ class Sim_SICCloudMPI : public Sim_SteadyStateMPI
 
 protected:
     virtual void _allocGPU();
+    virtual void _set_constants();
     virtual void _ic();
     virtual void _vp(const std::string basename = "datawavelet");
     virtual void _dump(const std::string basename = "data");
@@ -380,7 +380,7 @@ protected:
     SerializerIO_WaveletCompression_MPI_SimpleBlocking<SubGridWrapper, StreamerGridPointIterative> mywaveletdumper;
 
 public:
-    Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot);
+    Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot) : Sim_SteadyStateMPI(argc, argv, isroot), bVP(true) { }
 
     virtual void run();
 };

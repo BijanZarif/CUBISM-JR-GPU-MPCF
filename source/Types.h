@@ -94,6 +94,8 @@ struct flesh2ghost
 class MaterialDictionary
 {
     public:
+        static Real rho1;
+        static Real rho2;
         static Real gamma1;
         static Real gamma2;
         static Real pc1;

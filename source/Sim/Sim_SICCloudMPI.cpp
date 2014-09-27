@@ -17,7 +17,6 @@
 #include <sstream>
 using namespace std;
 
-extern uint_t been_here;
 
 namespace SICCloudData
 {
@@ -35,28 +34,6 @@ namespace SICCloudData
     Real post_shock_conservative[GridMPI::NVAR];
 }
 
-
-Sim_SICCloudMPI::Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot) :
-    Sim_SteadyStateMPI(argc, argv, isroot), bVP(true)
-{
-    // we use artifical subblocks that are smaller than the original block
-    parser.set_strict_mode();
-    const int subcells_x = parser("-subcellsX").asInt();
-    parser.unset_strict_mode();
-    const int subcells_y = parser("-subcellsY").asInt(subcells_x);
-    const int subcells_z = parser("-subcellsZ").asInt(subcells_x);
-
-    // wavelet dumps only work if subcells_x = subcells_y = subcells_z =
-    // _SUBBLOCKSIZE_
-    if (subcells_x != _SUBBLOCKSIZE_ && subcells_y != _SUBBLOCKSIZE_ && subcells_z !=_SUBBLOCKSIZE_)
-    {
-        bVP = false;
-        if (isroot) printf("WARNING: VP dumps disabled due to dimension mismatch!\n");
-    }
-
-    subblocks.mesh(mygrid, subcells_x, subcells_y, subcells_z);
-}
-
 void Sim_SICCloudMPI::_allocGPU()
 {
     if (isroot) printf("Allocating GPUlabMPISICCloud...\n");
@@ -65,43 +42,40 @@ void Sim_SICCloudMPI::_allocGPU()
 
 void Sim_SICCloudMPI::_vp(const std::string basename)
 {
-    if (bVP)
-    {
-        if (isroot) cout << "dumping MPI VP ...\n" ;
+    if (isroot) cout << "dumping MPI VP ...\n" ;
 
-        const string path = parser("-fpath").asString(".");
+    const string path = parser("-fpath").asString(".");
 
-        stringstream streamer;
-        streamer<<path;
-        streamer<<"/";
-        streamer<<basename;
-        streamer.setf(ios::dec | ios::right);
-        streamer.width(5);
-        streamer.fill('0');
-        streamer<<step;
+    stringstream streamer;
+    streamer<<path;
+    streamer<<"/";
+    streamer<<basename;
+    streamer.setf(ios::dec | ios::right);
+    streamer.width(5);
+    streamer.fill('0');
+    streamer<<step;
 
-        mywaveletdumper.verbose();
-        mywaveletdumper.set_threshold(5e-3);
-        mywaveletdumper.Write<4>(subblocks, streamer.str());
-        mywaveletdumper.set_threshold(1e-3);
-        mywaveletdumper.Write<5>(subblocks, streamer.str());
-        //mywaveletdumper.Write<6>(subblocks, streamer.str());
+    mywaveletdumper.verbose();
+    mywaveletdumper.set_threshold(5e-3);
+    mywaveletdumper.Write<4>(subblocks, streamer.str());
+    mywaveletdumper.set_threshold(1e-3);
+    mywaveletdumper.Write<5>(subblocks, streamer.str());
+    //mywaveletdumper.Write<6>(subblocks, streamer.str());
 
-        //used for debug
+    //used for debug
 #if 0
+    {
+        //mywaveletdumper.force_close();
+        if (isroot)
         {
-            //mywaveletdumper.force_close();
-            if (isroot)
-            {
-                printf("\n\nREADING BEGINS===================\n");
-                //just checking
-                mywaveletdumper.Read(streamer.str());
-                printf("\n\nREADING ENDS===================\n");
-            }
+            printf("\n\nREADING BEGINS===================\n");
+            //just checking
+            mywaveletdumper.Read(streamer.str());
+            printf("\n\nREADING ENDS===================\n");
         }
-#endif
-        if (isroot) cout << "done" << endl;
     }
+#endif
+    if (isroot) cout << "done" << endl;
 }
 
 void Sim_SICCloudMPI::_dump(const string basename)
@@ -213,6 +187,8 @@ void Sim_SICCloudMPI::_set_constants()
     SICCloudData::pc1 = parser("-pc1").asDouble(3.43e8/p_scale);
     SICCloudData::pc2 = parser("-pc2").asDouble(0.0);
     // set in global material dictionary
+    MaterialDictionary::rho1 = SICCloudData::rho0;
+    MaterialDictionary::rho2 = SICCloudData::rhoB;
     MaterialDictionary::gamma1 = SICCloudData::g1;
     MaterialDictionary::gamma2 = SICCloudData::g2;
     MaterialDictionary::pc1 = SICCloudData::pc1;
@@ -247,6 +223,24 @@ void Sim_SICCloudMPI::_set_constants()
     SICCloudData::post_shock_conservative[4] = p1*G1 + pc*gamma*G1 + static_cast<Real>(0.5)*SICCloudData::rho1*SICCloudData::u1*SICCloudData::u1; // v = w = 0 !
     SICCloudData::post_shock_conservative[5] = G1;
     SICCloudData::post_shock_conservative[6] = pc*gamma*G1;
+
+
+    // we use artifical subblocks that are smaller than the original block
+    parser.set_strict_mode();
+    const int subcells_x = parser("-subcellsX").asInt();
+    parser.unset_strict_mode();
+    const int subcells_y = parser("-subcellsY").asInt(subcells_x);
+    const int subcells_z = parser("-subcellsZ").asInt(subcells_x);
+
+    // wavelet dumps only work if subcells_x = subcells_y = subcells_z =
+    // _SUBBLOCKSIZE_
+    if (subcells_x != _SUBBLOCKSIZE_ && subcells_y != _SUBBLOCKSIZE_ && subcells_z !=_SUBBLOCKSIZE_)
+    {
+        bVP = false;
+        if (isroot) printf("WARNING: VP dumps disabled due to dimension mismatch!\n");
+    }
+
+    subblocks.make_submesh(mygrid, subcells_x, subcells_y, subcells_z);
 }
 
 void Sim_SICCloudMPI::_ic()
@@ -504,7 +498,7 @@ void Sim_SICCloudMPI::_ic_quad(const Seed<shape> * const seed)
 #pragma omp parallel for
         for (int i=0; i < (int)subblocks.size(); ++i)
         {
-            MenialBlock& myblock = *(subblocks[i]);
+            MenialBlock& myblock = subblocks[i];
 
             for (int iz=0; iz < MenialBlock::sizeZ; ++iz)
                 for (int iy=0; iy < MenialBlock::sizeY; ++iy)
@@ -528,7 +522,7 @@ void Sim_SICCloudMPI::_ic_quad(const Seed<shape> * const seed)
 #pragma omp parallel for
         for (int i=0; i < (int)subblocks.size(); ++i)
         {
-            MenialBlock& myblock = *(subblocks[i]);
+            MenialBlock& myblock = subblocks[i];
 
             double block_origin[3];
             myblock.get_origin(block_origin);
@@ -569,6 +563,9 @@ void Sim_SICCloudMPI::run()
 {
     _setup();
 
+    // disable VP dumps by default
+    if (!parser("-VP").asBool(false)) bVP = false;
+
     parser.set_strict_mode();
     const uint_t analysisperiod = parser("-analysisperiod").asInt();
     parser.unset_strict_mode();
@@ -589,8 +586,9 @@ void Sim_SICCloudMPI::run()
         while (t < tend)
         {
             profiler.push_start("EVOLVE");
-            dt_max = (tend-t) < (tnextdump-t) ? (tend-t) : (tnextdump-t);
-            dt = (*stepper)(dt_max);
+            dt_max = tend-t;
+            if (bIO) dt_max = dt_max < (tnextdump-t) ? dt_max : (tnextdump-t);
+            dt = (*stepper)(dt_max); // step ahead
             profiler.pop_stop();
 
             t += dt;
@@ -598,13 +596,22 @@ void Sim_SICCloudMPI::run()
 
             if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", step, t, dt);
 
-            if ((float)t == (float)tnextdump)
+            if (bIO && (float)t == (float)tnextdump)
             {
-                profiler.push_start("DUMP");
                 tnextdump += dumpinterval;
-                _dump();
-                _vp();
-                profiler.pop_stop();
+                if (bHDF)
+                {
+                    profiler.push_start("HDF DUMP");
+                    _dump();
+                    profiler.pop_stop();
+                }
+
+                if (bVP)
+                {
+                    profiler.push_start("VP");
+                    _vp();
+                    profiler.pop_stop();
+                }
             }
 
             if (step % saveperiod == 0)
@@ -617,7 +624,6 @@ void Sim_SICCloudMPI::run()
 
             if (step % analysisperiod == 0)
             {
-                if (isroot) printf("Been here = %d\n", been_here);
                 profiler.push_start("ANALYSIS");
                 if (isroot) printf("Running analysis...\n");
                 _dump_statistics(step, t, dt); // TODO: make this work with MPI
