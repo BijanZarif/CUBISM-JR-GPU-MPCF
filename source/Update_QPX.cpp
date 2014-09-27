@@ -1,7 +1,7 @@
 /* File        : Update_QPX.cpp */
 /* Creator     : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Sat 13 Sep 2014 09:52:43 AM CEST */
-/* Modified    : Sat 27 Sep 2014 10:04:54 AM CEST */
+/* Modified    : Sat 27 Sep 2014 12:38:08 PM CEST */
 /* Description : Copyright © 2014 ETH Zurich. All Rights Reserved. */
 
 #include "Update_QPX.h"
@@ -24,7 +24,7 @@ void Update_QPX::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
     {
         Real* const U      = &src[c][offset];
         Real* const rhs    = &tmp[c][offset];
-        Real* const divF_U = divF[c];// TODO: check that divF is 16-byte aligned
+        Real* const divF_U = divF[c];
 
         // TODO: N%4 == 0 ?
 #pragma omp parallel for
