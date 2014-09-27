@@ -14,8 +14,10 @@ using std::max;
 using std::min;
 using std::abs;
 
-
-uint_t been_here = 0;
+// TODO: remove this
+#include <cstdio>
+static FILE *correctionFile;
+static uint_t been_here = 0;
 
 
 void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N)
@@ -24,52 +26,71 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
      * 1.) tmp <- a * tmp - dtinvh * divF
      * 2.) src <- b * tmp + src
      * */
-    Real * const r = &src[0][offset]; Real * const u = &src[1][offset]; Real * const v = &src[2][offset];
-    Real * const w = &src[3][offset]; Real * const e = &src[4][offset]; Real * const G = &src[5][offset];
-    Real * const P = &src[6][offset];
 
-    Real * const rhs_r = &tmp[0][offset]; Real * const rhs_u = &tmp[1][offset]; Real * const rhs_v = &tmp[2][offset];
-    Real * const rhs_w = &tmp[3][offset]; Real * const rhs_e = &tmp[4][offset]; Real * const rhs_G = &tmp[5][offset];
-    Real * const rhs_P = &tmp[6][offset];
+    /* Real * const r = &src[0][offset]; Real * const u = &src[1][offset]; Real * const v = &src[2][offset]; */
+    /* Real * const w = &src[3][offset]; Real * const e = &src[4][offset]; Real * const G = &src[5][offset]; */
+    /* Real * const P = &src[6][offset]; */
 
-    Real * const divFr = divF[0]; Real * const divFu = divF[1]; Real * const divFv = divF[2];
-    Real * const divFw = divF[3]; Real * const divFe = divF[4]; Real * const divFG = divF[5];
-    Real * const divFP = divF[6];
+    /* Real * const rhs_r = &tmp[0][offset]; Real * const rhs_u = &tmp[1][offset]; Real * const rhs_v = &tmp[2][offset]; */
+    /* Real * const rhs_w = &tmp[3][offset]; Real * const rhs_e = &tmp[4][offset]; Real * const rhs_G = &tmp[5][offset]; */
+    /* Real * const rhs_P = &tmp[6][offset]; */
+
+    /* Real * const divFr = divF[0]; Real * const divFu = divF[1]; Real * const divFv = divF[2]; */
+    /* Real * const divFw = divF[3]; Real * const divFe = divF[4]; Real * const divFG = divF[5]; */
+    /* Real * const divFP = divF[6]; */
+
+    correctionFile = fopen("corrections.dat", "a");
+
+    for (int c=0; c < (int)src.size(); ++c)
+    {
+        Real* const U      = &src[c][offset];
+        Real* const rhs    = &tmp[c][offset];
+        Real* const divF_U = divF[c];
 
 #pragma omp parallel for
-    for (uint_t i = 0; i < N; ++i)
-    {
-        // 1.)
-        const Real fr = -m_dtinvh*divFr[i];
-        const Real fu = -m_dtinvh*divFu[i];
-        const Real fv = -m_dtinvh*divFv[i];
-        const Real fw = -m_dtinvh*divFw[i];
-        const Real fe = -m_dtinvh*divFe[i];
-        const Real fG = -m_dtinvh*divFG[i];
-        const Real fP = -m_dtinvh*divFP[i];
+        for (uint_t i = 0; i < N; ++i)
+        {
+            // 1.)
+            Real U_new = rhs[i];
+            const Real U_old = U[i];
+            const Real rhs_new = -m_dtinvh * divF_U[i];
 
-        Real r_new = rhs_r[i];
-        Real u_new = rhs_u[i];
-        Real v_new = rhs_v[i];
-        Real w_new = rhs_w[i];
-        Real e_new = rhs_e[i];
-        Real G_new = rhs_G[i];
-        Real P_new = rhs_P[i];
-        r_new = m_a * r_new + fr;
-        u_new = m_a * u_new + fu;
-        v_new = m_a * v_new + fv;
-        w_new = m_a * w_new + fw;
-        e_new = m_a * e_new + fe;
-        G_new = m_a * G_new + fG;
-        P_new = m_a * P_new + fP;
+            U_new = m_a * U_new + rhs_new;
 
-        rhs_r[i] = r_new;
-        rhs_u[i] = u_new;
-        rhs_v[i] = v_new;
-        rhs_w[i] = w_new;
-        rhs_e[i] = e_new;
-        rhs_G[i] = G_new;
-        rhs_P[i] = P_new;
+            rhs[i] = U_new;
+
+        U[i] += m_b * U_new;
+
+            const Real fr = -m_dtinvh*divFr[i];
+            const Real fu = -m_dtinvh*divFu[i];
+            const Real fv = -m_dtinvh*divFv[i];
+            const Real fw = -m_dtinvh*divFw[i];
+            const Real fe = -m_dtinvh*divFe[i];
+            const Real fG = -m_dtinvh*divFG[i];
+            const Real fP = -m_dtinvh*divFP[i];
+
+            Real r_new = rhs_r[i];
+            Real u_new = rhs_u[i];
+            Real v_new = rhs_v[i];
+            Real w_new = rhs_w[i];
+            Real e_new = rhs_e[i];
+            Real G_new = rhs_G[i];
+            Real P_new = rhs_P[i];
+            r_new = m_a * r_new + fr;
+            u_new = m_a * u_new + fu;
+            v_new = m_a * v_new + fv;
+            w_new = m_a * w_new + fw;
+            e_new = m_a * e_new + fe;
+            G_new = m_a * G_new + fG;
+            P_new = m_a * P_new + fP;
+
+            rhs_r[i] = r_new;
+            rhs_u[i] = u_new;
+            rhs_v[i] = v_new;
+            rhs_w[i] = w_new;
+            rhs_e[i] = e_new;
+            rhs_G[i] = G_new;
+            rhs_P[i] = P_new;
 
         // 2.)
 #ifndef _STATE_
@@ -90,7 +111,7 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         P_new = m_b * P_new + P[i];
 
         // update state based on cubism Update_State kernel
-        r[i] = max(r_new, static_cast<Real>(1.0));    // change rho
+        r[i] = max(r_new, static_cast<Real>(m_min_r));// change rho
         G[i] = max(G_new, static_cast<Real>(m_min_G));// change G
         P[i] = max(P_new, static_cast<Real>(m_min_P));// change P
         u[i] = u_new;
@@ -108,14 +129,30 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         /*     P[i] += difference; // change P again */
         /* } */
 
-        if (P[i] < static_cast<Real>(-2.5)*G[i]*pressure) // if it was still bad with new P and new G
+        /* if (P[i] < static_cast<Real>(-2.5)*G[i]*pressure) // if it was still bad with new P and new G */
+        if (P[i]/(static_cast<Real>(1.0) + G[i]) < static_cast<Real>(-2.0)*pressure) // if it was still bad with new P and new G
         {
+#pragma omp atomic
             ++been_here;
+#pragma omp critical
+            fprintf(correctionFile, "%d\t%e\t%e\t", been_here, G[i]*pressure, P[i]);
+
             /* const Real difference = static_cast<Real>(-8.0)*G[i]*pressure - P[i]; */
 
             // factor of 2 increase? from 256 nodes to 512, does it scale?
-            const Real difference = static_cast<Real>(-16.0)*G[i]*pressure - P[i];
+            // difference is purely based on EOS
+            /* const Real difference = static_cast<Real>(-1.2)*G[i]*pressure - P[i]; */
+
+
+            // Babak's difference
+            const Real difference = static_cast<Real>(-4.0) * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
+
+
             P[i] += difference; // change P again
+
+
+#pragma omp critical
+            fprintf(correctionFile, "%e\n", P[i]);
         }
 
 
@@ -138,4 +175,11 @@ void Update_CPP::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         e[i] = pressure * G[i] + P[i] + ke; // update e
 #endif
     }
+
+    fclose(correctionFile);
+
+}
+
+void Update_CPP::state(real_vector_t& src)
+{
 }
