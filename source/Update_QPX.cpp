@@ -1,7 +1,7 @@
 /* File        : Update_QPX.cpp */
 /* Creator     : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Sat 13 Sep 2014 09:52:43 AM CEST */
-/* Modified    : Sat 27 Sep 2014 12:38:08 PM CEST */
+/* Modified    : Sun 28 Sep 2014 02:52:15 PM CEST */
 /* Description : Copyright © 2014 ETH Zurich. All Rights Reserved. */
 
 #include "Update_QPX.h"
@@ -54,9 +54,8 @@ void Update_QPX::state(real_vector_t& src, const uint_t offset, const uint_t N)
     Real* const G = &src[5][offset];
     Real* const P = &src[6][offset];
 
-    const vector4double min_r = vec_splats(m_min_r);
-    const vector4double min_G = vec_splats(m_min_G);
-    const vector4double min_P = vec_splats(m_min_P);
+    const Real alpha = -2.0;
+    const Real beta  = -4.0;
 
 #pragma omp parallel for
     for (uint_t i = 0; i < N; i += 4)
@@ -69,9 +68,9 @@ void Update_QPX::state(real_vector_t& src, const uint_t offset, const uint_t N)
         vector4double G_old = vec_lda(0L, G+i);
         vector4double P_old = vec_lda(0L, P+i);
 
-        vector4double r_new = vec_max(r_old, min_r);
-        vector4double G_new = vec_max(G_old, min_G);
-        vector4double P_new = vec_max(P_old, min_P);
+        vector4double r_new = vec_max(r_old, vec_splats(m_min_r));
+        vector4double G_new = vec_max(G_old, vec_splats(m_min_G));
+        vector4double P_new = vec_max(P_old, vec_splats(m_min_P));
 
         const vector4double ke = vec_mul(vec_splats((Real)0.5),
                 vec_mul(vec_add(vec_mul(u_old,u_old), vec_add(vec_mul(v_old,v_old), vec_mul(v_old,v_old))),
@@ -79,9 +78,9 @@ void Update_QPX::state(real_vector_t& src, const uint_t offset, const uint_t N)
 
         const vector4double pressure = vec_mul(vec_sub(vec_sub(e_old,P_old),ke), myreciprocal<preclevel>(G_old));
 
-        const vector4double flag = vec_cmpgt(vec_mul(vec_splats((Real)-2.0),pressure), vec_mul(P_new, myreciprocal<preclevel>(vec_add(vec_splats((Real)1.0),G_new))));
+        const vector4double flag = vec_cmpgt(vec_mul(vec_splats(alpha),pressure), vec_mul(P_new, myreciprocal<preclevel>(vec_add(vec_splats((Real)1.0),G_new))));
 
-        const vector4double difference = vec_msub(vec_mul(vec_splats((Real)-4.0), pressure), vec_add(vec_splats((Real)1.0),G_new), P_new);
+        const vector4double difference = vec_msub(vec_mul(vec_splats(beta), pressure), vec_add(vec_splats((Real)1.0),G_new), P_new);
 
         P_new = vec_add(P_new, vec_sel(vec_splats((Real)0.0), difference, flag));
 

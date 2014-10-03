@@ -27,20 +27,36 @@ class LSRK3_IntegratorMPI
     template <typename Kupdate>
     double _RKstepGPU(const Real dtinvh)
     {
+        // Williamson
+        /* const Real A1 = 0.0; */
+        /* const Real A2 = -17./32; */
+        /* const Real A3 = -32./27; */
+        /* const Real B1 = 1./4; */
+        /* const Real B2 = 8./9; */
+        /* const Real B3 = 3./4; */
+
+        // Gottlieb & Shu
+        const Real A1 = 0.0;
+        const Real A2 = -2.915492524638791;
+        const Real A3 = -0.000000093517376;
+        const Real B1 = 0.924574000000000;
+        const Real B2 = 0.287713063186749;
+        const Real B3 = 0.626538109512740;
+
         double trk1, trk2, trk3;
         {// stage 1
             GPU->load_ghosts();
-            trk1 = GPU->template process_all<Kupdate>(0, 1./4, dtinvh);
+            trk1 = GPU->template process_all<Kupdate>(A1, B1, dtinvh);
             if (isroot && verbosity) printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
             GPU->load_ghosts();
-            trk2 = GPU->template process_all<Kupdate>(-17./32, 8./9, dtinvh);
+            trk2 = GPU->template process_all<Kupdate>(A2, B2, dtinvh);
             if (isroot && verbosity) printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
             GPU->load_ghosts();
-            trk3 = GPU->template process_all<Kupdate>(-32./27, 3./4, dtinvh);
+            trk3 = GPU->template process_all<Kupdate>(A3, B3, dtinvh);
             if (isroot && verbosity) printf("RK stage 3 takes %f sec\n", trk3);
         }
         return trk1 + trk2 + trk3;

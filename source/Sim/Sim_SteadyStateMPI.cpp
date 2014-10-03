@@ -60,7 +60,7 @@ void Sim_SteadyStateMPI::_setup()
     assert(mygrid != NULL);
 
     // smooth length
-    SimTools::EPSILON = static_cast<Real>(parser("-mollfactor").asInt(1)) * std::sqrt(3.) * mygrid->getH();
+    SimTools::EPSILON = static_cast<Real>(parser("-mollfactor").asDouble(1)) * std::sqrt(3.) * mygrid->getH();
 
     // allocate GPU
     if (!dryrun)
