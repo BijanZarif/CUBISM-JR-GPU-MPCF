@@ -1,7 +1,7 @@
 /* File        : SubGridWrapper.cpp */
 /* Creator     : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Wed 24 Sep 2014 02:12:49 PM CEST */
-/* Modified    : Thu 25 Sep 2014 03:38:15 PM CEST */
+/* Modified    : Tue 07 Oct 2014 12:10:21 PM CEST */
 /* Description : */
 #include "SubGridWrapper.h"
 #include <cstdio>
@@ -9,15 +9,15 @@
 
 GridMPI* SubGridWrapper::SubBlock::supergrid = 0;
 
-uint_t SubGridWrapper::SubBlock::sizeX = 0;
-uint_t SubGridWrapper::SubBlock::sizeY = 0;
-uint_t SubGridWrapper::SubBlock::sizeZ = 0;
+int SubGridWrapper::SubBlock::sizeX = 0;
+int SubGridWrapper::SubBlock::sizeY = 0;
+int SubGridWrapper::SubBlock::sizeZ = 0;
 double SubGridWrapper::SubBlock::extent_x = 0.0;
 double SubGridWrapper::SubBlock::extent_y = 0.0;
 double SubGridWrapper::SubBlock::extent_z = 0.0;
 double SubGridWrapper::SubBlock::h = 0.0;
 
-void SubGridWrapper::make_submesh(GridMPI *grid, const uint_t ncX, const uint_t ncY, const uint_t ncZ)
+void SubGridWrapper::make_submesh(GridMPI *grid, const int ncX, const int ncY, const int ncZ)
 {
     if (_BLOCKSIZEX_ % ncX != 0)
     {
@@ -48,27 +48,48 @@ void SubGridWrapper::make_submesh(GridMPI *grid, const uint_t ncX, const uint_t 
     SubGridWrapper::SubBlock::extent_y = ncY * h_;
     SubGridWrapper::SubBlock::extent_z = ncZ * h_;
     SubGridWrapper::SubBlock::h = h_;
+    SubGridWrapper::SubBlock::assign_supergrid(grid);
 
-    blocks.reserve(nblocks[0] * nblocks[1] * nblocks[2]);
+    const int N = nblocks[0] * nblocks[1] * nblocks[2];
+    blocks.clear();
+    blocks.reserve(N);
+    blocks.resize(N); // destroys NUMA touch! just sayin'
 
     double O[3];
     grid->get_origin(O);
-    for (int biz=0; biz < nblocks[2]; ++biz)
-        for (int biy=0; biy < nblocks[1]; ++biy)
-            for (int bix=0; bix < nblocks[0]; ++bix)
-            {
-                const double thisOrigin[3] = {
-                    O[0] + bix * SubGridWrapper::SubBlock::extent_x,
-                    O[1] + biy * SubGridWrapper::SubBlock::extent_y,
-                    O[2] + biz * SubGridWrapper::SubBlock::extent_z };
+#pragma omp parallel for
+    for (int i=0; i < N; ++i)
+    {
+        const int bix = i % nblocks[0];
+        const int biy = (i/nblocks[0]) % nblocks[1];
+        const int biz = (i/(nblocks[0]*nblocks[1])) % nblocks[2];
 
-                const uint_t thisIndex[3] = {bix, biy, biz};
+        const double thisOrigin[3] = {
+            O[0] + bix * SubGridWrapper::SubBlock::extent_x,
+            O[1] + biy * SubGridWrapper::SubBlock::extent_y,
+            O[2] + biz * SubGridWrapper::SubBlock::extent_z };
 
-                SubBlock thisBlock(thisOrigin, thisIndex);
-                blocks.push_back(thisBlock);
-            }
+        const int thisIndex[3] = {bix, biy, biz};
 
-    SubGridWrapper::SubBlock::assign_supergrid(grid);
+        SubBlock thisBlock(thisOrigin, thisIndex);
+        blocks[i] = thisBlock;
+    }
+
+
+    /* for (int biz=0; biz < nblocks[2]; ++biz) */
+    /*     for (int biy=0; biy < nblocks[1]; ++biy) */
+    /*         for (int bix=0; bix < nblocks[0]; ++bix) */
+    /*         { */
+    /*             const double thisOrigin[3] = { */
+    /*                 O[0] + bix * SubGridWrapper::SubBlock::extent_x, */
+    /*                 O[1] + biy * SubGridWrapper::SubBlock::extent_y, */
+    /*                 O[2] + biz * SubGridWrapper::SubBlock::extent_z }; */
+
+    /*             const int thisIndex[3] = {bix, biy, biz}; */
+
+    /*             SubBlock thisBlock(thisOrigin, thisIndex); */
+    /*             blocks.push_back(thisBlock); */
+    /*         } */
 }
 
 SubGridWrapper::~SubGridWrapper()

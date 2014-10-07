@@ -1,7 +1,7 @@
 /* File        : SubGridWrapper.h */
 /* Creator     : Fabian Wermelinger <fabianw@student.ethz.ch> */
 /* Created     : Wed 24 Sep 2014 01:51:15 PM CEST */
-/* Modified    : Thu 25 Sep 2014 03:44:40 PM CEST */
+/* Modified    : Tue 07 Oct 2014 11:47:04 AM CEST */
 /* Description : Emulates smaller sub-blocks, based on GridMPI. */
 #pragma once
 
@@ -17,15 +17,15 @@ class SubGridWrapper
 public:
     class SubBlock
     {
-        const double origin[3];
-        const uint_t block_index[3];
+        double origin[3];
+        int block_index[3];
 
         static GridMPI* supergrid;
 
     public:
-        static uint_t sizeX;
-        static uint_t sizeY;
-        static uint_t sizeZ;
+        static int sizeX;
+        static int sizeY;
+        static int sizeZ;
         static double extent_x;
         static double extent_y;
         static double extent_z;
@@ -33,16 +33,24 @@ public:
 
         static void assign_supergrid(GridMPI* const G) { supergrid = G; }
 
-        SubBlock(const double O[3], const uint_t idx[3]) : origin{O[0], O[1], O[2]}, block_index{idx[0], idx[1], idx[2]} { }
+        SubBlock() {}
+        SubBlock(const double O[3], const int idx[3])
+        {
+            for (int i=0; i < 3; ++i)
+            {
+                origin[i] = O[i];
+                block_index[i] = idx[i];
+            }
+        }
 
-        inline void get_pos(const unsigned int ix, const unsigned int iy, const unsigned int iz, Real pos[3]) const
+        inline void get_pos(const int lix, const int liy, const int liz, Real pos[3]) const
         {
             // local position, relative to origin, cell center
-            pos[0] = origin[0] + h * (ix+0.5);
-            pos[1] = origin[1] + h * (iy+0.5);
-            pos[2] = origin[2] + h * (iz+0.5);
+            pos[0] = origin[0] + h * (lix+0.5);
+            pos[1] = origin[1] + h * (liy+0.5);
+            pos[2] = origin[2] + h * (liz+0.5);
         }
-        inline void get_index(const unsigned int lix, const unsigned int liy, const unsigned int liz, uint_t gidx[3]) const
+        inline void get_index(const int lix, const int liy, const int liz, uint_t gidx[3]) const
         {
             // returns global grid cell index for a process
             gidx[0] = block_index[0] * sizeX + lix;
@@ -55,10 +63,11 @@ public:
             O[1] = origin[1];
             O[2] = origin[2];
         }
-        inline uint_t get_block_index(const uint_t i) const { assert(i<3); return block_index[i]; }
+        inline int get_block_index(const uint_t i) const { assert(i<3); return block_index[i]; }
 
         void set(const int lix, const int liy, const int liz, const FluidElement& IC)
         {
+            // compute global index from  local index ix
             const int ix = block_index[0] * sizeX + lix;
             const int iy = block_index[1] * sizeY + liy;
             const int iz = block_index[2] * sizeZ + liz;
@@ -74,6 +83,7 @@ public:
 
         FluidElement operator()(const int lix, const int liy, const int liz) const
         {
+            // compute global index from local index lix
             const int ix = block_index[0] * sizeX + lix;
             const int iy = block_index[1] * sizeY + liy;
             const int iz = block_index[2] * sizeZ + liz;
@@ -94,7 +104,7 @@ public:
 
 
 private:
-    uint_t nblocks[3];
+    int nblocks[3];
     std::vector<SubBlock> blocks;
 
     GridMPI* G;
@@ -103,10 +113,10 @@ public:
     SubGridWrapper() { }
     virtual ~SubGridWrapper();
 
-    void make_submesh(GridMPI *grid, const uint_t ncX, const uint_t ncY, const uint_t ncZ);
+    void make_submesh(GridMPI *grid, const int ncX, const int ncY, const int ncZ);
 
     inline SubBlock& operator[](const int block_id) { return blocks[block_id]; }
-    inline SubBlock operator[](const int block_id) const { return blocks[block_id]; }
+    inline const SubBlock& operator[](const int block_id) const { return blocks[block_id]; }
     inline size_t size() const { return blocks.size(); }
 
     // adapts CUBISM interface
