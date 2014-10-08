@@ -109,6 +109,9 @@ protected:
             assert(err == Z_OK);
 
             zbytes = myzstream.total_out;
+
+            err = deflateEnd(&myzstream);
+            assert(err == Z_OK);
         }
 
         //2-3.
