@@ -218,6 +218,7 @@ void Sim_SICCloudMPI::_set_constants()
     SICCloudData::rho1 = rho0*(tmp1*tmp2 + 1.0)/(tmp1 + tmp2);
     SICCloudData::p1   = p1;
 
+    /* TODO: (Sat 11 Oct 2014 01:16:42 PM CEST) Generalize this at some point */
     // REALITY CHECK: this only works for normal shock in x-direction
     SICCloudData::post_shock_conservative[0] = SICCloudData::rho1;
     SICCloudData::post_shock_conservative[1] = SICCloudData::rho1*SICCloudData::u1;
