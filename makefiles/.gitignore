@@ -2,3 +2,5 @@
 *.xmf
 mpcf-cluster-gpu
 *.o
+*.dat
+*.gp

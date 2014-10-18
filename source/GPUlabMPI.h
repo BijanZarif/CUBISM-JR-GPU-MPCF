@@ -10,6 +10,8 @@
 #include "GridMPI.h"
 #include "Types.h"
 #include "Profiler.h"
+#include "Timer.h"
+#include "Convection_CUDA.h"
 
 #include <mpi.h>
 #include <omp.h>
@@ -47,6 +49,7 @@ class GPUlabMPI
         enum {QUIET=0, VERBOSE} chatty;
 
         const bool isroot;
+        const bool update_state;
 
         // GPU BUFFER SIZES
         const uint_t GPU_input_size;
@@ -262,7 +265,127 @@ class GPUlabMPI
 
         // execution helper
         void _process_chunk_sos(const real_vector_t& src);
-        void _process_chunk_flow(const Real a, const Real b, const Real dtinvh, real_vector_t& src, real_vector_t& tmp);
+
+        template <typename Kupdate>
+        void _process_chunk_flow(const Real a, const Real b, const Real dtinvh, real_vector_t& src, real_vector_t& tmp)
+        {
+            /* *
+             * Process chunk for the RHS computation:
+             * 1.)  Launch GPU kernels to compute div(F)
+             * 2.)  Update previous chunk using GPU output
+             * 3.)  ============== Initialize next chunk ===================
+             * 4.)  Copy data into pinned buffer for the new chunk
+             * 5.)  Issue download of GPU computation for previous chunk
+             * 6.)  Upload data for new chunk
+             * */
+
+            Timer timer;
+
+            ///////////////////////////////////////////////////////////////////////////
+            // 1.)
+            ///////////////////////////////////////////////////////////////////////////
+            Convection_CUDA convection;
+
+            if (chatty) printf("\t[LAUNCH CONVECTION KERNEL CHUNK %d]\n", curr_chunk_id);
+            convection.compute(curr_slices, 0, curr_buffer->buf_id, curr_chunk_id);
+            /* convection.compute(curr_slices, 0, curr_buffer->buf_id, 0); // use stream 0 */
+
+            ///////////////////////////////////////////////////////////////////////////
+            // 2.)
+            ///////////////////////////////////////////////////////////////////////////
+            switch (chunk_state)
+            {
+                case INTERMEDIATE:
+                case LAST:
+                    Kupdate update(a, b, dtinvh);
+                    GPU::wait_d2h(prev_chunk_id);
+                    /* GPU::wait_d2h(0); // stream 0 */
+                    update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
+                    if (update_state) update.state(src, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
+                    break;
+            }
+            if (chatty) _end_info_current_chunk();
+
+            ///////////////////////////////////////////////////////////////////////////
+            // 3.)
+            ///////////////////////////////////////////////////////////////////////////
+            _init_next_chunk();
+            if (chatty)
+            {
+                char title[256];
+                sprintf(title, "RHS PROCESSING CHUNK %d\n", curr_chunk_id);
+                _start_info_current_chunk(title);
+            }
+
+            ///////////////////////////////////////////////////////////////////////////
+            // 4.)
+            ///////////////////////////////////////////////////////////////////////////
+            const uint_t OFFSET = SLICE_GPU * curr_iz;
+
+            timer.start();
+            switch (chunk_state)
+            {
+                case INTERMEDIATE:
+                    {
+                        // left zghosts (reuse previous buffer)
+                        const uint_t prevOFFSET = SLICE_GPU * prev_slices;
+                        _copy_range(curr_buffer->GPUin, 0, prev_buffer->GPUin, prevOFFSET, haloz.Nhalo);
+
+                        // interior + right zghosts
+                        _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, OFFSET, SLICE_GPU * curr_slices + haloz.Nhalo);
+                        break;
+                    }
+
+                case LAST:
+                    {
+                        // left zghosts (reuse previous buffer)
+                        const uint_t prevOFFSET = SLICE_GPU * prev_slices;
+                        _copy_range(curr_buffer->GPUin, 0, prev_buffer->GPUin, prevOFFSET, haloz.Nhalo);
+
+                        // interior
+                        _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, OFFSET, SLICE_GPU * curr_slices);
+
+                        // right zghosts
+                        const uint_t current_rightOFFSET = haloz.Nhalo + SLICE_GPU * curr_slices;
+                        _copy_range(curr_buffer->GPUin, current_rightOFFSET, haloz.right, 0, haloz.Nhalo);
+                        break;
+                    }
+            }
+            const double t3 = timer.stop();
+            if (chatty)
+                printf("\t[COPY SRC CHUNK %d TAKES %f sec]\n", curr_chunk_id, t3);
+
+            ///////////////////////////////////////////////////////////////////////////
+            // 5.)
+            ///////////////////////////////////////////////////////////////////////////
+            GPU::d2h_divF(prev_buffer->GPUout, GPU_output_size, prev_buffer->buf_id, prev_chunk_id);
+            /* GPU::d2h_divF(prev_buffer->GPUout, GPU_output_size, prev_buffer->buf_id, 0); // stream 0 */
+
+            ///////////////////////////////////////////////////////////////////////////
+            // 6.)
+            ///////////////////////////////////////////////////////////////////////////
+            switch (chunk_state)
+            {
+                case INTERMEDIATE:
+                case LAST:
+                    assert(curr_buffer->Nxghost == 3 * sizeY * curr_slices);
+                    assert(curr_buffer->Nyghost == 3 * sizeX * curr_slices);
+                    /* _copy_xyghosts(); */
+                    _CONV_copy_xyghosts();
+                    GPU::h2d_input(
+                            curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r,
+                            curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r,
+                            curr_buffer->GPUin, nslices+6,
+                            curr_buffer->buf_id, curr_chunk_id);
+                    /* GPU::h2d_input( */
+                    /*         curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r, */
+                    /*         curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r, */
+                    /*         curr_buffer->GPUin, nslices+6, */
+                    /*         curr_buffer->buf_id, 0); // stream 0 */
+
+                    break;
+            }
+        }
 
         // info
         void _print_array(const Real * const in, const uint_t size);
@@ -298,16 +421,102 @@ class GPUlabMPI
 
     public:
 
-        GPUlabMPI(GridMPI& G, const uint_t nslices, const int verbosity=0, const bool isroot_=true);
+        GPUlabMPI(GridMPI& G, const uint_t nslices, const int verbosity=0, const bool isroot_=true, const bool state_=false);
         virtual ~GPUlabMPI() { _free_GPU(); }
 
         ///////////////////////////////////////////////////////////////////////
         // PUBLIC ACCESSORS
         ///////////////////////////////////////////////////////////////////////
         void load_ghosts(const double t = 0);
-        /* inline void dump_chunk(const int complete = 0) { _dump_chunk(complete); } */
         double max_sos(float& sos);
-        double process_all(const Real a, const Real b, const Real dtinvh);
+
+        template <typename Kupdate>
+        double process_all(const Real a, const Real b, const Real dtinvh)
+        {
+            /* *
+             * 1.) Extract x/yghosts for current chunk and upload to GPU
+             * 2.) Copy ghosts and interior data into buffer for FIRST/SINGLE chunk
+             * 3.) Upload GPU input for FIRST/SINGLE chunk (3DArrays)
+             * 4.) Process all chunks
+             * 5.) Copy back of GPU updated solution for LAST/SINGLE chunk
+             * */
+
+            real_vector_t& src = grid.pdata();
+            real_vector_t& tmp = grid.ptmp();
+
+            Timer tall;
+            tall.start();
+
+            if (chatty)
+            {
+                char title[256];
+                sprintf(title, "RHS PROCESSING CHUNK %d\n", curr_chunk_id);
+                _start_info_current_chunk(title);
+            }
+
+            ///////////////////////////////////////////////////////////////
+            // 1.)
+            ///////////////////////////////////////////////////////////////
+            assert(curr_buffer->Nxghost == 3 * sizeY * curr_slices);
+            assert(curr_buffer->Nyghost == 3 * sizeX * curr_slices);
+            /* _copy_xyghosts(); */
+            _CONV_copy_xyghosts();
+
+            ///////////////////////////////////////////////////////////////
+            // 2.)
+            ///////////////////////////////////////////////////////////////
+            Timer timer;
+            uint_t Nelements = SLICE_GPU * curr_slices;
+
+            // copy left ghosts always
+            _copy_range(curr_buffer->GPUin, 0, haloz.left, 0, haloz.Nhalo);
+            switch (chunk_state) // right ghosts are conditional
+            {
+                case FIRST: Nelements += haloz.Nhalo; break;
+                case SINGLE:
+                            _copy_range(curr_buffer->GPUin, haloz.Nhalo + Nelements, haloz.right, 0, haloz.Nhalo);
+                            break;
+            }
+
+            // interior data
+            timer.start();
+            _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, 0, Nelements);
+            const double t1 = timer.stop();
+            if (chatty) printf("\t[COPY SRC CHUNK %d TAKES %f sec]\n", curr_chunk_id, t1);
+
+            ///////////////////////////////////////////////////////////////
+            // 3.)
+            ///////////////////////////////////////////////////////////////
+            GPU::h2d_input(
+                    curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r,
+                    curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r,
+                    curr_buffer->GPUin, nslices+6,
+                    curr_buffer->buf_id, curr_chunk_id);
+            /* GPU::h2d_input( */
+            /*         curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r, */
+            /*         curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r, */
+            /*         curr_buffer->GPUin, nslices+6, */
+            /*         curr_buffer->buf_id, 0); // stream 0 */
+
+            ///////////////////////////////////////////////////////////////
+            // 4.)
+            ///////////////////////////////////////////////////////////////
+            for (int i = 0; i < nchunks; ++i)
+                _process_chunk_flow<Kupdate>(a, b, dtinvh, src, tmp);
+
+            ///////////////////////////////////////////////////////////////
+            // 5.)
+            ///////////////////////////////////////////////////////////////
+            Kupdate update(a, b, dtinvh);
+            GPU::wait_d2h(prev_chunk_id);
+            /* GPU::wait_d2h(0); // stream 0 */
+            update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
+            if (update_state) update.state(src, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
+
+            if (chatty) _end_info_current_chunk();
+
+            return tall.stop();
+        }
 
         // info
         inline uint_t number_of_chunks() const { return nchunks; }

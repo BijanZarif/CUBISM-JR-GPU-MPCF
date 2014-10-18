@@ -7,6 +7,9 @@
 #pragma once
 
 #include "Sim_SteadyStateMPI.h"
+#include "SubGridWrapper.h"
+#include "SerializerIO_WaveletCompression_MPI_Simple.h"
+
 #include <fstream>
 #include <vector>
 #include <string>
@@ -355,22 +358,29 @@ public:
 
 class Sim_SICCloudMPI : public Sim_SteadyStateMPI
 {
-    void _set_constants();
     void _initialize_cloud();
     void _set_cloud(Seed<shape> **myseed);
     void _set_sensors();
     void _ic_quad(const Seed<shape> * const myseed);
 
+    SubGridWrapper subblocks;
+
+    bool bVP;
+
 protected:
     virtual void _allocGPU();
+    virtual void _set_constants();
     virtual void _ic();
+    virtual void _vp(const std::string basename = "datawavelet");
     virtual void _dump(const std::string basename = "data");
     virtual void _dump_statistics(const int step_id, const Real t, const Real dt);
     virtual void _dump_sensors(const int step_id, const Real t, const Real dt);
     virtual bool _restart();
 
+    SerializerIO_WaveletCompression_MPI_SimpleBlocking<SubGridWrapper, StreamerGridPointIterative> mywaveletdumper;
+
 public:
-    Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot);
+    Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot) : Sim_SteadyStateMPI(argc, argv, isroot), bVP(true) { }
 
     virtual void run();
 };
@@ -382,6 +392,7 @@ class GPUlabMPISICCloud : public GPUlabMPI
         void _apply_bc(const double t = 0)
         {
             BoundaryConditions<GridMPI> bc(grid.pdata());
+
             if (myFeature[0] == SKIN) bc.template applyBC_dirichlet<0,0,ghostmap::X>(halox.left, SICCloudData::post_shock_conservative);
             /* if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0,ghostmap::X>(halox.left); */
             if (myFeature[1] == SKIN) bc.template applyBC_absorbing<0,1,ghostmap::X>(halox.right);
@@ -392,5 +403,5 @@ class GPUlabMPISICCloud : public GPUlabMPI
         }
 
     public:
-        GPUlabMPISICCloud(GridMPI& grid, const uint_t nslices, const int verb, const bool isroot_) : GPUlabMPI(grid, nslices, verb, isroot_) { }
+        GPUlabMPISICCloud(GridMPI& grid, const uint_t nslices, const int verb, const bool isroot_, const bool state_) : GPUlabMPI(grid, nslices, verb, isroot_, state_) { }
 };
