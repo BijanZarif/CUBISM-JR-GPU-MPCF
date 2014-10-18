@@ -187,9 +187,9 @@ void Sim_SICCloudMPI::_set_constants()
     SICCloudData::pressureRatio = parser("-pressureratio").asDouble(400);
 
     SICCloudData::g1  = parser("-g1").asDouble(6.12);
-    SICCloudData::g2  = parser("-g2").asDouble(1.4);
     SICCloudData::pc1 = parser("-pc1").asDouble(3.43e8/p_scale);
-    SICCloudData::pc2 = parser("-pc2").asDouble(0.0);
+    SICCloudData::g2  = parser("-g2").asDouble(1.4);
+    SICCloudData::pc2 = parser("-pc2").asDouble(0.0/p_scale);
     // set in global material dictionary
     MaterialDictionary::rho1 = SICCloudData::rho0;
     MaterialDictionary::rho2 = SICCloudData::rhoB;
@@ -575,6 +575,9 @@ void Sim_SICCloudMPI::run()
     const uint_t analysisperiod = parser("-analysisperiod").asInt();
     parser.unset_strict_mode();
 
+    // log dumps
+    FILE* fp = fopen("dump.log", "a");
+
     if (dryrun)
     {
         if (isroot) printf("Dry Run...\n");
@@ -603,6 +606,7 @@ void Sim_SICCloudMPI::run()
 
             if (bIO && (float)t == (float)tnextdump)
             {
+                fprintf(fp, "step=%d\ttime=%e\n", step, t);
                 tnextdump += dumpinterval;
                 if (bHDF)
                 {
@@ -644,6 +648,7 @@ void Sim_SICCloudMPI::run()
         if (isroot) profiler.printSummary();
 
         _dump();
+        fclose(fp);
 
         return;
     }
