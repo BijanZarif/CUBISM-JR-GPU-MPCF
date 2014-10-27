@@ -46,17 +46,17 @@ class LSRK3_IntegratorMPI
         double trk1, trk2, trk3;
         {// stage 1
             GPU->load_ghosts();
-            trk1 = GPU->template process_all<Kupdate>(A1, B1, dtinvh);
+            /* trk1 = GPU->template process_all<Kupdate>(A1, B1, dtinvh); */
             if (isroot && verbosity) printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
             GPU->load_ghosts();
-            trk2 = GPU->template process_all<Kupdate>(A2, B2, dtinvh);
+            /* trk2 = GPU->template process_all<Kupdate>(A2, B2, dtinvh); */
             if (isroot && verbosity) printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
             GPU->load_ghosts();
-            trk3 = GPU->template process_all<Kupdate>(A3, B3, dtinvh);
+            /* trk3 = GPU->template process_all<Kupdate>(A3, B3, dtinvh); */
             if (isroot && verbosity) printf("RK stage 3 takes %f sec\n", trk3);
         }
         return trk1 + trk2 + trk3;

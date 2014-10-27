@@ -265,13 +265,13 @@ void Sim_SteadyStateMPI::run()
                 _save();
             }
 
-            if (step % 10 == 0)
+            if (isroot && step % 10 == 0)
                 profiler.printSummary();
 
             if ((step-step_start) == nsteps) break;
         }
 
-        profiler.printSummary();
+        if (isroot) profiler.printSummary();
 
         if (bIO) _dump();
 

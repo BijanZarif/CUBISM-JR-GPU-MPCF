@@ -448,22 +448,33 @@ void GPUlabMPI::load_ghosts(const double t)
 {
     // TODO: THIS NEEDS THOROUGH TESTING!
 
+    // send dirt
+#if defined(_MPI_PROFILE_)
+    profiler->push_start("MPI SEND");
+#endif
     if (myFeature[0] == FLESH) _copysend_halos<flesh2ghost::X_L>(0, &halox.send_left[0], halox.Nhalo, 0, 3, 0, sizeY, 0, sizeZ);
     if (myFeature[1] == FLESH) _copysend_halos<flesh2ghost::X_R>(1, &halox.send_right[0],halox.Nhalo, sizeX-3, sizeX, 0, sizeY, 0, sizeZ);
     if (myFeature[2] == FLESH) _copysend_halos<flesh2ghost::Y_L>(2, &haloy.send_left[0], haloy.Nhalo, 0, sizeX, 0, 3, 0, sizeZ);
     if (myFeature[3] == FLESH) _copysend_halos<flesh2ghost::Y_R>(3, &haloy.send_right[0],haloy.Nhalo, 0, sizeX, sizeY-3, sizeY, 0, sizeZ);
     if (myFeature[4] == FLESH) _copysend_halos(4, &haloz.send_left[0], haloz.Nhalo, 0);
     if (myFeature[5] == FLESH) _copysend_halos(5, &haloz.send_right[0],haloz.Nhalo, sizeZ-3);
+#if defined(_MPI_PROFILE_)
+    profiler->pop_stop();
+#endif
 
-    // TODO: use MPI_Irecv ? even better: hide MPI
-    // latency with communicating per chunk on the host.  With this you can
-    // hide MPI comm with GPU
+    // get dirt
+#if defined(_MPI_PROFILE_)
+    profiler->push_start("MPI RECV");
+#endif
     if (myFeature[0] == FLESH) _issue_recv(&halox.recv_left[0],  halox.Allhalos, 0); //TODO:  x/yhalos directly into pinned mem and H2D
     if (myFeature[1] == FLESH) _issue_recv(&halox.recv_right[0], halox.Allhalos, 1);
     if (myFeature[2] == FLESH) _issue_recv(&haloy.recv_left[0],  haloy.Allhalos, 2);
     if (myFeature[3] == FLESH) _issue_recv(&haloy.recv_right[0], haloy.Allhalos, 3);
     if (myFeature[4] == FLESH) _issue_recv(&haloz.recv_left[0],  haloz.Allhalos, 4); // TODO: receive directly into curr_buffer->zghost_l ?
     if (myFeature[5] == FLESH) _issue_recv(&haloz.recv_right[0], haloz.Allhalos, 5);
+#if defined(_MPI_PROFILE_)
+    profiler->pop_stop();
+#endif
 
     _apply_bc(t); // BC's apply to all myFeature == SKIN
 }
