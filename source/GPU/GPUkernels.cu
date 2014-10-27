@@ -244,7 +244,8 @@ inline void _char_vel_einfeldt(const Real rm, const Real rp,
      * averaged Gamma instead of Einfeldts constant Gamma = 1. Verify/Test
      * this!!!!! Also, Coralic mentions, that in practice one might just want
      * to use arithmetic averages due to less computational effort. */
-    const Real eta_2 = 0.5f*Rr*Rinv*Rinv / ((Gm + Rr*Gp)*Rinv);
+    const Real eta_2 = 0.5f*Rr*Rinv*Rinv / fminf(Gm, Gp);
+    /* const Real eta_2 = 0.5f*Rr*Rinv*Rinv; */
     const Real d2    = (cm2 + Rr*cp2)*Rinv + eta_2*(up - um)*(up - um);
     const Real d     = sqrtf(d2);
     const Real u     = (um + Rr*up)*Rinv;
