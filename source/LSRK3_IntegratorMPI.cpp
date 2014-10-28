@@ -20,6 +20,7 @@
 #include <mpi.h>
 
 
+// tiny helper
 template <typename KSOS>
 static double _maxSOS(const GridMPI * const grid, float& sos)
 {
@@ -29,6 +30,16 @@ static double _maxSOS(const GridMPI * const grid, float& sos)
     sos = kernel.compute(grid->pdata());
     return tsos.stop();
 }
+
+// LSRK3 data init
+double LSRK3_DataMPI::time     = 0.0;
+size_t LSRK3_DataMPI::step     = 0;
+
+Histogram LSRK3_DataMPI::histogram;
+size_t LSRK3_DataMPI::ReportFreq = 0;
+double LSRK3_DataMPI::t_RHS    = 0.0;
+double LSRK3_DataMPI::t_UPDATE = 0.0;
+double LSRK3_DataMPI::t_COMM   = 0.0;
 
 
 double LSRK3_IntegratorMPI::operator()(const double dt_max)
@@ -69,6 +80,10 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
     }
 
     if (isroot) printf("netto step takes %f sec\n", tsos + trk3);
+
+    // update state
+    LSRK3_DataMPI::time += dt;
+    LSRK3_DataMPI::step++;
 
     return dt;
 }

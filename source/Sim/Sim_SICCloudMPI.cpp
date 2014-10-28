@@ -37,6 +37,7 @@ namespace SICCloudData
 void Sim_SICCloudMPI::_allocGPU()
 {
     if (isroot) printf("Allocating GPUlabMPISICCloud...\n");
+
     // if we want to do a state update, allocate a capable lab
     bool state = false;
     if (parser("-state").asBool(false)) state = true;
@@ -51,13 +52,13 @@ void Sim_SICCloudMPI::_vp(const std::string basename)
     const string path = parser("-fpath").asString(".");
 
     stringstream streamer;
-    streamer<<path;
-    streamer<<"/";
-    streamer<<basename;
+    streamer << path;
+    streamer << "/";
+    streamer << basename;
     streamer.setf(ios::dec | ios::right);
     streamer.width(5);
     streamer.fill('0');
-    streamer<<step;
+    streamer << LSRK3_DataMPI::step;
 
     mywaveletdumper.verbose();
     mywaveletdumper.set_threshold(5e-3);
@@ -86,19 +87,19 @@ void Sim_SICCloudMPI::_dump(const string basename)
 {
     const string dump_path = parser("-fpath").asString(".");
 
-    if (isroot) printf("Dumping data%04d at step %d, time %f\n", fcount, step, t);
+    if (isroot) printf("Dumping data%04d at step %d, time %f\n", fcount, LSRK3_DataMPI::step, LSRK3_DataMPI::time);
     sprintf(fname, "%s_%04d-p", basename.c_str(), fcount);
-    DumpHDF5_MPI<GridMPI, myPressureStreamer>(*mygrid, step, fname, dump_path);
+    DumpHDF5_MPI<GridMPI, myPressureStreamer>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
     sprintf(fname, "%s_%04d-G", basename.c_str(), fcount);
-    DumpHDF5_MPI<GridMPI, myGammaStreamer>(*mygrid, step, fname, dump_path);
+    DumpHDF5_MPI<GridMPI, myGammaStreamer>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
     /* sprintf(fname, "%s_%04d-P", basename.c_str(), fcount); */
-    /* DumpHDF5_MPI<GridMPI, myPiStreamer>(*mygrid, step, fname, dump_path); */
+    /* DumpHDF5_MPI<GridMPI, myPiStreamer>(*mygrid, LSRK3_DataMPI::step, fname, dump_path); */
     /* sprintf(fname, "%s_%04d-rho", basename.c_str(), fcount); */
-    /* DumpHDF5_MPI<GridMPI, myRhoStreamer>(*mygrid, step, fname, dump_path); */
+    /* DumpHDF5_MPI<GridMPI, myRhoStreamer>(*mygrid, LSRK3_DataMPI::step, fname, dump_path); */
     /* sprintf(fname, "%s_%04d-velocity", basename.c_str(), fcount); */
-    /* DumpHDF5_MPI<GridMPI, myVelocityStreamer>(*mygrid, step, fname, dump_path); */
+    /* DumpHDF5_MPI<GridMPI, myVelocityStreamer>(*mygrid, LSRK3_DataMPI::step, fname, dump_path); */
     /* sprintf(fname, "%s_%04d-energy", basename.c_str(), fcount); */
-    /* DumpHDF5_MPI<GridMPI, myEnergyStreamer>(*mygrid, step, fname, dump_path); */
+    /* DumpHDF5_MPI<GridMPI, myEnergyStreamer>(*mygrid, LSRK3_DataMPI::step, fname, dump_path); */
     ++fcount;
 }
 
@@ -228,7 +229,6 @@ void Sim_SICCloudMPI::_set_constants()
     SICCloudData::post_shock_conservative[4] = p1*G1 + pc*gamma*G1 + static_cast<Real>(0.5)*SICCloudData::rho1*SICCloudData::u1*SICCloudData::u1; // v = w = 0 !
     SICCloudData::post_shock_conservative[5] = G1;
     SICCloudData::post_shock_conservative[6] = pc*gamma*G1;
-
 
     // we use artifical subblocks that are smaller than the original block
     parser.set_strict_mode();
@@ -569,7 +569,7 @@ void Sim_SICCloudMPI::run()
     _setup();
 
     // disable VP dumps by default
-    if (!parser("-VP").asBool(false)) bVP = false;
+    bVP = parser("-VP").asBool(false);
 
     parser.set_strict_mode();
     const uint_t analysisperiod = parser("-analysisperiod").asInt();
@@ -587,26 +587,28 @@ void Sim_SICCloudMPI::run()
     {
         double dt, dt_max;
 
-        const uint_t step_start = step; // such that -nsteps is a relative measure (only relevant for restarts)
+        const uint_t step_start = LSRK3_DataMPI::step; // such that -nsteps is a relative measure (only relevant for restarts)
 
-        /* _dump_statistics(step, t, 0.0); */
+        /* _dump_statistics(LSRK3_DataMPI::step, LSRK3_DataMPI::time, 0.0); */
 
-        while (t < tend)
+        while (LSRK3_DataMPI::time < tend)
         {
+            const double dt_final = tend - LSRK3_DataMPI::time;
+            const double dt_dump  = tnextdump - LSRK3_DataMPI::time;
+
+            // here is where the stuff happens
             profiler.push_start("EVOLVE");
-            dt_max = tend-t;
-            if (bIO) dt_max = dt_max < (tnextdump-t) ? dt_max : (tnextdump-t);
+            dt_max = dt_final;
+            if (bIO) dt_max = dt_max < dt_dump ? dt_max : dt_dump;
             dt = (*stepper)(dt_max); // step ahead
             profiler.pop_stop();
 
-            t += dt;
-            ++step;
+            // post processings
+            if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
 
-            if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", step, t, dt);
-
-            if (bIO && (float)t == (float)tnextdump)
+            if (bIO && (float)LSRK3_DataMPI::time == (float)tnextdump)
             {
-                fprintf(fp, "step=%d\ttime=%e\n", step, t);
+                fprintf(fp, "step=%d\ttime=%e\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
                 tnextdump += dumpinterval;
                 if (bHDF)
                 {
@@ -623,7 +625,7 @@ void Sim_SICCloudMPI::run()
                 }
             }
 
-            if (step % saveperiod == 0)
+            if (LSRK3_DataMPI::step % saveperiod == 0)
             {
                 profiler.push_start("SAVE");
                 if (isroot) printf("Saving time step...\n");
@@ -631,18 +633,18 @@ void Sim_SICCloudMPI::run()
                 profiler.pop_stop();
             }
 
-            if (step % analysisperiod == 0)
+            if (LSRK3_DataMPI::step % analysisperiod == 0)
             {
                 profiler.push_start("ANALYSIS");
                 if (isroot) printf("Running analysis...\n");
-                _dump_statistics(step, t, dt); // TODO: make this work with MPI
+                _dump_statistics(LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt); // TODO: make this work with MPI
                 profiler.pop_stop();
             }
 
-            if (isroot && step % 10 == 0)
+            if (isroot && LSRK3_DataMPI::step % 10 == 0)
                 profiler.printSummary();
 
-            if ((step-step_start) == nsteps) break;
+            if ((LSRK3_DataMPI::step - step_start) == nsteps) break;
         }
 
         if (isroot) profiler.printSummary();

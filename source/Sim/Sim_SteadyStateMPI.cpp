@@ -19,7 +19,7 @@ using namespace std;
 
 
 Sim_SteadyStateMPI::Sim_SteadyStateMPI(const int argc, const char ** argv, const int isroot_)
-    : isroot(isroot_), t(0.0), step(0), fcount(0), mygrid(NULL), myGPU(NULL), parser(argc, argv), profiler(GPUlabMPI::get_profiler())
+    : isroot(isroot_), fcount(0), mygrid(NULL), myGPU(NULL), parser(argc, argv), profiler(GPUlabMPI::get_profiler())
 { }
 
 
@@ -79,7 +79,7 @@ void Sim_SteadyStateMPI::_setup()
     {
         if(_restart())
         {
-            if (isroot) printf("Restarting at step %d, physical time %f\n", step, t);
+            if (isroot) printf("Restarting at step %d, physical time %f\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
             --fcount; // last dump before restart condition incremented fcount.
             // Decrement by one and dump restart IC, which increments fcount
             // again to start with the correct count.
@@ -163,8 +163,8 @@ void Sim_SteadyStateMPI::_dump(const string basename)
     const string dump_path = parser("-fpath").asString(".");
 
     sprintf(fname, "%s_%04d", basename.c_str(), fcount);
-    if (isroot) printf("Dumping file %s at step %d, time %f\n", fname, step, t);
-    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(*mygrid, step, fname, dump_path);
+    if (isroot) printf("Dumping file %s at step %d, time %f\n", fname, LSRK3_DataMPI::step, LSRK3_DataMPI::time);
+    DumpHDF5_MPI<GridMPI, myTensorialStreamer>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
     ++fcount;
 }
 
@@ -176,20 +176,20 @@ void Sim_SteadyStateMPI::_save()
     if (isroot)
     {
         ofstream saveinfo("save.info");
-        saveinfo << setprecision(16) << scientific << t << endl;
-        saveinfo << step << endl;
+        saveinfo << setprecision(16) << scientific << LSRK3_DataMPI::time << endl;
+        saveinfo << LSRK3_DataMPI::step << endl;
         saveinfo << fcount << endl;
         saveinfo << setprecision(16) << scientific << (tnextdump - dumpinterval) << endl; // last dump time
         saveinfo.close();
     }
-    /* DumpHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, step, "save.data", dump_path); */
+    /* DumpHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, LSRK3_DataMPI::step, "save.data", dump_path); */
 
     // save in 4 parts to allow data sets exceeding 2GB for a single process
     // http://www.hdfgroup.org/hdf5-quest.html#p2gb
-    DumpHDF5_MPI<GridMPI, mySaveStreamer_part1>(*mygrid, step, "save.data.part1", dump_path);
-    DumpHDF5_MPI<GridMPI, mySaveStreamer_part2>(*mygrid, step, "save.data.part2", dump_path);
-    DumpHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, step, "save.data.part3", dump_path);
-    DumpHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, step, "save.data.part4", dump_path);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part1>(*mygrid, LSRK3_DataMPI::step, "save.data.part1", dump_path);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part2>(*mygrid, LSRK3_DataMPI::step, "save.data.part2", dump_path);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, LSRK3_DataMPI::step, "save.data.part3", dump_path);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, LSRK3_DataMPI::step, "save.data.part4", dump_path);
 }
 
 
@@ -200,8 +200,8 @@ bool Sim_SteadyStateMPI::_restart()
     ifstream saveinfo("save.info");
     if (saveinfo.good())
     {
-        saveinfo >> t;
-        saveinfo >> step;
+        saveinfo >> LSRK3_DataMPI::time;
+        saveinfo >> LSRK3_DataMPI::step;
         saveinfo >> fcount;
         double last_dumptime;
         saveinfo >> last_dumptime;
@@ -214,8 +214,8 @@ bool Sim_SteadyStateMPI::_restart()
         ReadHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, "save.data.part3", dump_path);
         ReadHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, "save.data.part4", dump_path);
 
-        // since t >= last_dumptime and dumpinterval might be anything new:
-        while (t > tnextdump)
+        // make sure tnextdump > time
+        while (LSRK3_DataMPI::time > tnextdump)
             tnextdump += dumpinterval;
         return true;
     }
@@ -237,38 +237,40 @@ void Sim_SteadyStateMPI::run()
     {
         double dt, dt_max;
 
-        const uint_t step_start = step; // such that -nsteps is a relative measure
-        while (t < tend)
+        const uint_t step_start = LSRK3_DataMPI::step; // such that -nsteps is a relative measure
+        while (LSRK3_DataMPI::time < tend)
         {
+            const double dt_final = tend - LSRK3_DataMPI::time;
+            const double dt_dump  = tnextdump - LSRK3_DataMPI::time;
+
+            // here is where the stuff happens
             profiler.push_start("EVOLVE");
-            dt_max = (tend-t) < (tnextdump-t) ? (tend-t) : (tnextdump-t);
-            dt = (*stepper)(dt_max);
+            dt_max = dt_final < dt_dump ? dt_final : dt_dump;
+            dt = (*stepper)(dt_max); // step ahead
             profiler.pop_stop();
 
-            t += dt;
-            ++step;
+            // post processings
+            if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
 
-            if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", step, t, dt);
-
-            if (bIO && (float)t == (float)tnextdump)
+            if (bIO && (float)LSRK3_DataMPI::time == (float)tnextdump)
             {
                 profiler.push_start("DUMP");
                 tnextdump += dumpinterval;
                 _dump();
                 profiler.pop_stop();
             }
-            /* if (bIO && step % 10 == 0) _dump(); */
+            /* if (bIO && LSRK3_DataMPI::step % 10 == 0) _dump(); */
 
-            if (step % saveperiod == 0)
+            if (LSRK3_DataMPI::step % saveperiod == 0)
             {
                 if (isroot) printf("Saving time step...\n");
                 _save();
             }
 
-            if (isroot && step % 10 == 0)
+            if (isroot && LSRK3_DataMPI::step % 10 == 0)
                 profiler.printSummary();
 
-            if ((step-step_start) == nsteps) break;
+            if ((LSRK3_DataMPI::step - step_start) == nsteps) break;
         }
 
         if (isroot) profiler.printSummary();

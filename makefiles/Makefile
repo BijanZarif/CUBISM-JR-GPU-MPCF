@@ -95,7 +95,7 @@ VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU ../s
 .DEFAULT_GOAL := mpcf-cluster-gpu
 
 # core
-OBJECTS = main.o Types.o NodeBlock.o SubGridWrapper.o GPUlabMPI.o LSRK3_IntegratorMPI.o
+OBJECTS = main.o Types.o NodeBlock.o SubGridWrapper.o GPUlabMPI.o LSRK3_IntegratorMPI.o Histogram.o
 # wavelets
 OBJECTS += WaveletCompressor.o
 # CPP kernel drivers
