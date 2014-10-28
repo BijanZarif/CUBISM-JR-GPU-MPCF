@@ -1360,7 +1360,7 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     GPU::profiler.pop_stopCUDA();
 
     // TODO: is there a faster solution than this??
-    // copy to tex buffers
+    // copy to tex buffers.  The 3D array eats up A LOT of time
     for (uint_t i = 0; i < VSIZE; ++i)
     {
         cudaMemcpy3DParms copyParams = {0};

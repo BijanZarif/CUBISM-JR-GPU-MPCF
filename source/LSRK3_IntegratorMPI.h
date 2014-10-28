@@ -122,6 +122,7 @@ class LSRK3_IntegratorMPI
 
         double trk1, trk2, trk3;
         vector< pair<double,double> > t_ghosts(3);
+        vector< pair<double,double> > t_rhs_up(3);
         {// stage 1
             t_ghosts[0] = GPU->load_ghosts();
             /* trk1 = GPU->template process_all<Kupdate>(A1, B1, dtinvh); */
