@@ -12,6 +12,8 @@
 #include "ArgumentParser.h"
 #include "Histogram.h"
 #include <string>
+#include <vector>
+#include <utility>
 
 class LSRK3_DataMPI
 {
@@ -28,13 +30,14 @@ public:
     static double t_UPDATE; // Update (CPU)
     static double t_COMM;   // MPI communication
 
-    static void notify(double avg_time_rhs, double avg_time_update, double avg_time_comm, const size_t NTIMES)
+    static void notify(double avg_time_rhs, double avg_time_update, double avg_time_comm, double avg_time_BC, const size_t NTIMES)
     {
         if(step % ReportFreq == 0 && step > 0) histogram.consolidate();
 
         histogram.notify("RHS",    (float)avg_time_rhs);
         histogram.notify("UPDATE", (float)avg_time_update);
         histogram.notify("COMM",   (float)avg_time_comm);
+        histogram.notify("BC",     (float)avg_time_BC);
 
 
         /* if(LSRK3data::step_id % LSRK3data::ReportFreq == 0 && LSRK3data::step_id > 0) */
@@ -118,21 +121,28 @@ class LSRK3_IntegratorMPI
         const Real B3 = 0.626538109512740;
 
         double trk1, trk2, trk3;
+        vector< pair<double,double> > t_ghosts(3);
         {// stage 1
-            GPU->load_ghosts();
+            t_ghosts[0] = GPU->load_ghosts();
             /* trk1 = GPU->template process_all<Kupdate>(A1, B1, dtinvh); */
             if (isroot && verbosity) printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
-            GPU->load_ghosts();
+            t_ghosts[1] = GPU->load_ghosts();
             /* trk2 = GPU->template process_all<Kupdate>(A2, B2, dtinvh); */
             if (isroot && verbosity) printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
-            GPU->load_ghosts();
+            t_ghosts[2] = GPU->load_ghosts();
             /* trk3 = GPU->template process_all<Kupdate>(A3, B3, dtinvh); */
             if (isroot && verbosity) printf("RK stage 3 takes %f sec\n", trk3);
         }
+
+        const double avg_MPI_comm = (t_ghosts[0].first + t_ghosts[1].first + t_ghosts[2].first) / 3.0;
+        const double avg_BC_eval  = (t_ghosts[0].second + t_ghosts[1].second + t_ghosts[2].second) / 3.0;
+
+        LSRK3_DataMPI::notify(0, 0, avg_MPI_comm, avg_BC_eval, 3);
+
         return trk1 + trk2 + trk3;
     }
 

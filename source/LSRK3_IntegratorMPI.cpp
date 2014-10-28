@@ -32,14 +32,14 @@ static double _maxSOS(const GridMPI * const grid, float& sos)
 }
 
 // LSRK3 data init
-double LSRK3_DataMPI::time     = 0.0;
-size_t LSRK3_DataMPI::step     = 0;
+double LSRK3_DataMPI::time = 0.0;
+size_t LSRK3_DataMPI::step = 0;
 
 Histogram LSRK3_DataMPI::histogram;
-size_t LSRK3_DataMPI::ReportFreq = 0;
-double LSRK3_DataMPI::t_RHS    = 0.0;
+size_t LSRK3_DataMPI::ReportFreq = 1;
+double LSRK3_DataMPI::t_RHS = 0.0;
 double LSRK3_DataMPI::t_UPDATE = 0.0;
-double LSRK3_DataMPI::t_COMM   = 0.0;
+double LSRK3_DataMPI::t_COMM = 0.0;
 
 
 double LSRK3_IntegratorMPI::operator()(const double dt_max)
@@ -67,6 +67,10 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
 
     /* MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, grid->getCartComm()); */
 
+    // update state
+    LSRK3_DataMPI::time += dt;
+    LSRK3_DataMPI::step++;
+
     // 2.) Compute RHS and update using LSRK3
     double trk3;
     if (UPkernel == "cpp") trk3 = _RKstepGPU<Update_CPP>(dt/h);
@@ -80,10 +84,6 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
     }
 
     if (isroot) printf("netto step takes %f sec\n", tsos + trk3);
-
-    // update state
-    LSRK3_DataMPI::time += dt;
-    LSRK3_DataMPI::step++;
 
     return dt;
 }

@@ -8,7 +8,7 @@
 #include "MaxSpeedOfSound_CUDA.h"
 
 #include <string>
-using std::string;
+using namespace std;
 
 #ifdef _USE_HDF_
 #include <hdf5.h>
@@ -444,9 +444,11 @@ void GPUlabMPI::_start_info_current_chunk(const std::string title)
 ///////////////////////////////////////////////////////////////////////////////
 // PUBLIC
 ///////////////////////////////////////////////////////////////////////////////
-void GPUlabMPI::load_ghosts(const double t)
+pair<double, double> GPUlabMPI::load_ghosts(const double t)
 {
-    // TODO: THIS NEEDS THOROUGH TESTING!
+    Timer timer;
+
+    timer.start();
 
     // send dirt
 #if defined(_MPI_PROFILE_)
@@ -476,7 +478,13 @@ void GPUlabMPI::load_ghosts(const double t)
     profiler->pop_stop();
 #endif
 
+    const double t_MPI_COMM = timer.stop();
+
+    timer.start();
     _apply_bc(t); // BC's apply to all myFeature == SKIN
+    const double t_BC = timer.stop();
+
+    return pair<double,double>(t_MPI_COMM, t_BC);
 }
 
 

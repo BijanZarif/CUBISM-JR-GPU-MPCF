@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vector>
+#include <utility>
 #include <string>
 
 #ifdef _USE_HDF_
@@ -427,7 +428,7 @@ class GPUlabMPI
         ///////////////////////////////////////////////////////////////////////
         // PUBLIC ACCESSORS
         ///////////////////////////////////////////////////////////////////////
-        void load_ghosts(const double t = 0);
+        std::pair<double,double> load_ghosts(const double t = 0);
         double max_sos(float& sos);
 
         template <typename Kupdate>
