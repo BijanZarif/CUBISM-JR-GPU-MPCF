@@ -32,13 +32,12 @@ public:
 
     static void notify(double avg_time_rhs, double avg_time_update, double avg_time_comm, double avg_time_BC, const size_t NTIMES)
     {
-        if(step % ReportFreq == 0 && step > 0) histogram.consolidate();
-
         histogram.notify("RHS",    (float)avg_time_rhs);
         histogram.notify("UPDATE", (float)avg_time_update);
         histogram.notify("COMM",   (float)avg_time_comm);
         histogram.notify("BC",     (float)avg_time_BC);
 
+        if(step % ReportFreq == 0 && step > 0) histogram.consolidate();
 
         /* if(LSRK3data::step_id % LSRK3data::ReportFreq == 0 && LSRK3data::step_id > 0) */
         /* { */
