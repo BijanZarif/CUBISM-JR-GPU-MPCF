@@ -580,7 +580,8 @@ void Sim_SICCloudMPI::run()
     parser.unset_strict_mode();
 
     // log dumps
-    FILE* fp = fopen("dump.log", "a");
+    FILE* fp;
+    if (bIO) fp = fopen("dump.log", "a");
 
     if (dryrun)
     {
@@ -653,8 +654,14 @@ void Sim_SICCloudMPI::run()
 
         if (isroot) profiler.printSummary();
 
-        _dump();
-        fclose(fp);
+        if (bIO)
+        {
+            // dump final data
+            fprintf(fp, "step=%d\ttime=%e\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
+            if (bHDF) _dump();
+            if (bVP)  _vp();
+            fclose(fp);
+        }
 
         return;
     }
