@@ -41,8 +41,8 @@ namespace GPU
     // Implementation: GPUhousehold.cu
     ///////////////////////////////////////////////////////////////////////////
     // alloc/dealloc
-    void alloc(void** h_maxSOS, const uint_t nslices, const bool isroot = true);
-    void dealloc(const bool isroot = true);
+    void alloc(void** h_maxSOS, const uint_t nslices, const uint_t nchunks, const bool isroot = true);
+    void dealloc(const uint_t nchunks, const bool isroot = true);
 
     // PCIe transfers
     void h2d_input(

@@ -33,6 +33,9 @@ cudaEvent_t *event_h2d;
 cudaEvent_t *event_d2h;
 cudaEvent_t *event_compute;
 
+// GPU pipe processing timers, for every chunk one pair
+cudaEvent_t *pipe_start;
+cudaEvent_t *pipe_stop;
 
 ///////////////////////////////////////////////////////////////////////////////
 // IMPLEMENTATION
@@ -54,7 +57,7 @@ static void _h2d_3DArray(cudaArray_t dst, const Real * const src, const int nsli
 ///////////////////////////////////////////////////////////////////////////
 // GPU Memory alloc / dealloc
 ///////////////////////////////////////////////////////////////////////////
-void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
+void GPU::alloc(void** sos, const uint_t nslices, const uint_t nchunks, const bool isroot)
 {
     /* cudaDeviceReset(); */
     /* cudaSetDeviceFlags(cudaDeviceMapHost); */
@@ -141,6 +144,15 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
         cudaEventCreate(&event_d2h[i]);
         cudaEventCreate(&event_compute[i]);
     }
+    pipe_start = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
+    pipe_stop  = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
+    assert(pipe_start != NULL);
+    assert(pipe_stop  != NULL);
+    for (int i=0; i < nchunks; ++i)
+    {
+        cudaEventCreate(&pipe_start[i]);
+        cudaEventCreate(&pipe_stop[i]);
+    }
 
     // Stats
     if (isroot)
@@ -161,7 +173,7 @@ void GPU::alloc(void** sos, const uint_t nslices, const bool isroot)
 }
 
 
-void GPU::dealloc(const bool isroot)
+void GPU::dealloc(const uint_t nchunks, const bool isroot)
 {
     for (int var = 0; var < VSIZE; ++var)
     {
@@ -211,6 +223,13 @@ void GPU::dealloc(const bool isroot)
     free(event_h2d);
     free(event_d2h);
     free(event_compute);
+    for (int i=0; i < nchunks; ++i)
+    {
+        cudaEventDestroy(pipe_start[i]);
+        cudaEventDestroy(pipe_stop[i]);
+    }
+    free(pipe_start);
+    free(pipe_stop);
 
     // Stats
     if (isroot)

@@ -516,6 +516,8 @@ class GPUlabMPI
 
             if (chatty) _end_info_current_chunk();
 
+            // get GPU:: sum of all chunks for convection
+
             return tall.stop();
         }
 
