@@ -556,7 +556,7 @@ void Sim_SICCloudMPI::run()
             profiler.pop_stop();
 
             // post processings
-            if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
+            if (isroot) printf("step id is %d, time %e (dt = %e)\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
 
             if (bIO && (float)LSRK3_DataMPI::time == (float)tnextdump)
             {
