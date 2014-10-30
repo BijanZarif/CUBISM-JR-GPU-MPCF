@@ -15,6 +15,8 @@
 #include "GPUlabMPI.h"
 #include "LSRK3_IntegratorMPI.h"
 #include "BoundaryConditions.h"
+#include "SubGridWrapper.h"
+#include "SerializerIO_WaveletCompression_MPI_Simple.h"
 
 
 class Sim_SteadyStateMPI : public Simulation
@@ -27,8 +29,14 @@ protected:
     double tend, tnextdump, dumpinterval, CFL, maxextent;
     uint_t nsteps, nslices, saveperiod, fcount;
     int verbosity;
-    bool restart, dryrun, bIO, bHDF;
+    bool restart, dryrun, bIO, bHDF, bVP;
     char fname[256];
+
+    // use artificial subgrid for refined IC setup and wavelet dumps
+    SubGridWrapper subblocks;
+
+    // wavelet dumper
+    SerializerIO_WaveletCompression_MPI_SimpleBlocking<SubGridWrapper, StreamerGridPointIterative> mywaveletdumper;
 
     // MPI cartesian grid extent
     uint_t npex, npey, npez;
@@ -48,10 +56,13 @@ protected:
     virtual void _ic();
 
     virtual void _dump(const std::string basename = "data");
+    virtual void _vp(const std::string basename = "datawavelet");
 
     virtual void _save();
     virtual bool _restart();
 
+    // release some stuff
+    virtual void _take_a_dump(const std::string basename = "data");
 
 public:
 

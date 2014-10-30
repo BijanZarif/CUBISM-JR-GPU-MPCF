@@ -7,8 +7,6 @@
 #pragma once
 
 #include "Sim_SteadyStateMPI.h"
-#include "SubGridWrapper.h"
-#include "SerializerIO_WaveletCompression_MPI_Simple.h"
 
 #include <fstream>
 #include <vector>
@@ -363,24 +361,19 @@ class Sim_SICCloudMPI : public Sim_SteadyStateMPI
     void _set_sensors();
     void _ic_quad(const Seed<shape> * const myseed);
 
-    SubGridWrapper subblocks;
-
-    bool bVP;
 
 protected:
     virtual void _allocGPU();
     virtual void _set_constants();
     virtual void _ic();
-    virtual void _vp(const std::string basename = "datawavelet");
     virtual void _dump(const std::string basename = "data");
     virtual void _dump_statistics(const int step_id, const Real t, const Real dt);
     virtual void _dump_sensors(const int step_id, const Real t, const Real dt);
     virtual bool _restart();
 
-    SerializerIO_WaveletCompression_MPI_SimpleBlocking<SubGridWrapper, StreamerGridPointIterative> mywaveletdumper;
 
 public:
-    Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot) : Sim_SteadyStateMPI(argc, argv, isroot), bVP(true) { }
+    Sim_SICCloudMPI(const int argc, const char ** argv, const int isroot) : Sim_SteadyStateMPI(argc, argv, isroot) { }
 
     virtual void run();
 };
