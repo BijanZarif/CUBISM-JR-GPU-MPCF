@@ -82,11 +82,11 @@ void Sim_SteadyStateMPI::_setup()
     {
         if(_restart())
         {
-            if (isroot) printf("Restarting at step %d, physical time %f\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
+            if (isroot) printf("Restarting at step %d, time %f\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
             --fcount; // last dump before restart condition incremented fcount.
             // Decrement by one and dump restart IC, which increments fcount
             // again to start with the correct count.
-            if (bIO) _dump("restart_ic");
+            if (bIO) _I_dump_on_you("restart_ic");
         }
         else
         {
@@ -97,7 +97,7 @@ void Sim_SteadyStateMPI::_setup()
     else
     {
         _ic();
-        if (bIO) _dump();
+        if (bIO) _I_dump_on_you();
     }
 }
 
@@ -171,6 +171,9 @@ void Sim_SteadyStateMPI::_dump(const string basename)
     ++fcount;
 }
 
+void Sim_SteadyStateMPI::_I_dump_on_you(const string basename)
+{
+}
 
 void Sim_SteadyStateMPI::_save()
 {
@@ -253,7 +256,7 @@ void Sim_SteadyStateMPI::run()
             profiler.pop_stop();
 
             // post processings
-            if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
+            if (isroot) printf("step id is %d, time %e (dt = %e)\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
 
             if (bIO && (float)LSRK3_DataMPI::time == (float)tnextdump)
             {
