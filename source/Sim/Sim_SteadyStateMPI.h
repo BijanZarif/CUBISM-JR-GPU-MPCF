@@ -52,9 +52,6 @@ protected:
     virtual void _save();
     virtual bool _restart();
 
-    // little helper guy
-    void _I_dump_on_you(const std::string basename = "data");
-
 
 public:
 

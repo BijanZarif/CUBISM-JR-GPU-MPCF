@@ -86,7 +86,7 @@ void Sim_SteadyStateMPI::_setup()
             --fcount; // last dump before restart condition incremented fcount.
             // Decrement by one and dump restart IC, which increments fcount
             // again to start with the correct count.
-            if (bIO) _I_dump_on_you("restart_ic");
+            if (bIO) _dump("restart_ic");
         }
         else
         {
@@ -97,7 +97,7 @@ void Sim_SteadyStateMPI::_setup()
     else
     {
         _ic();
-        if (bIO) _I_dump_on_you();
+        if (bIO) _dump();
     }
 }
 
@@ -171,9 +171,6 @@ void Sim_SteadyStateMPI::_dump(const string basename)
     ++fcount;
 }
 
-void Sim_SteadyStateMPI::_I_dump_on_you(const string basename)
-{
-}
 
 void Sim_SteadyStateMPI::_save()
 {
