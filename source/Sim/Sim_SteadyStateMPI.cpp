@@ -54,9 +54,12 @@ void Sim_SteadyStateMPI::_setup()
     npey = parser("-npey").asInt(1);
     npez = parser("-npez").asInt(1);
 
+    // maximum domain extent
+    maxextent = parser("-maxextent").asDouble(1.0);
+
     // assign dependent stuff
     tnextdump = dumpinterval;
-    mygrid    = new GridMPI(npex, npey, npez);
+    mygrid    = new GridMPI(npex, npey, npez, maxextent);
     assert(mygrid != NULL);
 
     // smooth length

@@ -24,7 +24,7 @@ protected:
     const bool isroot;
 
     // simulation parameter
-    double tend, tnextdump, dumpinterval, CFL;
+    double tend, tnextdump, dumpinterval, CFL, maxextent;
     uint_t nsteps, nslices, saveperiod, fcount;
     int verbosity;
     bool restart, dryrun, bIO, bHDF;
