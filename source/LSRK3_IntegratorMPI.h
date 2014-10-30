@@ -96,6 +96,7 @@ class LSRK3_IntegratorMPI
     int verbosity;
     std::string SOSkernel, UPkernel;
     const bool isroot;
+    bool bhist;
 
     const GridMPI* grid;
     GPUlabMPI* GPU;
@@ -141,7 +142,7 @@ class LSRK3_IntegratorMPI
         const double avg_MPI_comm = (t_ghosts[0].first + t_ghosts[1].first + t_ghosts[2].first) / 3.0;
         const double avg_BC_eval  = (t_ghosts[0].second + t_ghosts[1].second + t_ghosts[2].second) / 3.0;
 
-        LSRK3_DataMPI::notify(0, 0, avg_MPI_comm, avg_BC_eval, 3);
+        if (bhist) LSRK3_DataMPI::notify(0, 0, avg_MPI_comm, avg_BC_eval, 3);
 
         return trk1 + trk2 + trk3;
     }
@@ -154,6 +155,10 @@ public:
         verbosity = parser("-verb").asInt(0);
         SOSkernel = parser("-SOSkernel").asString("cuda");
         UPkernel  = parser("-UPkernel").asString("cpp");
+
+        // histogram stuff
+        bhist = parser("-hist").asBool(false);
+        LSRK3_DataMPI::ReportFreq = parser("-histfreq").asInt(100);
 
         LSRK3_DataMPI::time = 0.0;
         LSRK3_DataMPI::step = 0;

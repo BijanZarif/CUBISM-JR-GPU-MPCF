@@ -44,9 +44,6 @@ void Sim_SteadyStateMPI::_setup()
     bIO = parser("-IO").asBool(true);
     bHDF= parser("-HDF").asBool(true);
 
-    // Histogram report frequency
-    LSRK3_DataMPI::ReportFreq = parser("-hist").asInt(10);
-
     // parse optional aruments
     verbosity = parser("-verb").asInt(0);
     restart   = parser("-restart").asBool(false);

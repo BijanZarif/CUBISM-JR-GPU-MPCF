@@ -326,14 +326,16 @@ void Sim_SICCloudMPI::_initialize_cloud()
         abort();
     }
 
-    f_read >> SICCloudData::n_shapes >> SICCloudData::n_small;
-    f_read >> SICCloudData::min_rad >> SICCloudData::max_rad;
-    f_read >> SICCloudData::seed_s[0] >> SICCloudData::seed_s[1] >> SICCloudData::seed_s[2];
-    f_read >> SICCloudData::seed_e[0] >> SICCloudData::seed_e[1] >> SICCloudData::seed_e[2];
-    if (!f_read.eof())
-        f_read >> SICCloudData::n_sensors;
-    else
-        SICCloudData::n_sensors=0;
+    f_read >> SICCloudData::n_shapes;
+    // this shit is not needed at the moment
+    /* f_read >> SICCloudData::n_small; */
+    /* f_read >> SICCloudData::min_rad >> SICCloudData::max_rad; */
+    /* f_read >> SICCloudData::seed_s[0] >> SICCloudData::seed_s[1] >> SICCloudData::seed_s[2]; */
+    /* f_read >> SICCloudData::seed_e[0] >> SICCloudData::seed_e[1] >> SICCloudData::seed_e[2]; */
+    /* if (!f_read.eof()) */
+    /*     f_read >> SICCloudData::n_sensors; */
+    /* else */
+    /*     SICCloudData::n_sensors=0; */
 
     f_read.close();
 
@@ -348,6 +350,8 @@ void Sim_SICCloudMPI::_set_cloud(Seed<shape> **seed)
 {
     const MPI_Comm cart_world = mygrid->getCartComm();
 
+    /* TODO: (Thu 30 Oct 2014 11:04:35 AM CET) what is really necessary in
+     * cloud_config file? n_shapes yes  */
     if(isroot) _initialize_cloud(); // requires file cloud_config.dat
 
     MPI_Bcast(&SICCloudData::n_shapes,    1, MPI::INT,    0, cart_world);
