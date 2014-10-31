@@ -6,7 +6,8 @@
  * */
 #include "GPU.cuh"
 
-#include <stdio.h>
+#include <cstdio>
+#include <cstdlib>
 #include <algorithm>
 #include <cassert>
 
@@ -156,21 +157,24 @@ void GPU::alloc(void** sos, const uint_t nslices, const uint_t nchunks, const bo
     }
 
     // Stats
+    int dev;
+    cudaDeviceProp prop;
+    cudaGetDevice(&dev);
+    cudaGetDeviceProperties(&prop, dev);
+    const bool tooMuch = (trans_bytes + ghost_bytes + computational_bytes) > prop.totalGlobalMem;
     if (isroot)
     {
-        int dev;
-        cudaDeviceProp prop;
-        cudaGetDevice(&dev);
-        cudaGetDeviceProperties(&prop, dev);
-
         printf("=====================================================================\n");
-        printf("[GPU ALLOCATION FOR %s]\n",      prop.name);
-        printf("[%5.1f MB (GPU chunk data)]\n",  trans_bytes / 1024. / 1024);
-        printf("[%5.1f MB (GPU ghosts)]\n",      ghost_bytes / 1024. / 1024);
-        printf("[%5.1f MB (Compute storage)]\n", computational_bytes / 1024. / 1024);
+        printf("[GPU ALLOCATION FOR %s (GMEM = %6.1f MB)]\n", prop.name, prop.totalGlobalMem / 1024. / 1024.);
+        printf("[%6.1f MB (GPU chunk data)]\n",  trans_bytes / 1024. / 1024.);
+        printf("[%6.1f MB (GPU ghosts)]\n",      ghost_bytes / 1024. / 1024.);
+        printf("[%6.1f MB (Compute storage)]\n", computational_bytes / 1024. / 1024.);
         GPU::tell_memUsage_GPU();
         printf("=====================================================================\n");
+        if (tooMuch)
+            printf("ERROR: You are trying to eat more than you can chew!\nnslices = %d -> reduce this parameter to make room on the GPU.\n", nslices);
     }
+    if (tooMuch) abort();
 }
 
 

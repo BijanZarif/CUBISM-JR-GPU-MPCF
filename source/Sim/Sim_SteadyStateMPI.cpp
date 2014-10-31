@@ -35,7 +35,7 @@ void Sim_SteadyStateMPI::_setup()
         tend         = parser("-tend").asDouble();
         CFL          = parser("-cfl").asDouble();
         nslices      = parser("-nslices").asInt();
-        dumpinterval = parser("-dumpinterval").asDouble();
+        dumpinterval = tnextdump = parser("-dumpinterval").asDouble();
         saveperiod   = parser("-saveperiod").asInt();
         parser.unset_strict_mode();
     }
@@ -43,6 +43,7 @@ void Sim_SteadyStateMPI::_setup()
     // with IO
     bIO = parser("-IO").asBool(true);
     bHDF= parser("-HDF").asBool(true);
+    bVP = parser("-VP").asBool(false);
 
     // parse optional aruments
     verbosity = parser("-verb").asInt(0);
@@ -57,10 +58,26 @@ void Sim_SteadyStateMPI::_setup()
     // maximum domain extent
     maxextent = parser("-maxextent").asDouble(1.0);
 
-    // assign dependent stuff
-    tnextdump = dumpinterval;
-    mygrid    = new GridMPI(npex, npey, npez, maxextent);
+    // init data
+    mygrid = new GridMPI(npex, npey, npez, maxextent);
     assert(mygrid != NULL);
+
+    // we use artifical subblocks that are smaller than the main block
+    parser.set_strict_mode();
+    const int subcells_x = parser("-subcellsX").asInt();
+    parser.unset_strict_mode();
+    const int subcells_y = parser("-subcellsY").asInt(subcells_x);
+    const int subcells_z = parser("-subcellsZ").asInt(subcells_x);
+
+    // wavelet dumps only work if subcells_x = subcells_y = subcells_z =
+    // _SUBBLOCKSIZE_
+    if (subcells_x != _SUBBLOCKSIZE_ && subcells_y != _SUBBLOCKSIZE_ && subcells_z !=_SUBBLOCKSIZE_)
+    {
+        bVP = false;
+        if (isroot) printf("WARNING: VP dumps disabled due to dimension mismatch!\n");
+    }
+    // set up artificial mesh
+    subblocks.make_submesh(mygrid, subcells_x, subcells_y, subcells_z);
 
     // smooth length
     SimTools::EPSILON = static_cast<Real>(parser("-mollfactor").asDouble(1)) * std::sqrt(3.) * mygrid->getH();
@@ -82,11 +99,11 @@ void Sim_SteadyStateMPI::_setup()
     {
         if(_restart())
         {
-            if (isroot) printf("Restarting at step %d, physical time %f\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
+            if (isroot) printf("Restarting at step %d, time %f\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
             --fcount; // last dump before restart condition incremented fcount.
             // Decrement by one and dump restart IC, which increments fcount
             // again to start with the correct count.
-            if (bIO) _dump("restart_ic");
+            if (bIO) _take_a_dump("restart_ic");
         }
         else
         {
@@ -97,7 +114,7 @@ void Sim_SteadyStateMPI::_setup()
     else
     {
         _ic();
-        if (bIO) _dump();
+        if (bIO) _take_a_dump();
     }
 }
 
@@ -172,6 +189,45 @@ void Sim_SteadyStateMPI::_dump(const string basename)
 }
 
 
+void Sim_SteadyStateMPI::_vp(const std::string basename)
+{
+    if (isroot) cout << "dumping MPI VP ...\n" ;
+
+    const string path = parser("-fpath").asString(".");
+
+    stringstream streamer;
+    streamer << path;
+    streamer << "/";
+    streamer << basename;
+    streamer.setf(ios::dec | ios::right);
+    streamer.width(5);
+    streamer.fill('0');
+    streamer << LSRK3_DataMPI::step;
+
+    mywaveletdumper.verbose();
+    mywaveletdumper.set_threshold(5e-3);
+    mywaveletdumper.Write<4>(subblocks, streamer.str());
+    mywaveletdumper.set_threshold(1e-3);
+    mywaveletdumper.Write<5>(subblocks, streamer.str());
+    //mywaveletdumper.Write<6>(subblocks, streamer.str());
+
+    //used for debug
+#if 0
+    {
+        //mywaveletdumper.force_close();
+        if (isroot)
+        {
+            printf("\n\nREADING BEGINS===================\n");
+            //just checking
+            mywaveletdumper.Read(streamer.str());
+            printf("\n\nREADING ENDS===================\n");
+        }
+    }
+#endif
+    if (isroot) cout << "done" << endl;
+}
+
+
 void Sim_SteadyStateMPI::_save()
 {
     const string dump_path = parser("-fpath").asString(".");
@@ -227,9 +283,31 @@ bool Sim_SteadyStateMPI::_restart()
 }
 
 
+void Sim_SteadyStateMPI::_take_a_dump(const string basename)
+{
+    if (bHDF)
+    {
+        profiler.push_start("HDF DUMP");
+        _dump(basename);
+        profiler.pop_stop();
+    }
+
+    if (bVP)
+    {
+        profiler.push_start("VP DUMP");
+        _vp( basename + "wavelet" );
+        profiler.pop_stop();
+    }
+}
+
+
 void Sim_SteadyStateMPI::run()
 {
     _setup();
+
+    // log dumps
+    FILE* fp;
+    if (bIO) fp = fopen("dump.log", "a");
 
     if (dryrun)
     {
@@ -253,14 +331,13 @@ void Sim_SteadyStateMPI::run()
             profiler.pop_stop();
 
             // post processings
-            if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
+            if (isroot) printf("step id is %d, time %e (dt = %e)\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
 
             if (bIO && (float)LSRK3_DataMPI::time == (float)tnextdump)
             {
-                profiler.push_start("DUMP");
+                fprintf(fp, "step=%d\ttime=%e\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
                 tnextdump += dumpinterval;
-                _dump();
-                profiler.pop_stop();
+                _take_a_dump();
             }
             /* if (bIO && LSRK3_DataMPI::step % 10 == 0) _dump(); */
 
@@ -278,8 +355,13 @@ void Sim_SteadyStateMPI::run()
 
         if (isroot) profiler.printSummary();
 
-        if (bIO) _dump();
-
-        return;
+        if (bIO)
+        {
+            // dump final data
+            fprintf(fp, "step=%d\ttime=%e\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
+            _take_a_dump();
+            fclose(fp);
+        }
     }
+    return;
 }

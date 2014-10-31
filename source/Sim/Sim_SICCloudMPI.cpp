@@ -45,44 +45,6 @@ void Sim_SICCloudMPI::_allocGPU()
     myGPU = new GPUlabMPISICCloud(*mygrid, nslices, verbosity, isroot, state);
 }
 
-void Sim_SICCloudMPI::_vp(const std::string basename)
-{
-    if (isroot) cout << "dumping MPI VP ...\n" ;
-
-    const string path = parser("-fpath").asString(".");
-
-    stringstream streamer;
-    streamer << path;
-    streamer << "/";
-    streamer << basename;
-    streamer.setf(ios::dec | ios::right);
-    streamer.width(5);
-    streamer.fill('0');
-    streamer << LSRK3_DataMPI::step;
-
-    mywaveletdumper.verbose();
-    mywaveletdumper.set_threshold(5e-3);
-    mywaveletdumper.Write<4>(subblocks, streamer.str());
-    mywaveletdumper.set_threshold(1e-3);
-    mywaveletdumper.Write<5>(subblocks, streamer.str());
-    //mywaveletdumper.Write<6>(subblocks, streamer.str());
-
-    //used for debug
-#if 0
-    {
-        //mywaveletdumper.force_close();
-        if (isroot)
-        {
-            printf("\n\nREADING BEGINS===================\n");
-            //just checking
-            mywaveletdumper.Read(streamer.str());
-            printf("\n\nREADING ENDS===================\n");
-        }
-    }
-#endif
-    if (isroot) cout << "done" << endl;
-}
-
 void Sim_SICCloudMPI::_dump(const string basename)
 {
     const string dump_path = parser("-fpath").asString(".");
@@ -154,6 +116,7 @@ void Sim_SICCloudMPI::_dump_statistics(const int step_id, const Real t, const Re
 
 void Sim_SICCloudMPI::_dump_sensors(const int step_id, const Real t, const Real dt)
 {
+    /* TODO: (Thu 30 Oct 2014 02:03:34 PM CET) currently not needed */
 }
 
 void Sim_SICCloudMPI::_set_constants()
@@ -229,23 +192,6 @@ void Sim_SICCloudMPI::_set_constants()
     SICCloudData::post_shock_conservative[4] = p1*G1 + pc*gamma*G1 + static_cast<Real>(0.5)*SICCloudData::rho1*SICCloudData::u1*SICCloudData::u1; // v = w = 0 !
     SICCloudData::post_shock_conservative[5] = G1;
     SICCloudData::post_shock_conservative[6] = pc*gamma*G1;
-
-    // we use artifical subblocks that are smaller than the original block
-    parser.set_strict_mode();
-    const int subcells_x = parser("-subcellsX").asInt();
-    parser.unset_strict_mode();
-    const int subcells_y = parser("-subcellsY").asInt(subcells_x);
-    const int subcells_z = parser("-subcellsZ").asInt(subcells_x);
-
-    // wavelet dumps only work if subcells_x = subcells_y = subcells_z =
-    // _SUBBLOCKSIZE_
-    if (subcells_x != _SUBBLOCKSIZE_ && subcells_y != _SUBBLOCKSIZE_ && subcells_z !=_SUBBLOCKSIZE_)
-    {
-        bVP = false;
-        if (isroot) printf("WARNING: VP dumps disabled due to dimension mismatch!\n");
-    }
-
-    subblocks.make_submesh(mygrid, subcells_x, subcells_y, subcells_z);
 }
 
 void Sim_SICCloudMPI::_ic()
@@ -327,7 +273,9 @@ void Sim_SICCloudMPI::_initialize_cloud()
     }
 
     f_read >> SICCloudData::n_shapes;
-    // this shit is not needed at the moment
+    /* TODO: (Thu 30 Oct 2014 04:17:08 PM CET) Clean this shit at some time! I
+     * want to read a file of bubbles here only, the cloud MUST be created with
+     * an external client */
     /* f_read >> SICCloudData::n_small; */
     /* f_read >> SICCloudData::min_rad >> SICCloudData::max_rad; */
     /* f_read >> SICCloudData::seed_s[0] >> SICCloudData::seed_s[1] >> SICCloudData::seed_s[2]; */
@@ -572,9 +520,8 @@ void Sim_SICCloudMPI::run()
 {
     _setup();
 
-    // disable VP dumps by default
-    bVP = parser("-VP").asBool(false);
-
+    /* TODO: (Thu 30 Oct 2014 02:02:50 PM CET) Analysis is currently only
+     * implemented for this case */
     parser.set_strict_mode();
     const uint_t analysisperiod = parser("-analysisperiod").asInt();
     parser.unset_strict_mode();
@@ -609,25 +556,13 @@ void Sim_SICCloudMPI::run()
             profiler.pop_stop();
 
             // post processings
-            if (isroot) printf("step id is %d, physical time %e (dt = %e)\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
+            if (isroot) printf("step id is %d, time %e (dt = %e)\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
 
             if (bIO && (float)LSRK3_DataMPI::time == (float)tnextdump)
             {
                 fprintf(fp, "step=%d\ttime=%e\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
                 tnextdump += dumpinterval;
-                if (bHDF)
-                {
-                    profiler.push_start("HDF DUMP");
-                    _dump();
-                    profiler.pop_stop();
-                }
-
-                if (bVP)
-                {
-                    profiler.push_start("VP");
-                    _vp();
-                    profiler.pop_stop();
-                }
+                _take_a_dump();
             }
 
             if (LSRK3_DataMPI::step % saveperiod == 0)
@@ -658,11 +593,9 @@ void Sim_SICCloudMPI::run()
         {
             // dump final data
             fprintf(fp, "step=%d\ttime=%e\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
-            if (bHDF) _dump();
-            if (bVP)  _vp();
+            _take_a_dump();
             fclose(fp);
         }
-
-        return;
     }
+    return;
 }

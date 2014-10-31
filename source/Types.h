@@ -106,7 +106,7 @@ class MaterialDictionary
 class Simulation
 {
     protected:
-        virtual void _setup() { }
+        virtual void _setup() = 0;
 
     public:
         virtual void run() = 0;
