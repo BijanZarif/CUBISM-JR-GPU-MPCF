@@ -16,9 +16,9 @@ void Update_QPX::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
      * */
     assert(src.size() == tmp.size() && tmp.size() == divF.size());
 
-    /* const vector4double a = vec_splats(m_a); */
-    /* const vector4double b = vec_splats(m_b); */
-    /* const vector4double dtinvh = vec_splats(-m_dtinvh); */
+    const vector4double a = vec_splats(m_a);
+    const vector4double b = vec_splats(m_b);
+    const vector4double dtinvh = vec_splats(-m_dtinvh);
 
     for (int c=0; c < (int)src.size(); ++c)
     {
@@ -32,14 +32,14 @@ void Update_QPX::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
         {
             vector4double U_new = vec_lda(0L, rhs + i);
             const vector4double U_old = vec_lda(0L, U + i);
-            const vector4double rhs_new = vec_mul(vec_splats(-m_dtinvh), vec_lda(0L, divF_U + i));
-            U_new = vec_madd(vec_splats(m_a), U_new, rhs_new);
+            const vector4double rhs_new = vec_mul(dtinvh, vec_lda(0L, divF_U + i));
+            U_new = vec_madd(a, U_new, rhs_new);
 
             // 1.)
             vec_sta(U_new, 0L, rhs + i);
 
             // 2.)
-            vec_sta(vec_madd(vec_splats(m_b), U_new, U_old), 0L, U + i);
+            vec_sta(vec_madd(b, U_new, U_old), 0L, U + i);
         }
     }
 }

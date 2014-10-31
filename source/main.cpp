@@ -63,16 +63,15 @@ int main(int argc, const char *argv[])
 
     // run simulation
     Timer tsim;
+
     tsim.start();
-
     mysim->run();
-
     double walltime = tsim.stop();
-
-    delete mysim;
 
     MPI_Allreduce(MPI_IN_PLACE, &walltime, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     if (isroot) printf("Walltime: %f\n", walltime);
+
+    delete mysim;
 
     // good night
     MPI_Barrier(MPI_COMM_WORLD);
