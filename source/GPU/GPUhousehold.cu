@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <algorithm>
+#include <cassert>
 
 ///////////////////////////////////////////////////////////////////////////////
 // GLOBAL VARIABLES
@@ -393,4 +394,28 @@ void GPU::tell_GPU()
     cudaGetDevice(&dev);
     cudaGetDeviceProperties(&prop, dev);
     printf("Using device %d (%s)\n", dev, prop.name);
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Timings
+///////////////////////////////////////////////////////////////////////////
+double GPU::get_pipe_processing_time(const uint_t nchunks)
+{
+    // return total time for processing all chunks in seconds
+    float t_this_chunk;
+    double t_all = 0.0;
+
+    // wait for the last chunk to finish.  This is just for safety, at the
+    // point where get_pipe_processing_time is called, the GPU must have
+    // finished already processing all chunks.
+    cudaEventSynchronize(pipe_stop[nchunks-1]);
+
+    for (int i=0; i < nchunks; ++i)
+    {
+        cudaEventElapsedTime(&t_this_chunk, pipe_start[i], pipe_stop[i]);
+        assert(t_this_chunk >= 0.0f);
+        t_all += t_this_chunk;
+    }
+
+    return t_all * 0.001; // secondos
 }

@@ -113,14 +113,14 @@ void GPUlabMPI::_copysend_halos(const int sender, Real * const cpybuf, const uin
 
 void GPUlabMPI::_alloc_GPU()
 {
-    GPU::alloc((void**) &maxSOS, nslices, isroot);
+    GPU::alloc((void**) &maxSOS, nslices, nchunks, isroot);
     gpu_allocation = ALLOCATED;
 }
 
 
 void GPUlabMPI::_free_GPU()
 {
-    GPU::dealloc(isroot);
+    GPU::dealloc(nchunks, isroot);
     gpu_allocation = FREE;
 }
 
@@ -198,7 +198,7 @@ void GPUlabMPI::_process_chunk_sos(const real_vector_t& src)
 
 void GPUlabMPI::_init_next_chunk()
 {
-    // TODO: the information below should be part of the buffer type
+    // TODO: the information below should be part of the buffer struct
     prev_slices   = curr_slices;
     prev_iz       = curr_iz;
     prev_chunk_id = curr_chunk_id;

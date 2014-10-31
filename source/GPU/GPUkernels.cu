@@ -51,8 +51,10 @@ extern cudaStream_t *stream;
 
 // compute events
 extern cudaEvent_t *event_compute;
+extern cudaEvent_t *pipe_start;
+extern cudaEvent_t *pipe_stop;
 
-// texture references
+// texture references, for each variable one
 texture<float, 3, cudaReadModeElementType> tex00;
 texture<float, 3, cudaReadModeElementType> tex01;
 texture<float, 3, cudaReadModeElementType> tex02;
@@ -1329,6 +1331,7 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
 
     if (nslices % 4 != 0 && nslices != 1)
     {
+        // nslices = 1 does work, but must not be used for production
         fprintf(stderr, "ERROR: nslices must be an integer multiple of 4. Aborting...\n");
         abort();
     }
@@ -1348,6 +1351,9 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     cudaStreamWaitEvent(stream[s_id], event_compute[s_idm1], 0);
 
     char prof_item[256];
+
+    // start pipe timer for current chunk
+    cudaEventRecord(pipe_start[chunk_id], stream[s_id]);
 
     // before we do anything, we convert to primitive variables and prepare
     // texture buffers
@@ -1449,6 +1455,10 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     const dim3 Z_grid((NX + _WARPSIZE_ - 1)/_WARPSIZE_, (NY + 4 - 1)/4, nslices);
     _HLLC_Z<<<Z_grid, Z_blocks, 0, stream[s_id]>>>(recon_m, recon_p, inout, d_sumG, d_sumP, d_divU);
 
+    // stop pipe timer for current chunk
+    cudaEventRecord(pipe_stop[chunk_id], stream[s_id]);
+
+    // set event flag -> kernels are done
     cudaEventRecord(event_compute[s_id], stream[s_id]);
 }
 

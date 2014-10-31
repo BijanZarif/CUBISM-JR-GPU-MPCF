@@ -19,7 +19,7 @@
 
 // extra-term kernels (for x-direction only)
 #ifndef _TILE_DIM_
-#define _TILE_DIM_   _WARPSIZE_
+#define _TILE_DIM_ _WARPSIZE_
 #endif
 #ifndef _BLOCK_ROWS_
 #define _BLOCK_ROWS_ 4
@@ -65,6 +65,9 @@ namespace GPU
     // stats
     void tell_memUsage_GPU();
     void tell_GPU();
+
+    // timing
+    double get_pipe_processing_time(const uint_t nchunks);
 
     ///////////////////////////////////////////////////////////////////////////
     // GPU kernel wrappers

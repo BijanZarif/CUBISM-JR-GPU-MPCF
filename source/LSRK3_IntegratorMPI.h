@@ -36,6 +36,7 @@ public:
         histogram.notify("UPDATE", (float)avg_time_update);
         histogram.notify("COMM",   (float)avg_time_comm);
         histogram.notify("BC",     (float)avg_time_BC);
+        histogram.notify("HALOS",  (float)(avg_time_comm + avg_time_BC));
 
         if(step % ReportFreq == 0 && step > 0) histogram.consolidate();
 
@@ -120,29 +121,38 @@ class LSRK3_IntegratorMPI
         const Real B2 = 0.287713063186749;
         const Real B3 = 0.626538109512740;
 
+        Timer timer;
         double trk1, trk2, trk3;
         vector< pair<double,double> > t_ghosts(3);
         vector< pair<double,double> > t_rhs_up(3);
         {// stage 1
+            timer.start();
             t_ghosts[0] = GPU->load_ghosts();
-            /* trk1 = GPU->template process_all<Kupdate>(A1, B1, dtinvh); */
+            t_rhs_up[0] = GPU->template process_all<Kupdate>(A1, B1, dtinvh);
+            trk1 = timer.stop();
             if (isroot && verbosity) printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
+            timer.start();
             t_ghosts[1] = GPU->load_ghosts();
-            /* trk2 = GPU->template process_all<Kupdate>(A2, B2, dtinvh); */
+            t_rhs_up[1] = GPU->template process_all<Kupdate>(A2, B2, dtinvh);
+            trk2 = timer.stop();
             if (isroot && verbosity) printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
+            timer.start();
             t_ghosts[2] = GPU->load_ghosts();
-            /* trk3 = GPU->template process_all<Kupdate>(A3, B3, dtinvh); */
+            t_rhs_up[2] = GPU->template process_all<Kupdate>(A3, B3, dtinvh);
+            trk3 = timer.stop();
             if (isroot && verbosity) printf("RK stage 3 takes %f sec\n", trk3);
         }
 
-        const double avg_MPI_comm = (t_ghosts[0].first + t_ghosts[1].first + t_ghosts[2].first) / 3.0;
+        const double avg_MPI_comm = (t_ghosts[0].first  + t_ghosts[1].first  + t_ghosts[2].first) / 3.0;
         const double avg_BC_eval  = (t_ghosts[0].second + t_ghosts[1].second + t_ghosts[2].second) / 3.0;
+        const double avg_RHS      = (t_rhs_up[0].first  + t_rhs_up[1].first  + t_rhs_up[2].first) / 3.0;
+        const double avg_UP       = (t_rhs_up[0].second + t_rhs_up[1].second + t_rhs_up[2].second) / 3.0;
 
-        if (bhist) LSRK3_DataMPI::notify(0, 0, avg_MPI_comm, avg_BC_eval, 3);
+        if (bhist) LSRK3_DataMPI::notify(avg_RHS, avg_UP, avg_MPI_comm, avg_BC_eval, 3);
 
         return trk1 + trk2 + trk3;
     }
