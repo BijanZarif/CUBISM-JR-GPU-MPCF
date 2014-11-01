@@ -68,6 +68,7 @@ namespace GPU
 
     // timing
     double get_pipe_processing_time(const uint_t nchunks);
+    std::vector<double> get_pci_transfer_time(const uint_t nchunks);
 
     ///////////////////////////////////////////////////////////////////////////
     // GPU kernel wrappers

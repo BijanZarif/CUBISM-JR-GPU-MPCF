@@ -452,7 +452,7 @@ class GPUlabMPI
          * variants exist for this kernel.
          * */
         template <typename Kupdate>
-        std::pair<double,double> process_all(const Real a, const Real b, const Real dtinvh)
+        std::vector<double> process_all(const Real a, const Real b, const Real dtinvh)
         {
             /* *
              * 1.) Extract x/yghosts for current chunk and upload to GPU
@@ -540,13 +540,16 @@ class GPUlabMPI
 
             if (chatty) _end_info_current_chunk();
 
-            // Fetch CUDA timings for RHS
+            // Collect (GPU) timers
             const double t_RHS = GPU::get_pipe_processing_time(nchunks);
-
-            // overall time
+            std::vector<double> t_PCI = GPU::get_pci_transfer_time(nchunks);
             const double t_ALL = tall.stop();
 
-            return std::pair<double,double>(t_RHS, t_UP);
+            t_PCI.push_back(t_RHS);
+            t_PCI.push_back(t_UP);
+            t_PCI.push_back(t_ALL);
+
+            return t_PCI; // (h2d HALO, h2d INPUT, d2h OUTPUT, RHS, UP, ALL)
         }
 
         // info

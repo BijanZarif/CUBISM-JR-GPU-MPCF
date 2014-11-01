@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cassert>
+#include <vector>
 
 ///////////////////////////////////////////////////////////////////////////////
 // GLOBAL VARIABLES
@@ -38,6 +39,14 @@ cudaEvent_t *event_compute;
 // GPU pipe processing timers, for every chunk one pair
 cudaEvent_t *pipe_start;
 cudaEvent_t *pipe_stop;
+
+// GPU H2D / D2H timers, for each chunk
+cudaEvent_t *h2d_halo_start;
+cudaEvent_t *h2d_halo_stop;
+cudaEvent_t *h2d_input_start;
+cudaEvent_t *h2d_input_stop;
+cudaEvent_t *d2h_output_start;
+cudaEvent_t *d2h_output_stop;
 
 ///////////////////////////////////////////////////////////////////////////////
 // IMPLEMENTATION
@@ -146,14 +155,34 @@ void GPU::alloc(void** sos, const uint_t nslices, const uint_t nchunks, const bo
         cudaEventCreate(&event_d2h[i]);
         cudaEventCreate(&event_compute[i]);
     }
-    pipe_start = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
-    pipe_stop  = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
-    assert(pipe_start != NULL);
-    assert(pipe_stop  != NULL);
+
+    // individual chunk timers
+    pipe_start       = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
+    pipe_stop        = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
+    h2d_halo_start   = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
+    h2d_halo_stop    = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
+    h2d_input_start  = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
+    h2d_input_stop   = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
+    d2h_output_start = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
+    d2h_output_stop  = (cudaEvent_t *) malloc(nchunks * sizeof(cudaEvent_t));
+    assert(pipe_start       != NULL);
+    assert(pipe_stop        != NULL);
+    assert(h2d_halo_start   != NULL);
+    assert(h2d_halo_stop    != NULL);
+    assert(h2d_input_start  != NULL);
+    assert(h2d_input_stop   != NULL);
+    assert(d2h_output_start != NULL);
+    assert(d2h_output_stop  != NULL);
     for (int i=0; i < nchunks; ++i)
     {
         cudaEventCreate(&pipe_start[i]);
         cudaEventCreate(&pipe_stop[i]);
+        cudaEventCreate(&h2d_halo_start[i]);
+        cudaEventCreate(&h2d_halo_stop[i]);
+        cudaEventCreate(&h2d_input_start[i]);
+        cudaEventCreate(&h2d_input_stop[i]);
+        cudaEventCreate(&d2h_output_start[i]);
+        cudaEventCreate(&d2h_output_stop[i]);
     }
 
     // Stats
@@ -232,9 +261,21 @@ void GPU::dealloc(const uint_t nchunks, const bool isroot)
     {
         cudaEventDestroy(pipe_start[i]);
         cudaEventDestroy(pipe_stop[i]);
+        cudaEventDestroy(h2d_halo_start[i]);
+        cudaEventDestroy(h2d_halo_stop[i]);
+        cudaEventDestroy(h2d_input_start[i]);
+        cudaEventDestroy(h2d_input_stop[i]);
+        cudaEventDestroy(d2h_output_start[i]);
+        cudaEventDestroy(d2h_output_stop[i]);
     }
     free(pipe_start);
     free(pipe_stop);
+    free(h2d_halo_start);
+    free(h2d_halo_stop);
+    free(h2d_input_start);
+    free(h2d_input_stop);
+    free(d2h_output_start);
+    free(d2h_output_stop);
 
     // Stats
     if (isroot)
@@ -275,6 +316,7 @@ void GPU::h2d_input(
 
     // TODO: use larger arrays for ghosts to minimize API overhead +
     // increase BW performance. (LOW PRIORITY)
+    cudaEventRecord(h2d_halo_start[chunk_id], stream[s_id]);
     sprintf(prof_item, "SEND GHOSTS (%d)", s_id);
     GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
     for (int i = 0; i < VSIZE; ++i)
@@ -287,13 +329,16 @@ void GPU::h2d_input(
         cudaMemcpyAsync(mybuf->d_ygr[i], yghost_r[i], Nyghost*sizeof(Real), cudaMemcpyHostToDevice, stream[s_id]);
     }
     GPU::profiler.pop_stopCUDA();
+    cudaEventRecord(h2d_halo_stop[chunk_id], stream[s_id]);
 
     // h2d chunk + zghosts
+    cudaEventRecord(h2d_input_start[chunk_id], stream[s_id]);
     sprintf(prof_item, "SEND CHUNK (%d)", s_id);
     GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
     for (int i = 0; i < VSIZE; ++i)
         cudaMemcpyAsync(mybuf->d_inout[i], src[i], NX*NY*nslices*sizeof(Real), cudaMemcpyHostToDevice, stream[s_id]);
     GPU::profiler.pop_stopCUDA();
+    cudaEventRecord(h2d_input_stop[chunk_id], stream[s_id]);
 
     cudaEventRecord(event_h2d[s_id], stream[s_id]);
 }
@@ -332,10 +377,12 @@ void GPU::d2h_divF(real_vector_t& dst, const uint_t N,
     char prof_item[256];
     sprintf(prof_item, "RECV DIVF (%d)", s_id);
 
+    cudaEventRecord(d2h_output_start[chunk_id], stream[s_id]);
     GPU::profiler.push_startCUDA(prof_item, &stream[s_id]);
     for (int i = 0; i < VSIZE; ++i)
         cudaMemcpyAsync(dst[i], mybuf->d_inout[i], N*sizeof(Real), cudaMemcpyDeviceToHost, stream[s_id]);
     GPU::profiler.pop_stopCUDA();
+    cudaEventRecord(d2h_output_stop[chunk_id], stream[s_id]);
 
     cudaEventRecord(event_d2h[s_id], stream[s_id]);
 }
@@ -421,5 +468,31 @@ double GPU::get_pipe_processing_time(const uint_t nchunks)
         t_all += t_this_chunk;
     }
 
-    return t_all * 0.001; // secondos
+    return t_all * 0.001;
+}
+
+std::vector<double> GPU::get_pci_transfer_time(const uint_t nchunks)
+{
+    float t_dummy;
+    std::vector<double> t_pci(3, 0.0);
+
+    // safety
+    cudaEventSynchronize(d2h_output_stop[nchunks-1]);
+
+    for (int i=0; i < nchunks; ++i)
+    {
+        cudaEventElapsedTime(&t_dummy, h2d_halo_start[i], h2d_halo_stop[i]);
+        assert(t_dummy >= 0.0f);
+        t_pci[0] += t_dummy * 0.001;
+
+        cudaEventElapsedTime(&t_dummy, h2d_input_start[i], h2d_input_stop[i]);
+        assert(t_dummy >= 0.0f);
+        t_pci[1] += t_dummy * 0.001;
+
+        cudaEventElapsedTime(&t_dummy, d2h_output_start[i], d2h_output_stop[i]);
+        assert(t_dummy >= 0.0f);
+        t_pci[2] += t_dummy * 0.001;
+    }
+
+    return t_pci;
 }
