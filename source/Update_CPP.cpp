@@ -57,6 +57,9 @@ void Update_CPP::state(real_vector_t& src, const uint_t offset, const uint_t N)
     Real* const G = &src[5][offset];
     Real* const P = &src[6][offset];
 
+    const Real alpha = -2.0;
+    const Real beta  = -4.0;
+
 #pragma omp parallel for
         for (uint_t i = 0; i < N; ++i)
         {
@@ -79,9 +82,9 @@ void Update_CPP::state(real_vector_t& src, const uint_t offset, const uint_t N)
 
             // apply correction to current material state, based on the thought
             // that energy > 0 for all t
-            if (P[i]/(static_cast<Real>(1.0) + G[i]) < static_cast<Real>(-2.0)*pressure) // if it was still bad with new P and new G
+            if (P[i]/(static_cast<Real>(1.0) + G[i]) < alpha*pressure) // if it was still bad with new P and new G
             {
-                const Real difference = static_cast<Real>(-4.0) * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
+                const Real difference = beta * pressure * (static_cast<Real>(1.0) + G[i]) - P[i];
                 P[i] += difference; // change P again
             }
 
