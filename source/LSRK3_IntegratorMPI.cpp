@@ -20,6 +20,26 @@
 #include <mpi.h>
 
 
+// main state variables
+double LSRK3_DataMPI::time = 0.0;
+size_t LSRK3_DataMPI::step = 0;
+
+// LSRK3 coeffs, default to Gottlieb & Shu -> see constructor
+// LSRK3_IntegratorMPI
+Real LSRK3_DataMPI::A1 = 0.0;
+Real LSRK3_DataMPI::A2 = 0.0;
+Real LSRK3_DataMPI::A3 = 0.0;
+Real LSRK3_DataMPI::B1 = 0.0;
+Real LSRK3_DataMPI::B2 = 0.0;
+Real LSRK3_DataMPI::B3 = 0.0;
+
+Histogram LSRK3_DataMPI::histogram;
+size_t LSRK3_DataMPI::ReportFreq = 1;
+double LSRK3_DataMPI::t_RHS = 0.0;
+double LSRK3_DataMPI::t_UPDATE = 0.0;
+double LSRK3_DataMPI::t_COMM = 0.0;
+
+
 // tiny helper
 template <typename KSOS>
 static double _maxSOS(const GridMPI * const grid, float& sos)
@@ -30,16 +50,6 @@ static double _maxSOS(const GridMPI * const grid, float& sos)
     sos = kernel.compute(grid->pdata());
     return tsos.stop();
 }
-
-// LSRK3 data init
-double LSRK3_DataMPI::time = 0.0;
-size_t LSRK3_DataMPI::step = 0;
-
-Histogram LSRK3_DataMPI::histogram;
-size_t LSRK3_DataMPI::ReportFreq = 1;
-double LSRK3_DataMPI::t_RHS = 0.0;
-double LSRK3_DataMPI::t_UPDATE = 0.0;
-double LSRK3_DataMPI::t_COMM = 0.0;
 
 
 double LSRK3_IntegratorMPI::operator()(const double dt_max)
