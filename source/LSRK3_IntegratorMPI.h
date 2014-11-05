@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <iostream>
+#include <cstdlib>
 
 class LSRK3_DataMPI
 {
@@ -22,6 +24,10 @@ public:
     // hidden and an interface base should be used, just sayin')
     static double time;
     static size_t step;
+
+    // LSRK3 coefficients
+    static Real A1, A2, A3, B1, B2, B3;
+
 
     // accumulation time per process for important branches
     static Histogram histogram;
@@ -94,7 +100,7 @@ class LSRK3_IntegratorMPI
     double dt;
     float sos;
     int verbosity;
-    std::string SOSkernel, UPkernel;
+    std::string SOSkernel, UPkernel, coefficientSet;
     const bool isroot;
     bool bhist;
 
@@ -104,38 +110,22 @@ class LSRK3_IntegratorMPI
     template <typename Kupdate>
     double _RKstepGPU(const Real dtinvh)
     {
-        // Williamson
-        /* const Real A1 = 0.0; */
-        /* const Real A2 = -17./32; */
-        /* const Real A3 = -32./27; */
-        /* const Real B1 = 1./4; */
-        /* const Real B2 = 8./9; */
-        /* const Real B3 = 3./4; */
-
-        // Gottlieb & Shu
-        const Real A1 = 0.0;
-        const Real A2 = -2.915492524638791;
-        const Real A3 = -0.000000093517376;
-        const Real B1 = 0.924574000000000;
-        const Real B2 = 0.287713063186749;
-        const Real B3 = 0.626538109512740;
-
         double trk1, trk2, trk3;
         vector< pair<double,double> > t_ghosts(3);
         vector< pair<double,double> > t_rhs_up(3);
         {// stage 1
             t_ghosts[0] = GPU->load_ghosts();
-            trk1 = GPU->template process_all<Kupdate>(A1, B1, dtinvh);
+            trk1 = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A1, LSRK3_DataMPI::B1, dtinvh);
             if (isroot && verbosity) printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
             t_ghosts[1] = GPU->load_ghosts();
-            trk2 = GPU->template process_all<Kupdate>(A2, B2, dtinvh);
+            trk2 = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A2, LSRK3_DataMPI::B2, dtinvh);
             if (isroot && verbosity) printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
             t_ghosts[2] = GPU->load_ghosts();
-            trk3 = GPU->template process_all<Kupdate>(A3, B3, dtinvh);
+            trk3 = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A3, LSRK3_DataMPI::B3, dtinvh);
             if (isroot && verbosity) printf("RK stage 3 takes %f sec\n", trk3);
         }
 
@@ -160,8 +150,35 @@ public:
         bhist = parser("-hist").asBool(false);
         LSRK3_DataMPI::ReportFreq = parser("-histfreq").asInt(100);
 
+        // explicitly set to zero
         LSRK3_DataMPI::time = 0.0;
         LSRK3_DataMPI::step = 0;
+
+        // coefficient set
+        coefficientSet = parser("-LSRK3coeffs").asString("gottlieb-shu");
+        if (coefficientSet == "gottlieb-shu")
+        {
+            LSRK3_DataMPI::A1 = 0.0;
+            LSRK3_DataMPI::A2 = -2.915492524638791;
+            LSRK3_DataMPI::A3 = -0.000000093517376;
+            LSRK3_DataMPI::B1 = 0.924574000000000;
+            LSRK3_DataMPI::B2 = 0.287713063186749;
+            LSRK3_DataMPI::B3 = 0.626538109512740;
+        }
+        else if (coefficientSet == "williamson")
+        {
+            LSRK3_DataMPI::A1 = 0.0;
+            LSRK3_DataMPI::A2 = -17./32;
+            LSRK3_DataMPI::A3 = -32./27;
+            LSRK3_DataMPI::B1 = 1./4;
+            LSRK3_DataMPI::B2 = 8./9;
+            LSRK3_DataMPI::B3 = 3./4;
+        }
+        else
+        {
+            std::cerr << "ERROR: Unknown LSRK3 coefficients \"" << coefficientSet << "\"" << std::endl;
+            std::exit(-1);
+        }
     }
 
     double operator()(const double dt_max);
