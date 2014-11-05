@@ -122,21 +122,21 @@ class LSRK3_IntegratorMPI
         {// stage 1
             timer.start();
             t_ghosts[0] = GPU->load_ghosts();
-            t_main[0]   = GPU->template process_all<Kupdate>(A1, B1, dtinvh);
+            t_main[0]   = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A1, LSRK3_DataMPI::B1, dtinvh);
             trk1 = timer.stop();
             if (isroot && verbosity) printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
             timer.start();
             t_ghosts[1] = GPU->load_ghosts();
-            t_main[1]   = GPU->template process_all<Kupdate>(A2, B2, dtinvh);
+            t_main[1]   = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A2, LSRK3_DataMPI::B2, dtinvh);
             trk2 = timer.stop();
             if (isroot && verbosity) printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
             timer.start();
             t_ghosts[2] = GPU->load_ghosts();
-            t_main[2]   = GPU->template process_all<Kupdate>(A3, B3, dtinvh);
+            t_main[2]   = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A3, LSRK3_DataMPI::B3, dtinvh);
             trk3 = timer.stop();
             if (isroot && verbosity) printf("RK stage 3 takes %f sec\n", trk3);
         }
