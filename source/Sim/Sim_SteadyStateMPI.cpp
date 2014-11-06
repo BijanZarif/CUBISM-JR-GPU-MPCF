@@ -305,6 +305,8 @@ void Sim_SteadyStateMPI::run()
 {
     _setup();
 
+    if (parser("-printargs").asBool(true)) parser.print_options();
+
     // log dumps
     FILE* fp;
     if (bIO) fp = fopen("dump.log", "a");
