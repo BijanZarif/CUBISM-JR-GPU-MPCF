@@ -8,6 +8,7 @@
 #include <omp.h>
 #include <string>
 #include <fstream>
+#include <cstdio>
 #include <iomanip>
 #include <cmath>
 
@@ -19,7 +20,7 @@ using namespace std;
 
 
 Sim_SteadyStateMPI::Sim_SteadyStateMPI(const int argc, const char ** argv, const int isroot_)
-    : isroot(isroot_), fcount(0), mygrid(NULL), myGPU(NULL), parser(argc, argv), profiler(GPUlabMPI::get_profiler())
+    : isroot(isroot_), fcount(0), save_flipflop(0), mygrid(NULL), myGPU(NULL), parser(argc, argv), profiler(GPUlabMPI::get_profiler())
 { }
 
 
@@ -231,31 +232,45 @@ void Sim_SteadyStateMPI::_vp(const std::string basename)
 void Sim_SteadyStateMPI::_save()
 {
     const string dump_path = parser("-fpath").asString(".");
+    char fname[256];
 
     if (isroot)
     {
-        ofstream saveinfo("save.info");
+        sprintf(fname, "save.info%d", save_flipflop);
+        ofstream saveinfo(fname);
         saveinfo << setprecision(16) << scientific << LSRK3_DataMPI::time << endl;
         saveinfo << LSRK3_DataMPI::step << endl;
         saveinfo << fcount << endl;
         saveinfo << setprecision(16) << scientific << (tnextdump - dumpinterval) << endl; // last dump time
+        saveinfo << save_flipflop << endl;
         saveinfo.close();
     }
     /* DumpHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, LSRK3_DataMPI::step, "save.data", dump_path); */
 
     // save in 4 parts to allow data sets exceeding 2GB for a single process
     // http://www.hdfgroup.org/hdf5-quest.html#p2gb
-    DumpHDF5_MPI<GridMPI, mySaveStreamer_part1>(*mygrid, LSRK3_DataMPI::step, "save.data.part1", dump_path);
-    DumpHDF5_MPI<GridMPI, mySaveStreamer_part2>(*mygrid, LSRK3_DataMPI::step, "save.data.part2", dump_path);
-    DumpHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, LSRK3_DataMPI::step, "save.data.part3", dump_path);
-    DumpHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, LSRK3_DataMPI::step, "save.data.part4", dump_path);
+    sprintf(fname, "save.data%d.part%d", save_flipflop, 1);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part1>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
+    sprintf(fname, "save.data%d.part%d", save_flipflop, 2);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part2>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
+    sprintf(fname, "save.data%d.part%d", save_flipflop, 3);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
+    sprintf(fname, "save.data%d.part%d", save_flipflop, 4);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
+
+    // next
+    save_flipflop = 1 - save_flipflop;
 }
 
 
 bool Sim_SteadyStateMPI::_restart()
 {
     const string dump_path = parser("-fpath").asString(".");
+    char fname[256];
 
+    // the file that is read must be named like this.  Note that there is no
+    // flipflop information here, so use e.g. a symlink to specify the restart
+    // data
     ifstream saveinfo("save.info");
     if (saveinfo.good())
     {
@@ -265,13 +280,21 @@ bool Sim_SteadyStateMPI::_restart()
         double last_dumptime;
         saveinfo >> last_dumptime;
         tnextdump = last_dumptime + dumpinterval;
+        saveinfo >> save_flipflop;
         /* ReadHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, "save.data", dump_path); */
 
         // 4 parts
-        ReadHDF5_MPI<GridMPI, mySaveStreamer_part1>(*mygrid, "save.data.part1", dump_path);
-        ReadHDF5_MPI<GridMPI, mySaveStreamer_part2>(*mygrid, "save.data.part2", dump_path);
-        ReadHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, "save.data.part3", dump_path);
-        ReadHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, "save.data.part4", dump_path);
+        sprintf(fname, "save.data%d.part%d", save_flipflop, 1);
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part1>(*mygrid, fname, dump_path);
+        sprintf(fname, "save.data%d.part%d", save_flipflop, 2);
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part2>(*mygrid, fname, dump_path);
+        sprintf(fname, "save.data%d.part%d", save_flipflop, 3);
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, fname, dump_path);
+        sprintf(fname, "save.data%d.part%d", save_flipflop, 4);
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, fname, dump_path);
+
+        // dont overwrite this save data for next save
+        save_flipflop = 1 - save_flipflop;
 
         // make sure tnextdump > time
         while (LSRK3_DataMPI::time > tnextdump)
