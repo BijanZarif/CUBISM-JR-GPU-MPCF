@@ -36,12 +36,17 @@ public:
     static double t_UPDATE; // Update (CPU)
     static double t_COMM;   // MPI communication
 
-    static void notify(double avg_time_rhs, double avg_time_update, double avg_time_comm, double avg_time_BC, const size_t NTIMES)
+    static void notify(double avg_time_rhs, double avg_time_update, double avg_time_comm, double avg_time_BC,
+            double avg_time_h2d_halo, double avg_time_h2d_in, double avg_time_d2h_out, const size_t NTIMES)
     {
-        histogram.notify("RHS",    (float)avg_time_rhs);
-        histogram.notify("UPDATE", (float)avg_time_update);
-        histogram.notify("COMM",   (float)avg_time_comm);
-        histogram.notify("BC",     (float)avg_time_BC);
+        histogram.notify("RHS",       (float)avg_time_rhs);
+        histogram.notify("UPDATE",    (float)avg_time_update);
+        histogram.notify("COMM",      (float)avg_time_comm);
+        histogram.notify("BC",        (float)avg_time_BC);
+        histogram.notify("HALOS",     (float)(avg_time_comm + avg_time_BC));
+        histogram.notify("H2D_HALOS", (float)avg_time_h2d_halo);
+        histogram.notify("H2D_IN",    (float)avg_time_h2d_in);
+        histogram.notify("D2H_OUT",   (float)avg_time_d2h_out);
 
         if(step % ReportFreq == 0 && step > 0) histogram.consolidate();
 
@@ -110,29 +115,44 @@ class LSRK3_IntegratorMPI
     template <typename Kupdate>
     double _RKstepGPU(const Real dtinvh)
     {
+        Timer timer;
         double trk1, trk2, trk3;
         vector< pair<double,double> > t_ghosts(3);
-        vector< pair<double,double> > t_rhs_up(3);
+        vector< vector<double> > t_main(3);
         {// stage 1
+            timer.start();
             t_ghosts[0] = GPU->load_ghosts();
-            trk1 = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A1, LSRK3_DataMPI::B1, dtinvh);
+            t_main[0]   = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A1, LSRK3_DataMPI::B1, dtinvh);
+            trk1 = timer.stop();
             if (isroot && verbosity) printf("RK stage 1 takes %f sec\n", trk1);
         }
         {// stage 2
+            timer.start();
             t_ghosts[1] = GPU->load_ghosts();
-            trk2 = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A2, LSRK3_DataMPI::B2, dtinvh);
+            t_main[1]   = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A2, LSRK3_DataMPI::B2, dtinvh);
+            trk2 = timer.stop();
             if (isroot && verbosity) printf("RK stage 2 takes %f sec\n", trk2);
         }
         {// stage 3
+            timer.start();
             t_ghosts[2] = GPU->load_ghosts();
-            trk3 = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A3, LSRK3_DataMPI::B3, dtinvh);
+            t_main[2]   = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A3, LSRK3_DataMPI::B3, dtinvh);
+            trk3 = timer.stop();
             if (isroot && verbosity) printf("RK stage 3 takes %f sec\n", trk3);
         }
 
-        const double avg_MPI_comm = (t_ghosts[0].first + t_ghosts[1].first + t_ghosts[2].first) / 3.0;
-        const double avg_BC_eval  = (t_ghosts[0].second + t_ghosts[1].second + t_ghosts[2].second) / 3.0;
+        if (bhist)
+        {
+            const double avg_MPI_comm = (t_ghosts[0].first  + t_ghosts[1].first  + t_ghosts[2].first) / 3.0;
+            const double avg_BC_eval  = (t_ghosts[0].second + t_ghosts[1].second + t_ghosts[2].second) / 3.0;
+            const double avg_h2d_HALO = (t_main[0][0] + t_main[1][0] + t_main[2][0]) / 3.0;
+            const double avg_h2d_IN   = (t_main[0][1] + t_main[1][1] + t_main[2][1]) / 3.0;
+            const double avg_d2h_OUT  = (t_main[0][2] + t_main[1][2] + t_main[2][2]) / 3.0;
+            const double avg_RHS      = (t_main[0][3] + t_main[1][3] + t_main[2][3]) / 3.0;
+            const double avg_UP       = (t_main[0][4] + t_main[1][4] + t_main[2][4]) / 3.0;
 
-        if (bhist) LSRK3_DataMPI::notify(0, 0, avg_MPI_comm, avg_BC_eval, 3);
+            LSRK3_DataMPI::notify(avg_RHS, avg_UP, avg_MPI_comm, avg_BC_eval, avg_h2d_HALO, avg_h2d_IN, avg_d2h_OUT, 3);
+        }
 
         return trk1 + trk2 + trk3;
     }

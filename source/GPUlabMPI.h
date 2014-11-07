@@ -268,12 +268,15 @@ class GPUlabMPI
         void _process_chunk_sos(const real_vector_t& src);
 
         template <typename Kupdate>
-        void _process_chunk_flow(const Real a, const Real b, const Real dtinvh, real_vector_t& src, real_vector_t& tmp)
+        double _process_chunk_flow(const Real a, const Real b, const Real dtinvh, real_vector_t& src, real_vector_t& tmp)
         {
             /* *
              * Process chunk for the RHS computation:
              * 1.)  Launch GPU kernels to compute div(F)
-             * 2.)  Update previous chunk using GPU output
+             * 2.)  Update previous chunk using GPU output (this is a postponed
+             *      operation by one chunk.  The very last chunk is updated at
+             *      the end of process_all.  The postponing is required
+             *      for CPU/GPU overlap reasons.)
              * 3.)  ============== Initialize next chunk ===================
              * 4.)  Copy data into pinned buffer for the new chunk
              * 5.)  Issue download of GPU computation for previous chunk
@@ -281,6 +284,7 @@ class GPUlabMPI
              * */
 
             Timer timer;
+            double t_UP_chunk = 0.0;
 
             ///////////////////////////////////////////////////////////////////////////
             // 1.)
@@ -301,7 +305,10 @@ class GPUlabMPI
                     Kupdate update(a, b, dtinvh);
                     GPU::wait_d2h(prev_chunk_id);
                     /* GPU::wait_d2h(0); // stream 0 */
+
+                    timer.start();
                     update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
+                    t_UP_chunk = timer.stop();
                     if (update_state) update.state(src, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
                     break;
             }
@@ -386,6 +393,7 @@ class GPUlabMPI
 
                     break;
             }
+            return t_UP_chunk;
         }
 
         // info
@@ -428,11 +436,23 @@ class GPUlabMPI
         ///////////////////////////////////////////////////////////////////////
         // PUBLIC ACCESSORS
         ///////////////////////////////////////////////////////////////////////
+        /* Compute halo cells, which can be either one of the two
+         * (i)  Values obtained from boundary condition
+         * (ii) Values obtained via internode communication with another node
+         * */
         std::pair<double,double> load_ghosts(const double t = 0);
+
+        /* Compute maximum speed of sound needed to get dt for the step. CPP
+         * and QPX kernels exist for this task as well, where speed up relative
+         * to CPP is ~2X for max_sos below and ~4X for QPX.
+         * */
         double max_sos(float& sos);
 
+        /* Process RHS on GPU and update using the Kupdate kernel. CPP and QPX
+         * variants exist for this kernel.
+         * */
         template <typename Kupdate>
-        double process_all(const Real a, const Real b, const Real dtinvh)
+        std::vector<double> process_all(const Real a, const Real b, const Real dtinvh)
         {
             /* *
              * 1.) Extract x/yghosts for current chunk and upload to GPU
@@ -502,8 +522,9 @@ class GPUlabMPI
             ///////////////////////////////////////////////////////////////
             // 4.)
             ///////////////////////////////////////////////////////////////
+            double t_UP = 0.0;
             for (int i = 0; i < nchunks; ++i)
-                _process_chunk_flow<Kupdate>(a, b, dtinvh, src, tmp);
+                t_UP += _process_chunk_flow<Kupdate>(a, b, dtinvh, src, tmp);
 
             ///////////////////////////////////////////////////////////////
             // 5.)
@@ -511,12 +532,24 @@ class GPUlabMPI
             Kupdate update(a, b, dtinvh);
             GPU::wait_d2h(prev_chunk_id);
             /* GPU::wait_d2h(0); // stream 0 */
+
+            timer.start();
             update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
+            t_UP += timer.stop();
             if (update_state) update.state(src, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
 
             if (chatty) _end_info_current_chunk();
 
-            return tall.stop();
+            // Collect (GPU) timers
+            const double t_RHS = GPU::get_pipe_processing_time(nchunks);
+            std::vector<double> t_PCI = GPU::get_pci_transfer_time(nchunks);
+            const double t_ALL = tall.stop();
+
+            t_PCI.push_back(t_RHS);
+            t_PCI.push_back(t_UP);
+            t_PCI.push_back(t_ALL);
+
+            return t_PCI; // (h2d HALO, h2d INPUT, d2h OUTPUT, RHS, UP, ALL)
         }
 
         // info

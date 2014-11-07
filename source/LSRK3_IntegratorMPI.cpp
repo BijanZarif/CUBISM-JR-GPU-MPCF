@@ -69,7 +69,6 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
 
     MPI_Allreduce(MPI_IN_PLACE, &sos, 1, MPI_FLOAT, MPI_MAX, grid->getCartComm());
 
-    /* if (isroot) printf("sos = %f (took %f sec)\n", sos, tsos); */
     if (isroot) printf("Max SOS = %f (took %f sec)\n", sos, tsos);
 
     dt = CFL * h / sos;

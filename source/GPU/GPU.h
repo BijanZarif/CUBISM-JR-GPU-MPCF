@@ -19,7 +19,7 @@
 
 // extra-term kernels (for x-direction only)
 #ifndef _TILE_DIM_
-#define _TILE_DIM_   _WARPSIZE_
+#define _TILE_DIM_ _WARPSIZE_
 #endif
 #ifndef _BLOCK_ROWS_
 #define _BLOCK_ROWS_ 4
@@ -41,8 +41,8 @@ namespace GPU
     // Implementation: GPUhousehold.cu
     ///////////////////////////////////////////////////////////////////////////
     // alloc/dealloc
-    void alloc(void** h_maxSOS, const uint_t nslices, const bool isroot = true);
-    void dealloc(const bool isroot = true);
+    void alloc(void** h_maxSOS, const uint_t nslices, const uint_t nchunks, const bool isroot = true);
+    void dealloc(const uint_t nchunks, const bool isroot = true);
 
     // PCIe transfers
     void h2d_input(
@@ -65,6 +65,10 @@ namespace GPU
     // stats
     void tell_memUsage_GPU();
     void tell_GPU();
+
+    // timing
+    double get_pipe_processing_time(const uint_t nchunks);
+    std::vector<double> get_pci_transfer_time(const uint_t nchunks);
 
     ///////////////////////////////////////////////////////////////////////////
     // GPU kernel wrappers
