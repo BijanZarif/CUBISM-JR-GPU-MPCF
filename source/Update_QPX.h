@@ -10,8 +10,8 @@
 class Update_QPX : public Update_CPP
 {
 public:
-    Update_QPX(const Real a, const Real b, const Real dtinvh) : Update_CPP(a,b,dtinvh) { }
+    Update_QPX(const Real a, const Real b, const Real dtinvh, const Real alpha=-3.0, const Real beta=-4.0) : Update_CPP(a,b,dtinvh,alpha,beta) { }
 
-    void compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N);
-    void state(real_vector_t& src, const uint_t offset, const uint_t N);
+    void compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N) const;
+    void state(real_vector_t& src, const uint_t offset, const uint_t N) const;
 };

@@ -8,7 +8,7 @@
 #include "QPXEMU.h"
 #include <cassert>
 
-void Update_QPX::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N)
+void Update_QPX::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N) const
 {
     /* *
      * 1.) tmp <- a * tmp - dtinvh * divF
@@ -44,7 +44,7 @@ void Update_QPX::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
     }
 }
 
-void Update_QPX::state(real_vector_t& src, const uint_t offset, const uint_t N)
+void Update_QPX::state(real_vector_t& src, const uint_t offset, const uint_t N) const
 {
     Real* const r = &src[0][offset];
     Real* const u = &src[1][offset];
@@ -53,9 +53,6 @@ void Update_QPX::state(real_vector_t& src, const uint_t offset, const uint_t N)
     Real* const e = &src[4][offset];
     Real* const G = &src[5][offset];
     Real* const P = &src[6][offset];
-
-    const Real alpha = -2.0;
-    const Real beta  = -4.0;
 
 #pragma omp parallel for
     for (uint_t i = 0; i < N; i += 4)
@@ -78,9 +75,9 @@ void Update_QPX::state(real_vector_t& src, const uint_t offset, const uint_t N)
 
         const vector4double pressure = vec_mul(vec_sub(vec_sub(e_old,P_old),ke), myreciprocal<preclevel>(G_old));
 
-        const vector4double flag = vec_cmpgt(vec_mul(vec_splats(alpha),pressure), vec_mul(P_new, myreciprocal<preclevel>(vec_add(vec_splats((Real)1.0),G_new))));
+        const vector4double flag = vec_cmpgt(vec_mul(vec_splats(m_alpha),pressure), vec_mul(P_new, myreciprocal<preclevel>(vec_add(vec_splats((Real)1.0),G_new))));
 
-        const vector4double difference = vec_msub(vec_mul(vec_splats(beta), pressure), vec_add(vec_splats((Real)1.0),G_new), P_new);
+        const vector4double difference = vec_msub(vec_mul(vec_splats(m_beta), pressure), vec_add(vec_splats((Real)1.0),G_new), P_new);
 
         P_new = vec_add(P_new, vec_sel(vec_splats((Real)0.0), difference, flag));
 

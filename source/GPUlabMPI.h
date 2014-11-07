@@ -309,7 +309,9 @@ class GPUlabMPI
                     timer.start();
                     update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
                     t_UP_chunk = timer.stop();
-                    if (update_state) update.state(src, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
+                    /* TODO: (Fri 07 Nov 2014 10:19:25 AM CET) We do state
+                     * corrections only after each RK3 step, not stage */
+                    /* if (update_state) update.state(src, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices); */
                     break;
             }
             if (chatty) _end_info_current_chunk();
@@ -448,8 +450,8 @@ class GPUlabMPI
          * */
         double max_sos(float& sos);
 
-        /* Process RHS on GPU and update using the Kupdate kernel. CPP and QPX
-         * variants exist for this kernel.
+        /* Process RHS on GPU and update using the Kupdate kernel (a single RK
+         * stage). CPP and QPX variants exist for this kernel.
          * */
         template <typename Kupdate>
         std::vector<double> process_all(const Real a, const Real b, const Real dtinvh)
@@ -536,7 +538,9 @@ class GPUlabMPI
             timer.start();
             update.compute(src, tmp, prev_buffer->GPUout, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
             t_UP += timer.stop();
-            if (update_state) update.state(src, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices);
+            /* TODO: (Fri 07 Nov 2014 10:19:25 AM CET) We do state corrections
+             * only after each RK3 step, not stage */
+            /* if (update_state) update.state(src, SLICE_GPU*prev_iz, SLICE_GPU*prev_slices); */
 
             if (chatty) _end_info_current_chunk();
 
@@ -551,6 +555,27 @@ class GPUlabMPI
 
             return t_PCI; // (h2d HALO, h2d INPUT, d2h OUTPUT, RHS, UP, ALL)
         }
+
+        /* Apply an artificial correction to the current state.  This is used
+         * due to stability issues and may be required for liquids only.
+         * */
+        template <typename Kupdate>
+        double apply_correction(const Real alpha=-3.0, const Real beta=-4.0)
+        {
+            double t_state = 0.0;
+            if (update_state)
+            {
+                Timer timer;
+                real_vector_t& src = grid.pdata();
+                Kupdate update(0.0, 0.0, 0.0, alpha, beta); // first three are dummies here
+
+                timer.start();
+                update.state(src, 0, grid.size()); // whole mesh, not only chunks
+                t_state = timer.stop();
+            }
+            return t_state;
+        }
+
 
         // info
         inline uint_t number_of_chunks() const { return nchunks; }

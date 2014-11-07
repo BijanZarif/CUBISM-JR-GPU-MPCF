@@ -117,6 +117,7 @@ class LSRK3_IntegratorMPI
     {
         Timer timer;
         double trk1, trk2, trk3;
+        double t_correction = 0.0;
         vector< pair<double,double> > t_ghosts(3);
         vector< vector<double> > t_main(3);
         {// stage 1
@@ -139,6 +140,10 @@ class LSRK3_IntegratorMPI
             t_main[2]   = GPU->template process_all<Kupdate>(LSRK3_DataMPI::A3, LSRK3_DataMPI::B3, dtinvh);
             trk3 = timer.stop();
             if (isroot && verbosity) printf("RK stage 3 takes %f sec\n", trk3);
+        }
+        {// state correction
+            t_correction = GPU->template apply_correction<Kupdate>(-3.0, -4.0);
+            if (isroot && verbosity) printf("Correction update takes %f sec\n", t_correction);
         }
 
         if (bhist)
