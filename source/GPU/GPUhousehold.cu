@@ -195,7 +195,9 @@ void GPU::alloc(void** sos, const uint_t nslices, const uint_t nchunks, const bo
     {
         printf("=====================================================================\n");
         printf("[GPU ALLOCATION FOR %s (GMEM = %6.1f MB)]\n", prop.name, prop.totalGlobalMem / 1024. / 1024.);
-        printf("[%6.1f MB (GPU chunk data)]\n",  trans_bytes / 1024. / 1024.);
+        printf("[Domain on node: %dx%dx%d]\n",  _BLOCKSIZEX_, _BLOCKSIZEY_, _BLOCKSIZEZ_);
+        printf("[Domain on GPU:  %dx%dx%d (%d chunks used)]\n",  _BLOCKSIZEX_, _BLOCKSIZEY_, nslices, nchunks);
+        printf("[%6.1f MB (GPU chunk data, %d chunks allocated)]\n",  trans_bytes / 1024. / 1024., _NUM_GPU_BUF_);
         printf("[%6.1f MB (GPU ghosts)]\n",      ghost_bytes / 1024. / 1024.);
         printf("[%6.1f MB (Compute storage)]\n", computational_bytes / 1024. / 1024.);
         GPU::tell_memUsage_GPU();
