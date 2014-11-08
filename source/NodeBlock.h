@@ -43,7 +43,7 @@ class NodeBlock
         double extent[3];
         double h;
 
-        // Fluid data and tmp storage
+        // Fluid data and tmp storage (low storage Runge-Kutta)
         std::vector<Real *> data;
         std::vector<Real *> tmp;
 
