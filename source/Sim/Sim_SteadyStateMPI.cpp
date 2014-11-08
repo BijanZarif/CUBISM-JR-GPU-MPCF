@@ -328,7 +328,7 @@ void Sim_SteadyStateMPI::run()
 {
     _setup();
 
-    if (parser("-printargs").asBool(true)) parser.print_options();
+    if (parser("-printargs").asBool(true) && isroot) parser.print_options();
 
     // log dumps
     FILE* fp;

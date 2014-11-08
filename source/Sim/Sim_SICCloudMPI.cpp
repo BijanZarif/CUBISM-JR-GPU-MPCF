@@ -526,7 +526,7 @@ void Sim_SICCloudMPI::run()
     const uint_t analysisperiod = parser("-analysisperiod").asInt();
     parser.unset_strict_mode();
 
-    if (parser("-printargs").asBool(true)) parser.print_options();
+    if (parser("-printargs").asBool(true) && isroot) parser.print_options();
 
     // log dumps
     FILE* fp;
