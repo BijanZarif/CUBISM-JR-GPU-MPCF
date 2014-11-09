@@ -108,7 +108,7 @@ void Sim_SteadyStateMPI::_setup()
         }
         else
         {
-            if (isroot) printf("Loading restart file was not successful... Abort\n");
+            if (isroot) printf("Restart is not ok! Can't find save.info file... Abort\n");
             abort();
         }
     }

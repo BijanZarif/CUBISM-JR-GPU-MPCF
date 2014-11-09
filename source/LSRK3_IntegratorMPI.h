@@ -142,7 +142,7 @@ class LSRK3_IntegratorMPI
             if (isroot && verbosity) printf("RK stage 3 takes %f sec\n", trk3);
         }
         {// state correction
-            t_correction = GPU->template apply_correction<Kupdate>(-3.0, -4.0);
+            t_correction = GPU->template apply_correction<Kupdate>(-4.0, -5.0);
             if (isroot && verbosity) printf("Correction update takes %f sec\n", t_correction);
         }
 

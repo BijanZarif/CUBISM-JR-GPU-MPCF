@@ -136,7 +136,8 @@ public:
 					}
 
 				if (itemCount == 0)
-					values += '1';
+					values = "true";
+
 				mapArguments[argv[i]] = Value(values);
 				i += itemCount;
 			}
