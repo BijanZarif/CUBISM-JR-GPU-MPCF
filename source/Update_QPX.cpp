@@ -60,6 +60,7 @@ void Update_QPX::state(real_vector_t& src, const uint_t offset, const uint_t N) 
     Real* const G = &src[5][offset];
     Real* const P = &src[6][offset];
 
+    // TODO: N%4 == 0 ?
 #pragma omp parallel for
     for (uint_t i = 0; i < N; i += 4)
     {
