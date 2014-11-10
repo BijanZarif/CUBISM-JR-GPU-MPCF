@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <string>
+#include <ctime>
 using namespace std;
 
 
@@ -33,6 +34,13 @@ int main(int argc, const char *argv[])
 
     if (isroot)
     {
+        time_t rawtime;
+        struct tm* timeinfo;
+        time(&rawtime);
+        timeinfo = localtime(&rawtime);
+        char buf[256];
+        strftime(buf, 256, "%A, %h %d %Y, %r", timeinfo);
+        printf("Hi! It is now %s, not sure how the weather is. We begin anyway...\n", buf);
         for (int i = 0; i < argc; ++i)
             printf("%s ", argv[i]);
         printf("\n");

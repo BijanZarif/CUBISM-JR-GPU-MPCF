@@ -14,7 +14,6 @@
 
 #include "Sim_SteadyStateMPI.h"
 #include "HDF5Dumper_MPI.h"
-/* #include "SerializerIO_WaveletCompression_MPI_Simple.h" */
 
 using namespace std;
 
@@ -101,9 +100,7 @@ void Sim_SteadyStateMPI::_setup()
         if(_restart())
         {
             if (isroot) printf("Restarting at step %d, time %f\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
-            --fcount; // last dump before restart condition incremented fcount.
-            // Decrement by one and dump restart IC, which increments fcount
-            // again to start with the correct count.
+            if (fcount > 0) --fcount;
             if (bIO) _take_a_dump("restart_ic");
         }
         else
