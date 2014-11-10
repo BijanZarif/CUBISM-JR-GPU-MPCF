@@ -159,7 +159,7 @@ class LSRK3_IntegratorMPI
             LSRK3_DataMPI::notify(avg_RHS, avg_UP, avg_MPI_comm, avg_BC_eval, avg_h2d_HALO, avg_h2d_IN, avg_d2h_OUT, 3);
         }
 
-        return trk1 + trk2 + trk3;
+        return trk1 + trk2 + trk3 + t_correction;
     }
 
 public:

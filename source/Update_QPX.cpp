@@ -8,6 +8,12 @@
 #include "QPXEMU.h"
 #include <cassert>
 
+#include <cmath>
+using std::max;
+using std::min;
+using std::abs;
+
+
 void Update_QPX::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& divF, const uint_t offset, const uint_t N) const
 {
     /* *
@@ -33,9 +39,9 @@ void Update_QPX::compute(real_vector_t& src, real_vector_t& tmp, real_vector_t& 
             vector4double U_new = vec_lda(0L, rhs + i);
             const vector4double U_old = vec_lda(0L, U + i);
             const vector4double rhs_new = vec_mul(dtinvh, vec_lda(0L, divF_U + i));
-            U_new = vec_madd(a, U_new, rhs_new);
 
             // 1.)
+            U_new = vec_madd(a, U_new, rhs_new);
             vec_sta(U_new, 0L, rhs + i);
 
             // 2.)
@@ -70,7 +76,7 @@ void Update_QPX::state(real_vector_t& src, const uint_t offset, const uint_t N) 
         vector4double P_new = vec_max(P_old, vec_splats(m_min_P));
 
         const vector4double ke = vec_mul(vec_splats((Real)0.5),
-                vec_mul(vec_add(vec_mul(u_old,u_old), vec_add(vec_mul(v_old,v_old), vec_mul(v_old,v_old))),
+                vec_mul(vec_add(vec_mul(u_old,u_old), vec_add(vec_mul(v_old,v_old), vec_mul(w_old,w_old))),
                     myreciprocal<preclevel>(r_old)));
 
         const vector4double pressure = vec_mul(vec_sub(vec_sub(e_old,P_old),ke), myreciprocal<preclevel>(G_old));
