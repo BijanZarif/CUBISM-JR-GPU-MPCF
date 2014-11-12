@@ -69,7 +69,8 @@ class GPUlabMPI
         // HALOS / MPI COMMUNICATION
         ///////////////////////////////////////////////////////////////////////
         const MPI_Comm cart_world;
-        std::vector<MPI_Request> request;
+        std::vector<MPI_Request> recv_pending;
+        std::vector<MPI_Request> send_pending;
         std::vector<MPI_Status> status;
 
         int nbr[6]; // neighbor ranks
@@ -103,12 +104,16 @@ class GPUlabMPI
         {
             // why is the send buffer not a const pointer?? 3.0 Standard says
             // different
-            MPI_Isend(const_cast<Real * const>(sendbuf), Nelements, _MPI_REAL_, nbr[sender], sender, cart_world, &request[sender]);
+            MPI_Request req;
+            MPI_Isend(const_cast<Real * const>(sendbuf), Nelements, _MPI_REAL_, nbr[sender], sender, cart_world, &req);
+            send_pending.push_back(req);
         }
 
         inline void _issue_recv(Real * const recvbuf, const uint_t Nelements, const uint_t receiver)
         {
-            MPI_Recv(recvbuf, Nelements, _MPI_REAL_, nbr[receiver], MPI_ANY_TAG, cart_world, &status[receiver]);
+            MPI_Request req;
+            MPI_Irecv(recvbuf, Nelements, _MPI_REAL_, nbr[receiver], receiver, cart_world, &req);
+            recv_pending.push_back(req);
         }
 
         // Halo extraction
