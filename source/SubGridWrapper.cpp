@@ -85,6 +85,7 @@ void SubGridWrapper::make_submesh(GridMPI *grid, const int ncX, const int ncY, c
 
 SubGridWrapper::~SubGridWrapper()
 {
+    G = 0;
     SubGridWrapper::SubBlock::assign_supergrid(0);
     blocks.clear();
 }
