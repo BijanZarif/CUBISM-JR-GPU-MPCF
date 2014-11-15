@@ -57,9 +57,9 @@ void kernel(Real * const store)
 #pragma unroll 256
     for (unsigned int i = 0; i < NLOOP; ++i)
     {
-        y1 = x1 + y1*x1;
-        y2 = x2 + y2*x2;
-        y3 = x3 + y3*x3;
+        y1 = x1 + y1*x2;
+        y2 = x2 + y2*x3;
+        y3 = x3 + y3*x11;
 
         /* y11 = x11 + y11*x11; */
         /* y22 = x22 + y22*x22; */
@@ -70,7 +70,7 @@ void kernel(Real * const store)
         /* y66 = x66 + y66*x66; */
     }
 
-    store[tid] = y1+y2+y3+y11+y22+y33+y44+y55+y66;
+    store[tid] = y1+y2+y3;
 }
 
 

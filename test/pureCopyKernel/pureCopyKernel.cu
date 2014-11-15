@@ -7,7 +7,7 @@
 
 #define TILE_DIM 32
 #define BLOCK_ROWS 8
-#define NUMREPS 100
+#define NUMREPS 1000
 
 __global__
 void copy_kernel(float * const __restrict__ in, float * const __restrict__ out,
@@ -18,8 +18,15 @@ void copy_kernel(float * const __restrict__ in, float * const __restrict__ out,
     const int index = xIndex + width * yIndex;
 
     for (int r = 0; r < nreps; ++r)
+    {
         for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS)
             out[index+i*width] = in[index+i*width];
+        /* for (int i = 0; i < TILE_DIM; i += 2*BLOCK_ROWS) */
+        /* { */
+        /*     out[index+i*width] = in[index+i*width]; */
+        /*     out[index+(i+BLOCK_ROWS)*width] = in[index+(i+BLOCK_ROWS)*width]; */
+        /* } */
+    }
 }
 
 
@@ -27,6 +34,8 @@ int main()
 {
     const int size_x = 2048;
     const int size_y = 2048;
+    /* const int size_x = 4096; */
+    /* const int size_y = 4096; */
 
     dim3 grid(size_x/TILE_DIM, size_y/TILE_DIM), threads(TILE_DIM, BLOCK_ROWS);
 
@@ -58,30 +67,31 @@ int main()
     float elapsed_inner;
     cudaEventElapsedTime(&elapsed_inner, start, stop);
 
-    cudaEventRecord(start);
-    for ( int i = 0; i < NUMREPS; ++i)
-        copy_kernel<<<grid, threads>>>(d_in, d_out, size_x, size_y, 1);
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-    float elapsed_outer;
-    cudaEventElapsedTime(&elapsed_outer, start, stop);
+    /* cudaEventRecord(start); */
+    /* for ( int i = 0; i < NUMREPS; ++i) */
+    /*     copy_kernel<<<grid, threads>>>(d_in, d_out, size_x, size_y, 1); */
+    /* cudaEventRecord(stop); */
+    /* cudaEventSynchronize(stop); */
+    /* float elapsed_outer; */
+    /* cudaEventElapsedTime(&elapsed_outer, start, stop); */
 
-    const float kernel_overhead = (elapsed_outer - elapsed_inner)/NUMREPS;
+    /* const float kernel_overhead = (elapsed_outer - elapsed_inner)/NUMREPS; */
     const float inner_time = elapsed_inner/NUMREPS;
-    const float outer_time = elapsed_outer/NUMREPS;
-    const float pure_kernel_time = inner_time - kernel_overhead;
+    /* const float outer_time = elapsed_outer/NUMREPS; */
+    /* const float pure_kernel_time = inner_time - kernel_overhead; */
 
-    const float eff_inner_BW = 2.*1000.*bytes/(1024.*1024.*1024.*inner_time); // GB/s
-    const float eff_outer_BW = 2.*1000.*bytes/(1024.*1024.*1024.*outer_time); // GB/s
-    const float eff_noOverhead_BW = 2.*1000.*bytes/(1024.*1024.*1024.*pure_kernel_time); // GB/s
+    /* const float eff_inner_BW = 2.*1000.*bytes/(1024.*1024.*1024.*inner_time); // GB/s */
+    const float eff_inner_BW = 1000.*bytes/(1024.*1024.*1024.*inner_time); // GB/s
+    /* const float eff_outer_BW = 2.*1000.*bytes/(1024.*1024.*1024.*outer_time); // GB/s */
+    /* const float eff_noOverhead_BW = 2.*1000.*bytes/(1024.*1024.*1024.*pure_kernel_time); // GB/s */
 
     printf("REPS INSIDE KERNEL:\n");
     printf("Walltime = %fms\nAvg Kernel Time = %fms\n", elapsed_inner, inner_time);
     printf("Effective Bandwidth = %f GB/s\n\n", eff_inner_BW);
 
-    printf("REPS OUTSIDE KERNEL:\n");
-    printf("Walltime = %fms\nAvg Kernel Time = %fms\n", elapsed_outer, outer_time);
-    printf("Effective Bandwidth = %f GB/s\n", eff_outer_BW);
+    /* printf("REPS OUTSIDE KERNEL:\n"); */
+    /* printf("Walltime = %fms\nAvg Kernel Time = %fms\n", elapsed_outer, outer_time); */
+    /* printf("Effective Bandwidth = %f GB/s\n", eff_outer_BW); */
 
     /* printf("\nEffective Bandwith (w/o Overhead) = %f GB/s\n", eff_noOverhead_BW); */
 
