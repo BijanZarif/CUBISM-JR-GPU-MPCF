@@ -19,7 +19,7 @@ using namespace std;
 /* #define BLOCKS 1024 */
 /* #define THREADS 64 */
 
-#define FLOP 6
+#define FLOP 8
 
 #ifdef SINGLE_PRECISION
 typedef float Real;
@@ -41,36 +41,23 @@ typedef double Real;
 
 
 __global__
-void kernel(Real * const store)
+void fma_kernel(Real * const store)
 {
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-    register Real x1=0.6f, x2=0.6f, x3=0.6f;
-    register Real y1=0.1f, y2=0.2f, y3=0.3f;
-
-    register Real x11=0.5f, x22=0.5f, x33=0.5f;
-    register Real y11=0.0f, y22=0.0f, y33=0.0f;
-
-    register Real x44=0.2f, x55=0.3f, x66=0.5f;
-    register Real y44=0.0f, y55=0.0f, y66=0.0f;
+    register Real x1=0.00006f, x2=0.00003f, x3=0.00001f, x4=0.00005f;
+    register Real y1=0.01f, y2=0.02f, y3=0.03f, y4=0.04f;
 
 #pragma unroll 256
     for (unsigned int i = 0; i < NLOOP; ++i)
     {
         y1 = x1 + y1*x2;
         y2 = x2 + y2*x3;
-        y3 = x3 + y3*x11;
-
-        /* y11 = x11 + y11*x11; */
-        /* y22 = x22 + y22*x22; */
-        /* y33 = x33 + y33*x33; */
-
-        /* y44 = x44 + y44*x44; */
-        /* y55 = x55 + y55*x55; */
-        /* y66 = x66 + y66*x66; */
+        y3 = x3 + y3*x1;
+        y4 = x4 + y4*x2;
     }
 
-    store[tid] = y1+y2+y3;
+    store[tid] = y1+y2+y3+y4;
 }
 
 
@@ -82,7 +69,7 @@ int main(const int argc, const char **argv)
 
     GPUtimer timer;
     timer.start();
-    kernel<<<BLOCKS, THREADS>>>(dA);
+    fma_kernel<<<BLOCKS, THREADS>>>(dA);
     timer.stop();
 
     cudaDeviceSynchronize();
