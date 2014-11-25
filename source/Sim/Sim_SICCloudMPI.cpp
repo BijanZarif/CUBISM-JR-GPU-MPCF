@@ -532,6 +532,12 @@ void Sim_SICCloudMPI::run()
     FILE* fp;
     if (bIO) fp = fopen("dump.log", "a");
 
+    // dynamic settings file
+    ofstream current_setting("parameter.dat");
+    current_setting << tend << endl;
+    current_setting.close();
+
+
     if (dryrun)
     {
         if (isroot) printf("Dry Run...\n");
@@ -584,7 +590,13 @@ void Sim_SICCloudMPI::run()
             }
 
             if (isroot && LSRK3_DataMPI::step % 10 == 0)
+            {
+                ifstream new_settings("parameter.dat");
+                new_settings >> tend;
+                new_settings.close();
+
                 profiler.printSummary();
+            }
 
             if ((LSRK3_DataMPI::step - step_start) == nsteps) break;
         }

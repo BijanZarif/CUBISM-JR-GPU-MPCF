@@ -19,19 +19,26 @@ void copy_kernel(float * const __restrict__ in, float * const __restrict__ out,
 
     for (int r = 0; r < nreps; ++r)
     {
-        for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS)
-            out[index+i*width] = in[index+i*width];
-        /* for (int i = 0; i < TILE_DIM; i += 2*BLOCK_ROWS) */
-        /* { */
+        /* for (int i = 0; i < TILE_DIM; i += BLOCK_ROWS) */
         /*     out[index+i*width] = in[index+i*width]; */
-        /*     out[index+(i+BLOCK_ROWS)*width] = in[index+(i+BLOCK_ROWS)*width]; */
-        /* } */
+        for (int i = 0; i < TILE_DIM; i += 2*BLOCK_ROWS)
+        {
+            out[index+i*width] = in[index+i*width];
+            out[index+(i+BLOCK_ROWS)*width] = in[index+(i+BLOCK_ROWS)*width];
+        }
     }
 }
 
 
 int main()
 {
+    int dev;
+    cudaGetDevice(&dev);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, dev);
+    printf("Device ID: %d\n", dev);
+    printf("Device: %s\n", prop.name);
+
     const int size_x = 2048;
     const int size_y = 2048;
     /* const int size_x = 4096; */
