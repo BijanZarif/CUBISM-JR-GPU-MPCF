@@ -69,9 +69,9 @@ public:
     Sim_SteadyStateMPI(const int argc, const char ** argv, const int isroot);
     virtual ~Sim_SteadyStateMPI()
     {
-        delete mygrid;
         delete stepper;
         delete myGPU;
+        /* delete mygrid; */
     }
 
     virtual void run();

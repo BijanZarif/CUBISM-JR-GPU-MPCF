@@ -65,12 +65,17 @@ class GPUlabMPI
 
         int* maxSOS; // pointer to mapped memory CPU/GPU
 
+        /* TODO: (Thu 13 Nov 2014 04:27:32 PM CET) temporary */
+        double t_COPY_data_all;
+
         ///////////////////////////////////////////////////////////////////////
         // HALOS / MPI COMMUNICATION
         ///////////////////////////////////////////////////////////////////////
         const MPI_Comm cart_world;
-        std::vector<MPI_Request> request;
+        std::vector<MPI_Request> recv_pending;
+        std::vector<MPI_Request> send_pending;
         std::vector<MPI_Status> status;
+        size_t timestamp;
 
         int nbr[6]; // neighbor ranks
 
@@ -99,22 +104,26 @@ class GPUlabMPI
         };
 
         // MPI
-        inline void _issue_send(const Real * const sendbuf, const uint_t Nelements, const uint_t sender)
+        inline void _issue_send(const Real * const sendbuf, const uint_t Nelements, const uint_t sender, const int tag)
         {
             // why is the send buffer not a const pointer?? 3.0 Standard says
             // different
-            MPI_Isend(const_cast<Real * const>(sendbuf), Nelements, _MPI_REAL_, nbr[sender], sender, cart_world, &request[sender]);
+            MPI_Request req;
+            MPI_Isend(const_cast<Real * const>(sendbuf), Nelements, _MPI_REAL_, nbr[sender], tag, cart_world, &req);
+            send_pending.push_back(req);
         }
 
-        inline void _issue_recv(Real * const recvbuf, const uint_t Nelements, const uint_t receiver)
+        inline void _issue_recv(Real * const recvbuf, const uint_t Nelements, const uint_t receiver, const int tag)
         {
-            MPI_Recv(recvbuf, Nelements, _MPI_REAL_, nbr[receiver], MPI_ANY_TAG, cart_world, &status[receiver]);
+            MPI_Request req;
+            MPI_Irecv(recvbuf, Nelements, _MPI_REAL_, nbr[receiver], tag, cart_world, &req);
+            recv_pending.push_back(req);
         }
 
         // Halo extraction
         template <index_map map>
-        void _copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE);
-        void _copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int zS);
+        void _copysend_halos(const int sender, const int tag, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE);
+        void _copysend_halos(const int sender, const int tag, Real * const cpybuf, const uint_t Nhalos, const int zS);
 
 
         ///////////////////////////////////////////////////////////////////////
@@ -199,13 +208,16 @@ class GPUlabMPI
         void _init_next_chunk();
         void _dump_chunk(const int complete = 0);
 
-        inline void _copy_range(real_vector_t& dst, const uint_t dstOFFSET, const real_vector_t& src, const uint_t srcOFFSET, const uint_t Nelements)
+        inline double _copy_range(real_vector_t& dst, const uint_t dstOFFSET, const real_vector_t& src, const uint_t srcOFFSET, const uint_t Nelements)
         {
+            Timer t;
+            t.start();
             for (int i = 0; i < GridMPI::NVAR; ++i)
                 memcpy(dst[i] + dstOFFSET, src[i] + srcOFFSET, Nelements*sizeof(Real));
+            return t.stop();
         }
 
-        inline void _CONV_copy_range(real_vector_t& dst, const uint_t dstOFFSET, const real_vector_t& src, const uint_t srcOFFSET, const uint_t Nelements)
+        inline double _CONV_copy_range(real_vector_t& dst, const uint_t dstOFFSET, const real_vector_t& src, const uint_t srcOFFSET, const uint_t Nelements)
         {
             // primitive dest
             Real * const p_r = &(dst[0])[dstOFFSET];
@@ -224,6 +236,9 @@ class GPUlabMPI
             const Real * const c_e = &(src[4])[srcOFFSET];
             const Real * const c_G = &(src[5])[srcOFFSET];
             const Real * const c_P = &(src[6])[srcOFFSET];
+
+            Timer t;
+            t.start();
 
             memcpy(p_r, c_r, Nelements*sizeof(Real));
             memcpy(p_G, c_G, Nelements*sizeof(Real));
@@ -245,23 +260,28 @@ class GPUlabMPI
                 p_w[i] = w/r;
                 p_e[i] = (e - static_cast<Real>(0.5)*(u*u + v*v + w*w)/r - P) / G;
             }
+            return t.stop();
         }
 
-        inline void _copy_xyghosts() // alternatively, copy ALL x/yghosts at beginning
+        inline double _copy_xyghosts() // alternatively, copy ALL x/yghosts at beginning
         {
+            double t = 0.0;
             // copy from the halos into the ghost buffer of the current chunk
-            _copy_range(curr_buffer->xghost_l, 0, halox.left,  3*sizeY*curr_iz, curr_buffer->Nxghost);
-            _copy_range(curr_buffer->xghost_r, 0, halox.right, 3*sizeY*curr_iz, curr_buffer->Nxghost);
-            _copy_range(curr_buffer->yghost_l, 0, haloy.left,  3*sizeX*curr_iz, curr_buffer->Nyghost);
-            _copy_range(curr_buffer->yghost_r, 0, haloy.right, 3*sizeX*curr_iz, curr_buffer->Nyghost);
+            t += _copy_range(curr_buffer->xghost_l, 0, halox.left,  3*sizeY*curr_iz, curr_buffer->Nxghost);
+            t += _copy_range(curr_buffer->xghost_r, 0, halox.right, 3*sizeY*curr_iz, curr_buffer->Nxghost);
+            t += _copy_range(curr_buffer->yghost_l, 0, haloy.left,  3*sizeX*curr_iz, curr_buffer->Nyghost);
+            t += _copy_range(curr_buffer->yghost_r, 0, haloy.right, 3*sizeX*curr_iz, curr_buffer->Nyghost);
+            return t;
         }
 
-        inline void _CONV_copy_xyghosts() // convert to primitive vars and copy xyghosts
+        inline double _CONV_copy_xyghosts() // convert to primitive vars and copy xyghosts
         {
-            _CONV_copy_range(curr_buffer->xghost_l, 0, halox.left,  3*sizeY*curr_iz, curr_buffer->Nxghost);
-            _CONV_copy_range(curr_buffer->xghost_r, 0, halox.right, 3*sizeY*curr_iz, curr_buffer->Nxghost);
-            _CONV_copy_range(curr_buffer->yghost_l, 0, haloy.left,  3*sizeX*curr_iz, curr_buffer->Nyghost);
-            _CONV_copy_range(curr_buffer->yghost_r, 0, haloy.right, 3*sizeX*curr_iz, curr_buffer->Nyghost);
+            double t = 0.0;
+            t += _CONV_copy_range(curr_buffer->xghost_l, 0, halox.left,  3*sizeY*curr_iz, curr_buffer->Nxghost);
+            t += _CONV_copy_range(curr_buffer->xghost_r, 0, halox.right, 3*sizeY*curr_iz, curr_buffer->Nxghost);
+            t += _CONV_copy_range(curr_buffer->yghost_l, 0, haloy.left,  3*sizeX*curr_iz, curr_buffer->Nyghost);
+            t += _CONV_copy_range(curr_buffer->yghost_r, 0, haloy.right, 3*sizeX*curr_iz, curr_buffer->Nyghost);
+            return t;
         }
 
         // execution helper
@@ -285,6 +305,8 @@ class GPUlabMPI
 
             Timer timer;
             double t_UP_chunk = 0.0;
+
+            double t_COPY_data = 0.0;
 
             ///////////////////////////////////////////////////////////////////////////
             // 1.)
@@ -339,10 +361,10 @@ class GPUlabMPI
                     {
                         // left zghosts (reuse previous buffer)
                         const uint_t prevOFFSET = SLICE_GPU * prev_slices;
-                        _copy_range(curr_buffer->GPUin, 0, prev_buffer->GPUin, prevOFFSET, haloz.Nhalo);
+                        t_COPY_data += _copy_range(curr_buffer->GPUin, 0, prev_buffer->GPUin, prevOFFSET, haloz.Nhalo);
 
                         // interior + right zghosts
-                        _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, OFFSET, SLICE_GPU * curr_slices + haloz.Nhalo);
+                        t_COPY_data += _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, OFFSET, SLICE_GPU * curr_slices + haloz.Nhalo);
                         break;
                     }
 
@@ -350,14 +372,14 @@ class GPUlabMPI
                     {
                         // left zghosts (reuse previous buffer)
                         const uint_t prevOFFSET = SLICE_GPU * prev_slices;
-                        _copy_range(curr_buffer->GPUin, 0, prev_buffer->GPUin, prevOFFSET, haloz.Nhalo);
+                        t_COPY_data += _copy_range(curr_buffer->GPUin, 0, prev_buffer->GPUin, prevOFFSET, haloz.Nhalo);
 
                         // interior
-                        _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, OFFSET, SLICE_GPU * curr_slices);
+                        t_COPY_data += _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, OFFSET, SLICE_GPU * curr_slices);
 
                         // right zghosts
                         const uint_t current_rightOFFSET = haloz.Nhalo + SLICE_GPU * curr_slices;
-                        _copy_range(curr_buffer->GPUin, current_rightOFFSET, haloz.right, 0, haloz.Nhalo);
+                        t_COPY_data += _copy_range(curr_buffer->GPUin, current_rightOFFSET, haloz.right, 0, haloz.Nhalo);
                         break;
                     }
             }
@@ -381,7 +403,7 @@ class GPUlabMPI
                     assert(curr_buffer->Nxghost == 3 * sizeY * curr_slices);
                     assert(curr_buffer->Nyghost == 3 * sizeX * curr_slices);
                     /* _copy_xyghosts(); */
-                    _CONV_copy_xyghosts();
+                    t_COPY_data += _CONV_copy_xyghosts();
                     GPU::h2d_input(
                             curr_buffer->Nxghost, curr_buffer->xghost_l, curr_buffer->xghost_r,
                             curr_buffer->Nyghost, curr_buffer->yghost_l, curr_buffer->yghost_r,
@@ -395,6 +417,8 @@ class GPUlabMPI
 
                     break;
             }
+
+            t_COPY_data_all += t_COPY_data;
             return t_UP_chunk;
         }
 
@@ -467,6 +491,8 @@ class GPUlabMPI
             real_vector_t& src = grid.pdata();
             real_vector_t& tmp = grid.ptmp();
 
+            t_COPY_data_all = 0.0;
+
             Timer tall;
             tall.start();
 
@@ -483,7 +509,7 @@ class GPUlabMPI
             assert(curr_buffer->Nxghost == 3 * sizeY * curr_slices);
             assert(curr_buffer->Nyghost == 3 * sizeX * curr_slices);
             /* _copy_xyghosts(); */
-            _CONV_copy_xyghosts();
+            t_COPY_data_all += _CONV_copy_xyghosts();
 
             ///////////////////////////////////////////////////////////////
             // 2.)
@@ -492,18 +518,18 @@ class GPUlabMPI
             uint_t Nelements = SLICE_GPU * curr_slices;
 
             // copy left ghosts always
-            _copy_range(curr_buffer->GPUin, 0, haloz.left, 0, haloz.Nhalo);
+            t_COPY_data_all += _copy_range(curr_buffer->GPUin, 0, haloz.left, 0, haloz.Nhalo);
             switch (chunk_state) // right ghosts are conditional
             {
                 case FIRST: Nelements += haloz.Nhalo; break;
                 case SINGLE:
-                            _copy_range(curr_buffer->GPUin, haloz.Nhalo + Nelements, haloz.right, 0, haloz.Nhalo);
+                            t_COPY_data_all += _copy_range(curr_buffer->GPUin, haloz.Nhalo + Nelements, haloz.right, 0, haloz.Nhalo);
                             break;
             }
 
             // interior data
             timer.start();
-            _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, 0, Nelements);
+            t_COPY_data_all += _copy_range(curr_buffer->GPUin, haloz.Nhalo, src, 0, Nelements);
             const double t1 = timer.stop();
             if (chatty) printf("\t[COPY SRC CHUNK %d TAKES %f sec]\n", curr_chunk_id, t1);
 
@@ -552,6 +578,9 @@ class GPUlabMPI
             t_PCI.push_back(t_RHS);
             t_PCI.push_back(t_UP);
             t_PCI.push_back(t_ALL);
+
+            /* TODO: (Thu 13 Nov 2014 04:29:42 PM CET) temporary */
+            /* printf("Time for all data copies = %f s\n", t_COPY_data_all); */
 
             return t_PCI; // (h2d HALO, h2d INPUT, d2h OUTPUT, RHS, UP, ALL)
         }
