@@ -75,6 +75,7 @@ class GPUlabMPI
         std::vector<MPI_Request> recv_pending;
         std::vector<MPI_Request> send_pending;
         std::vector<MPI_Status> status;
+        size_t timestamp;
 
         int nbr[6]; // neighbor ranks
 
@@ -103,26 +104,26 @@ class GPUlabMPI
         };
 
         // MPI
-        inline void _issue_send(const Real * const sendbuf, const uint_t Nelements, const uint_t sender)
+        inline void _issue_send(const Real * const sendbuf, const uint_t Nelements, const uint_t sender, const int tag)
         {
             // why is the send buffer not a const pointer?? 3.0 Standard says
             // different
             MPI_Request req;
-            MPI_Isend(const_cast<Real * const>(sendbuf), Nelements, _MPI_REAL_, nbr[sender], sender, cart_world, &req);
+            MPI_Isend(const_cast<Real * const>(sendbuf), Nelements, _MPI_REAL_, nbr[sender], tag, cart_world, &req);
             send_pending.push_back(req);
         }
 
-        inline void _issue_recv(Real * const recvbuf, const uint_t Nelements, const uint_t receiver)
+        inline void _issue_recv(Real * const recvbuf, const uint_t Nelements, const uint_t receiver, const int tag)
         {
             MPI_Request req;
-            MPI_Irecv(recvbuf, Nelements, _MPI_REAL_, nbr[receiver], MPI_ANY_TAG, cart_world, &req);
+            MPI_Irecv(recvbuf, Nelements, _MPI_REAL_, nbr[receiver], tag, cart_world, &req);
             recv_pending.push_back(req);
         }
 
         // Halo extraction
         template <index_map map>
-        void _copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE);
-        void _copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int zS);
+        void _copysend_halos(const int sender, const int tag, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE);
+        void _copysend_halos(const int sender, const int tag, Real * const cpybuf, const uint_t Nhalos, const int zS);
 
 
         ///////////////////////////////////////////////////////////////////////
@@ -579,7 +580,7 @@ class GPUlabMPI
             t_PCI.push_back(t_ALL);
 
             /* TODO: (Thu 13 Nov 2014 04:29:42 PM CET) temporary */
-            printf("Time for all data copies = %f s\n", t_COPY_data_all);
+            /* printf("Time for all data copies = %f s\n", t_COPY_data_all); */
 
             return t_PCI; // (h2d HALO, h2d INPUT, d2h OUTPUT, RHS, UP, ALL)
         }
