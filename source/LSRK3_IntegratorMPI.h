@@ -206,5 +206,11 @@ public:
         }
     }
 
+    virtual ~LSRK3_IntegratorMPI()
+    {
+        grid = 0;
+        GPU = 0;
+    }
+
     double operator()(const double dt_max);
 };

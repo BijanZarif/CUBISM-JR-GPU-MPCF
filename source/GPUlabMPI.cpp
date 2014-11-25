@@ -25,7 +25,7 @@ GPUlabMPI::GPUlabMPI(GridMPI& G, const uint_t nslices_, const int verbosity, con
     GPU_input_size( SLICE_GPU * (nslices_+6) ),
     GPU_output_size( SLICE_GPU * nslices_ ),
     nslices(nslices_), nslices_last( sizeZ % nslices_ ), nchunks( (sizeZ + nslices_ - 1) / nslices_ ),
-    cart_world(G.getCartComm()), request(6), status(6),
+    cart_world(G.getCartComm()), //request(6), status(6),
     BUFFER1(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 0), // per chunk, uses GPU buffer 0
     BUFFER2(GPU_input_size, GPU_output_size, 3*sizeY*nslices_, sizeX*3*nslices_, 1), // per chunk, uses GPU buffer 1
     grid(G),
@@ -69,13 +69,17 @@ GPUlabMPI::GPUlabMPI(GridMPI& G, const uint_t nslices_, const int verbosity, con
         myFeature[i*2 + 1] = mycoords[i] == grid.getBlocksPerDimension(i)-1 ? SKIN : FLESH;
     }
     grid.getNeighborRanks(nbr);
+
+    recv_pending.clear();
+    send_pending.clear();
+    timestamp = 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // PRIVATE
 ///////////////////////////////////////////////////////////////////////////////
 template <index_map map>
-void GPUlabMPI::_copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE)
+void GPUlabMPI::_copysend_halos(const int sender, const int tag, Real * const cpybuf, const uint_t Nhalos, const int xS, const int xE, const int yS, const int yE, const int zS, const int zE)
 {
     assert(Nhalos == (xE-xS)*(yE-yS)*(zE-zS));
 
@@ -90,11 +94,11 @@ void GPUlabMPI::_copysend_halos(const int sender, Real * const cpybuf, const uin
                     cpybuf[offset + map(ix,iy,iz-zS)] = src[ix + sizeX * (iy + sizeY * iz)];
     }
 
-    _issue_send(cpybuf, GridMPI::NVAR * Nhalos, sender);
+    _issue_send(cpybuf, GridMPI::NVAR * Nhalos, sender, tag);
 }
 
 
-void GPUlabMPI::_copysend_halos(const int sender, Real * const cpybuf, const uint_t Nhalos, const int zS)
+void GPUlabMPI::_copysend_halos(const int sender, const int tag, Real * const cpybuf, const uint_t Nhalos, const int zS)
 {
     assert(Nhalos == 3*SLICE_GPU);
 
@@ -107,7 +111,7 @@ void GPUlabMPI::_copysend_halos(const int sender, Real * const cpybuf, const uin
         memcpy(cpybuf + offset, src + srcoffset, Nhalos*sizeof(Real));
     }
 
-    _issue_send(cpybuf, GridMPI::NVAR * Nhalos, sender);
+    _issue_send(cpybuf, GridMPI::NVAR * Nhalos, sender, tag);
 }
 
 
@@ -446,43 +450,80 @@ void GPUlabMPI::_start_info_current_chunk(const std::string title)
 ///////////////////////////////////////////////////////////////////////////////
 pair<double, double> GPUlabMPI::load_ghosts(const double t)
 {
-    Timer timer;
+    Timer timer, timer_comm;
 
-    timer.start();
+    timer_comm.start();
 
-    // send dirt
 #if defined(_MPI_PROFILE_)
-    profiler->push_start("MPI SEND");
+    profiler->push_start("MPI Isend/Irecv");
 #endif
-    if (myFeature[0] == FLESH) _copysend_halos<flesh2ghost::X_L>(0, &halox.send_left[0], halox.Nhalo, 0, 3, 0, sizeY, 0, sizeZ);
-    if (myFeature[1] == FLESH) _copysend_halos<flesh2ghost::X_R>(1, &halox.send_right[0],halox.Nhalo, sizeX-3, sizeX, 0, sizeY, 0, sizeZ);
-    if (myFeature[2] == FLESH) _copysend_halos<flesh2ghost::Y_L>(2, &haloy.send_left[0], haloy.Nhalo, 0, sizeX, 0, 3, 0, sizeZ);
-    if (myFeature[3] == FLESH) _copysend_halos<flesh2ghost::Y_R>(3, &haloy.send_right[0],haloy.Nhalo, 0, sizeX, sizeY-3, sizeY, 0, sizeZ);
-    if (myFeature[4] == FLESH) _copysend_halos(4, &haloz.send_left[0], haloz.Nhalo, 0);
-    if (myFeature[5] == FLESH) _copysend_halos(5, &haloz.send_right[0],haloz.Nhalo, sizeZ-3);
+
+    /* if (myFeature[0] == FLESH) _issue_recv(&halox.recv_left.front(),  halox.Allhalos, 0, 1); //TODO:  x/yhalos directly into pinned mem and H2D */
+    /* if (myFeature[1] == FLESH) _issue_recv(&halox.recv_right.front(), halox.Allhalos, 1, 0); */
+    /* if (myFeature[2] == FLESH) _issue_recv(&haloy.recv_left.front(),  haloy.Allhalos, 2, 3); */
+    /* if (myFeature[3] == FLESH) _issue_recv(&haloy.recv_right.front(), haloy.Allhalos, 3, 2); */
+    /* if (myFeature[4] == FLESH) _issue_recv(&haloz.recv_left.front(),  haloz.Allhalos, 4, 5); // TODO: receive directly into curr_buffer->zghost_l ? */
+    /* if (myFeature[5] == FLESH) _issue_recv(&haloz.recv_right.front(), haloz.Allhalos, 5, 4); */
+
+
+    if (myFeature[0] == FLESH)
+    {
+        _issue_recv(&halox.recv_left.front(),  halox.Allhalos, 0, 6*timestamp + 1); //TODO:  x/yhalos directly into pinned mem and H2D
+        _copysend_halos<flesh2ghost::X_L>(0, 6*timestamp + 0, &halox.send_left.front(), halox.Nhalo, 0, 3, 0, sizeY, 0, sizeZ);
+    }
+    if (myFeature[1] == FLESH)
+    {
+        _issue_recv(&halox.recv_right.front(), halox.Allhalos, 1, 6*timestamp + 0);
+        _copysend_halos<flesh2ghost::X_R>(1, 6*timestamp + 1, &halox.send_right.front(),halox.Nhalo, sizeX-3, sizeX, 0, sizeY, 0, sizeZ);
+    }
+    if (myFeature[2] == FLESH)
+    {
+        _issue_recv(&haloy.recv_left.front(),  haloy.Allhalos, 2, 6*timestamp + 3);
+        _copysend_halos<flesh2ghost::Y_L>(2, 6*timestamp + 2, &haloy.send_left.front(), haloy.Nhalo, 0, sizeX, 0, 3, 0, sizeZ);
+    }
+    if (myFeature[3] == FLESH)
+    {
+        _issue_recv(&haloy.recv_right.front(), haloy.Allhalos, 3, 6*timestamp + 2);
+        _copysend_halos<flesh2ghost::Y_R>(3, 6*timestamp + 3, &haloy.send_right.front(),haloy.Nhalo, 0, sizeX, sizeY-3, sizeY, 0, sizeZ);
+    }
+    if (myFeature[4] == FLESH)
+    {
+        _issue_recv(&haloz.recv_left.front(),  haloz.Allhalos, 4, 6*timestamp + 5); // TODO: receive directly into curr_buffer->zghost_l ?
+        _copysend_halos(4, 6*timestamp + 4, &haloz.send_left.front(), haloz.Nhalo, 0);
+    }
+    if (myFeature[5] == FLESH)
+    {
+        _issue_recv(&haloz.recv_right.front(), haloz.Allhalos, 5, 6*timestamp + 4);
+        _copysend_halos(5, 6*timestamp + 5, &haloz.send_right.front(),haloz.Nhalo, sizeZ-3);
+    }
+
+    ++timestamp;
+
 #if defined(_MPI_PROFILE_)
     profiler->pop_stop();
 #endif
 
-    // get dirt
-#if defined(_MPI_PROFILE_)
-    profiler->push_start("MPI RECV");
-#endif
-    if (myFeature[0] == FLESH) _issue_recv(&halox.recv_left[0],  halox.Allhalos, 0); //TODO:  x/yhalos directly into pinned mem and H2D
-    if (myFeature[1] == FLESH) _issue_recv(&halox.recv_right[0], halox.Allhalos, 1);
-    if (myFeature[2] == FLESH) _issue_recv(&haloy.recv_left[0],  haloy.Allhalos, 2);
-    if (myFeature[3] == FLESH) _issue_recv(&haloy.recv_right[0], haloy.Allhalos, 3);
-    if (myFeature[4] == FLESH) _issue_recv(&haloz.recv_left[0],  haloz.Allhalos, 4); // TODO: receive directly into curr_buffer->zghost_l ?
-    if (myFeature[5] == FLESH) _issue_recv(&haloz.recv_right[0], haloz.Allhalos, 5);
-#if defined(_MPI_PROFILE_)
-    profiler->pop_stop();
-#endif
-
-    const double t_MPI_COMM = timer.stop();
-
+    // in the mean time, apply BC if any
     timer.start();
     _apply_bc(t); // BC's apply to all myFeature == SKIN
     const double t_BC = timer.stop();
+
+    // wait for pending receives
+    if (recv_pending.size() > 0)
+    {
+        vector<MPI_Status> status(recv_pending.size());
+        MPI_Waitall(recv_pending.size(), &recv_pending.front(), &status.front());
+        recv_pending.clear();
+
+        /* TODO: (Wed 12 Nov 2014 03:18:10 PM CET) right now it is ok to do
+         * this here. Must be sure not to overwrite data that still needs to be
+         * sent somewhere (this becomes relevant if send/recv is per chunk, not
+         * wholesale).  At this point, all communication is complete */
+        send_pending.clear();
+    }
+
+    const double t_MPI_COMM = timer_comm.stop();
+
 
     return pair<double,double>(t_MPI_COMM, t_BC);
 }

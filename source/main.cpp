@@ -12,6 +12,7 @@
 #include "Sim_2DSBIMPI.h"
 #include "Sim_SICCloudMPI.h"
 
+#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -81,8 +82,7 @@ int main(int argc, const char *argv[])
 
     delete mysim;
 
-    // good night
-    MPI_Barrier(MPI_COMM_WORLD);
+    // see you later
     MPI_Finalize();
 
     return 0;

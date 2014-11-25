@@ -57,43 +57,35 @@ void SubGridWrapper::make_submesh(GridMPI *grid, const int ncX, const int ncY, c
 
     double O[3];
     grid->get_origin(O);
+
+    int mypeidx[3];
+    grid->peindex(mypeidx);
+
 #pragma omp parallel for
     for (int i=0; i < N; ++i)
     {
         const int bix = i % nblocks[0];
         const int biy = (i/nblocks[0]) % nblocks[1];
-        const int biz = (i/(nblocks[0]*nblocks[1])) % nblocks[2];
+        const int biz = i/(nblocks[0]*nblocks[1]);
 
         const double thisOrigin[3] = {
             O[0] + bix * SubGridWrapper::SubBlock::extent_x,
             O[1] + biy * SubGridWrapper::SubBlock::extent_y,
             O[2] + biz * SubGridWrapper::SubBlock::extent_z };
 
-        const int thisIndex[3] = {bix, biy, biz};
+        const int thisIndex[3] = {
+            nblocks[0]*mypeidx[0] + bix,
+            nblocks[1]*mypeidx[1] + biy,
+            nblocks[2]*mypeidx[2] + biz};
 
         SubBlock thisBlock(thisOrigin, thisIndex);
         blocks[i] = thisBlock;
     }
-
-
-    /* for (int biz=0; biz < nblocks[2]; ++biz) */
-    /*     for (int biy=0; biy < nblocks[1]; ++biy) */
-    /*         for (int bix=0; bix < nblocks[0]; ++bix) */
-    /*         { */
-    /*             const double thisOrigin[3] = { */
-    /*                 O[0] + bix * SubGridWrapper::SubBlock::extent_x, */
-    /*                 O[1] + biy * SubGridWrapper::SubBlock::extent_y, */
-    /*                 O[2] + biz * SubGridWrapper::SubBlock::extent_z }; */
-
-    /*             const int thisIndex[3] = {bix, biy, biz}; */
-
-    /*             SubBlock thisBlock(thisOrigin, thisIndex); */
-    /*             blocks.push_back(thisBlock); */
-    /*         } */
 }
 
 SubGridWrapper::~SubGridWrapper()
 {
+    G = 0;
     SubGridWrapper::SubBlock::assign_supergrid(0);
     blocks.clear();
 }
