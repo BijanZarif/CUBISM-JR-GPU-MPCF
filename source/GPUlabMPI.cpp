@@ -456,36 +456,22 @@ pair<double, double> GPUlabMPI::load_ghosts(const double t)
 #if defined(_MPI_PROFILE_)
     profiler->push_start("MPI Isend/Irecv");
 #endif
-    if (myFeature[0] == FLESH)
-    {
-        _copysend_halos<flesh2ghost::X_L>(0, &halox.send_left.front(), halox.Nhalo, 0, 3, 0, sizeY, 0, sizeZ);
-        _issue_recv(&halox.recv_left.front(),  halox.Allhalos, 0); //TODO:  x/yhalos directly into pinned mem and H2D
-    }
-    if (myFeature[1] == FLESH)
-    {
-        _copysend_halos<flesh2ghost::X_R>(1, &halox.send_right.front(),halox.Nhalo, sizeX-3, sizeX, 0, sizeY, 0, sizeZ);
-        _issue_recv(&halox.recv_right.front(), halox.Allhalos, 1);
-    }
-    if (myFeature[2] == FLESH)
-    {
-        _copysend_halos<flesh2ghost::Y_L>(2, &haloy.send_left.front(), haloy.Nhalo, 0, sizeX, 0, 3, 0, sizeZ);
-        _issue_recv(&haloy.recv_left.front(),  haloy.Allhalos, 2);
-    }
-    if (myFeature[3] == FLESH)
-    {
-        _copysend_halos<flesh2ghost::Y_R>(3, &haloy.send_right.front(),haloy.Nhalo, 0, sizeX, sizeY-3, sizeY, 0, sizeZ);
-        _issue_recv(&haloy.recv_right.front(), haloy.Allhalos, 3);
-    }
-    if (myFeature[4] == FLESH)
-    {
-        _copysend_halos(4, &haloz.send_left.front(), haloz.Nhalo, 0);
-        _issue_recv(&haloz.recv_left.front(),  haloz.Allhalos, 4); // TODO: receive directly into curr_buffer->zghost_l ?
-    }
-    if (myFeature[5] == FLESH)
-    {
-        _copysend_halos(5, &haloz.send_right.front(),haloz.Nhalo, sizeZ-3);
-        _issue_recv(&haloz.recv_right.front(), haloz.Allhalos, 5);
-    }
+    if (myFeature[1] == FLESH) _issue_recv(&halox.recv_right.front(), halox.Allhalos, 1);
+    if (myFeature[0] == FLESH) _issue_recv(&halox.recv_left.front(),  halox.Allhalos, 0); //TODO:  x/yhalos directly into pinned mem and H2D
+    if (myFeature[3] == FLESH) _issue_recv(&haloy.recv_right.front(), haloy.Allhalos, 3);
+    if (myFeature[2] == FLESH) _issue_recv(&haloy.recv_left.front(),  haloy.Allhalos, 2);
+    if (myFeature[5] == FLESH) _issue_recv(&haloz.recv_right.front(), haloz.Allhalos, 5);
+    if (myFeature[4] == FLESH) _issue_recv(&haloz.recv_left.front(),  haloz.Allhalos, 4); // TODO: receive directly into curr_buffer->zghost_l ?
+
+
+    if (myFeature[0] == FLESH) _copysend_halos<flesh2ghost::X_L>(0, &halox.send_left.front(), halox.Nhalo, 0, 3, 0, sizeY, 0, sizeZ);
+    if (myFeature[1] == FLESH) _copysend_halos<flesh2ghost::X_R>(1, &halox.send_right.front(),halox.Nhalo, sizeX-3, sizeX, 0, sizeY, 0, sizeZ);
+    if (myFeature[2] == FLESH) _copysend_halos<flesh2ghost::Y_L>(2, &haloy.send_left.front(), haloy.Nhalo, 0, sizeX, 0, 3, 0, sizeZ);
+    if (myFeature[3] == FLESH) _copysend_halos<flesh2ghost::Y_R>(3, &haloy.send_right.front(),haloy.Nhalo, 0, sizeX, sizeY-3, sizeY, 0, sizeZ);
+    if (myFeature[4] == FLESH) _copysend_halos(4, &haloz.send_left.front(), haloz.Nhalo, 0);
+    if (myFeature[5] == FLESH) _copysend_halos(5, &haloz.send_right.front(),haloz.Nhalo, sizeZ-3);
+
+
 #if defined(_MPI_PROFILE_)
     profiler->pop_stop();
 #endif
