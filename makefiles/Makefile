@@ -53,7 +53,13 @@ endif
 ifneq "$(findstring localhost.localdomain,$(shell hostname))" "" #Cyrus
 	mpi-inc = /usr/include/openmpi-x86_64
 	mpi-lib = /usr/lib64/openmpi/lib
-	LIBS += -L/usr/local/cuda-6.0/lib64 -lcudart
+	LIBS += -L/usr/local/cuda/lib64 -lcudart
+endif
+
+ifneq "$(findstring falcon,$(shell hostname))" "" #Cyrus
+	mpi-inc = /usr/include/openmpi-x86_64
+	mpi-lib = /usr/lib64/openmpi/lib
+	LIBS += -L/usr/local/cuda/lib64 -lcudart
 endif
 
 # CUFLAGS += -arch=sm_35 -Xptxas -v

@@ -234,6 +234,7 @@ void GPUlabMPI::_init_next_chunk()
 
 void GPUlabMPI::_dump_chunk(const int complete)
 {
+#ifdef _USE_HDF_
     static unsigned int ndumps = 0;
     printf("Dumping Chunk %d (total dumps %d)...\n", curr_chunk_id, ++ndumps);
 
@@ -402,6 +403,7 @@ void GPUlabMPI::_dump_chunk(const int complete)
         fprintf(xmf, "</Xdmf>\n");
         fclose(xmf);
     }
+#endif
 }
 
 
