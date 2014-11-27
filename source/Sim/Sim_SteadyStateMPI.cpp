@@ -181,7 +181,7 @@ void Sim_SteadyStateMPI::_dump(const string basename)
     const string dump_path = parser("-fpath").asString(".");
 
     sprintf(fname, "%s_%04d", basename.c_str(), fcount);
-    if (isroot) printf("Dumping file %s at step %d, time %f\n", fname, LSRK3_DataMPI::step, LSRK3_DataMPI::time);
+    if (isroot) printf("Dumping HDF file %s at step %d, time %f\n", fname, LSRK3_DataMPI::step, LSRK3_DataMPI::time);
     DumpHDF5_MPI<GridMPI, myTensorialStreamer>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
     ++fcount;
 }
@@ -189,7 +189,7 @@ void Sim_SteadyStateMPI::_dump(const string basename)
 
 void Sim_SteadyStateMPI::_vp(const std::string basename)
 {
-    if (isroot) cout << "dumping MPI VP ...\n" ;
+    if (isroot) cout << "Dumping MPI VP...\n" ;
 
     const string path = parser("-fpath").asString(".");
 

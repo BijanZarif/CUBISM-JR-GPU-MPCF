@@ -67,14 +67,14 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
     }
     assert(sos > 0);
 
-    MPI_Allreduce(MPI_IN_PLACE, &sos, 1, MPI_FLOAT, MPI_MAX, grid->getCartComm());
+    MPI_Allreduce(MPI_IN_PLACE, &sos, 1, MPI_FLOAT, MPI_MAX, MPI_COMM_WORLD);
 
     if (isroot) printf("Max SOS = %f (took %f sec)\n", sos, tsos);
 
     dt = CFL * h / sos;
     dt = dt_max < dt ? dt_max : dt;
 
-    /* MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, grid->getCartComm()); */
+    /* MPI_Allreduce(MPI_IN_PLACE, &dt, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD); */
 
     // update state
     LSRK3_DataMPI::time += dt;

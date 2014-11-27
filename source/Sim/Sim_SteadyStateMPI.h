@@ -27,7 +27,7 @@ protected:
 
     // simulation parameter
     double tend, tnextdump, dumpinterval, CFL, maxextent;
-    uint_t nsteps, nslices, saveperiod;
+    int nsteps, nslices, saveperiod;
     int verbosity, save_flipflop, fcount;
     bool restart, dryrun, bIO, bHDF, bVP;
     char fname[256];

@@ -73,12 +73,14 @@ void SubGridWrapper::make_submesh(GridMPI *grid, const int ncX, const int ncY, c
             O[1] + biy * SubGridWrapper::SubBlock::extent_y,
             O[2] + biz * SubGridWrapper::SubBlock::extent_z };
 
-        const int thisIndex[3] = {
+        const int thisMPIIdx[3] = {bix, biy, biz};
+
+        const int thisUniverseIdx[3] = {
             nblocks[0]*mypeidx[0] + bix,
             nblocks[1]*mypeidx[1] + biy,
             nblocks[2]*mypeidx[2] + biz};
 
-        SubBlock thisBlock(thisOrigin, thisIndex);
+        SubBlock thisBlock(thisOrigin, thisMPIIdx, thisUniverseIdx);
         blocks[i] = thisBlock;
     }
 }

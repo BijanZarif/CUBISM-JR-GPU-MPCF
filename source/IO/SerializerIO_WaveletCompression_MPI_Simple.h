@@ -208,7 +208,10 @@ protected:
 
                 //building the meta data
                 {
-                    BlockMetadata curr = { i, myhotblocks, vInfo[i].get_block_index(0), vInfo[i].get_block_index(1), vInfo[i].get_block_index(2)};
+                    BlockMetadata curr = { i, myhotblocks,
+                        vInfo[i].get_block_index_universe(0),
+                        vInfo[i].get_block_index_universe(1),
+                        vInfo[i].get_block_index_universe(2)};
                     mybuf.hotblocks[myhotblocks] = curr;
                     myhotblocks++;
                 }
