@@ -20,6 +20,7 @@
 using namespace std;
 
 #define _BUBBLECENTIPEDE_X_ 1
+#define _MPI_Y2_ 0
 
 #ifdef _FLOAT_PRECISION_
 #define _MPIREAL_ MPI_FLOAT
@@ -126,11 +127,15 @@ void Sim_SICCloudMPI::_dump_statistics(const int step_id, const Real t, const Re
     vector<Real> mycenterline_P(_BLOCKSIZEX_);
 
     // copy the shit
-    const size_t idx_start0 = ID3(0, _BLOCKSIZEY_-1, _BLOCKSIZEZ_/2, _BLOCKSIZEX_, _BLOCKSIZEY_);
-    const size_t idx_start1 = ID3(0, 0,              _BLOCKSIZEZ_/2, _BLOCKSIZEX_, _BLOCKSIZEY_);
     int mypeidx[3];
     mygrid->peindex(mypeidx);
+#if _MPI_Y2_
+    const size_t idx_start0 = ID3(0, _BLOCKSIZEY_-1, _BLOCKSIZEZ_/2, _BLOCKSIZEX_, _BLOCKSIZEY_);
+    const size_t idx_start1 = ID3(0, 0,              _BLOCKSIZEZ_/2, _BLOCKSIZEX_, _BLOCKSIZEY_);
     const size_t my_idxstart = idx_start0*(1-mypeidx[1]) + idx_start1*mypeidx[1];
+#else
+    const size_t my_idxstart = ID3(0, _BLOCKSIZEY_/2, _BLOCKSIZEZ_/2, _BLOCKSIZEX_, _BLOCKSIZEY_);
+#endif
     memcpy(&mycenterline_r.front(), &r[my_idxstart], _BLOCKSIZEX_*sizeof(Real));
     memcpy(&mycenterline_p.front(), &e[my_idxstart], _BLOCKSIZEX_*sizeof(Real));
     memcpy(&mycenterline_G.front(), &G[my_idxstart], _BLOCKSIZEX_*sizeof(Real));
@@ -212,6 +217,7 @@ void Sim_SICCloudMPI::_dump_statistics(const int step_id, const Real t, const Re
         Real* cu = &centerline_u.front();
         Real* cv = &centerline_v.front();
         Real* cw = &centerline_w.front();
+#if _MPI_Y2_
         for (int j=0; j < gsize/2; ++j)
         {
             for (int i=0; i < _BLOCKSIZEX_; ++i)
@@ -227,6 +233,10 @@ void Sim_SICCloudMPI::_dump_statistics(const int step_id, const Real t, const Re
             cv += 2*_BLOCKSIZEX_;
             cw += 2*_BLOCKSIZEX_;
         }
+#else
+        for (int i=0; i < centerline_r.size(); ++i)
+            fprintf(f, "%e %e %e %e %e\n", cr[i], cp[i], cu[i], cv[i], cw[i]);
+#endif
         fclose(f);
 #endif
     }
@@ -691,6 +701,7 @@ void Sim_SICCloudMPI::run()
             if (bIO && (float)LSRK3_DataMPI::time == (float)tnextdump)
             {
                 fprintf(fp, "step=%d\ttime=%e\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
+                fflush(fp);
                 tnextdump += dumpinterval;
                 if (isroot) printf("I have to take a dump...\n");
                 _take_a_dump();
