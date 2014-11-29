@@ -745,7 +745,7 @@ void Sim_SICCloudMPI::run()
 
                 stepper->set_CFL(CFL);
 
-                profiler.printSummary();
+                if (isroot) profiler.printSummary();
             }
 
             if ((LSRK3_DataMPI::step - step_start) == nsteps) break;
