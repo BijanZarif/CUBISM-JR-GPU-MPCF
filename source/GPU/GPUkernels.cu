@@ -1434,6 +1434,11 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     _WENO_Y<6><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6], mybuf->d_ygl[6], mybuf->d_ygr[6]);
 
     // hllc fluxes
+    /* TODO: (Wed 03 Dec 2014 04:27:21 PM CET) shouldn't here the kernel grid
+     * be like:
+     * const dim3 Y_grid((NX + _WARPSIZE_ - 1)/_WARPSIZE_, NY, (nslices + 4 - 1)/4);
+     * ?????
+     * */
     _HLLC_Y<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(recon_m, recon_p, inout, d_sumG, d_sumP, d_divU);
 
     // ========================================================================
