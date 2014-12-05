@@ -212,7 +212,7 @@ inline void _char_vel_einfeldt(const Real rm, const Real rp,
         const Real pm, const Real pp,
         const Real Gm, const Real Gp,
         const Real Pm, const Real Pp,
-        Real& outm, Real& outp) // (23 MUL/ADD/SUB + 6 DIV) = 29 FLOP
+        Real& outm, Real& outp) // (23 MUL/ADD/SUB + 7 DIV) = 30 FLOP
 {
     /* *
      * Compute upper and lower bounds of signal velocities for the Riemann
@@ -789,7 +789,7 @@ _HLLC_X(DevicePointer recon_m, DevicePointer recon_p)
         assert(Pm >= 0.0f); assert(Pp >= 0.0f);
 
         Real sm, sp;
-        _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+        _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 30 FLOP (6 DIV)
         const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp); // 11 FLOP (1 DIV)
         assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
 
@@ -879,7 +879,7 @@ _HLLC_Y(DevicePointer recon_m, DevicePointer recon_p, DevicePointer divF,
             assert(Pm >= 0.0f); assert(Pp >= 0.0f);
 
             Real sm, sp;
-            _char_vel_einfeldt(rm, rp, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+            _char_vel_einfeldt(rm, rp, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 30 FLOP (6 DIV)
             const Real ss = _char_vel_star(rm, rp, vm, vp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
             assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
 
@@ -974,7 +974,7 @@ _HLLC_Z(DevicePointer recon_m, DevicePointer recon_p, DevicePointer divF,
             assert(Pm >= 0.0f); assert(Pp >= 0.0f);
 
             Real sm, sp;
-            _char_vel_einfeldt(rm, rp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+            _char_vel_einfeldt(rm, rp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 30 FLOP (6 DIV)
             const Real ss = _char_vel_star(rm, rp, wm, wp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
             assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
 
