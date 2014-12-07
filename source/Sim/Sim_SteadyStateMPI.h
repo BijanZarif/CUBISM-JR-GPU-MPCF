@@ -18,6 +18,12 @@
 #include "SubGridWrapper.h"
 #include "SerializerIO_WaveletCompression_MPI_Simple.h"
 
+class Sim_SteadyStateData
+{
+public:
+    static Real r, u, v, w, e, G, P;
+};
+
 
 class Sim_SteadyStateMPI : public Simulation
 {
@@ -84,7 +90,18 @@ protected:
     void _apply_bc(const double t = 0)
     {
         BoundaryConditions<GridMPI> bc(grid.pdata());
-        if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0,ghostmap::X>(halox.left);
+
+        const Real D[GridMPI::NVAR] = {
+            Sim_SteadyStateData::r,
+            Sim_SteadyStateData::u+1.0,
+            Sim_SteadyStateData::v,
+            Sim_SteadyStateData::w,
+            Sim_SteadyStateData::e,
+            Sim_SteadyStateData::G,
+            Sim_SteadyStateData::P};
+
+        if (myFeature[0] == SKIN) bc.template applyBC_dirichlet<0,0,ghostmap::X>(halox.left, D);
+        /* if (myFeature[0] == SKIN) bc.template applyBC_absorbing<0,0,ghostmap::X>(halox.left); */
         if (myFeature[1] == SKIN) bc.template applyBC_absorbing<0,1,ghostmap::X>(halox.right);
         if (myFeature[2] == SKIN) bc.template applyBC_absorbing<1,0,ghostmap::Y>(haloy.left);
         if (myFeature[3] == SKIN) bc.template applyBC_absorbing<1,1,ghostmap::Y>(haloy.right);
