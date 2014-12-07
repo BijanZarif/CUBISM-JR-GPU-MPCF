@@ -465,12 +465,6 @@ struct mySaveStreamer_part1
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
         out[0] = r[idx];
-        /* out[1] = u[idx]; */
-        /* out[2] = v[idx]; */
-        /* out[3] = w[idx]; */
-        /* out[4] = e[idx]; */
-        /* out[5] = G[idx]; */
-        /* out[6] = P[idx]; */
     }
 
     void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz)
@@ -478,12 +472,6 @@ struct mySaveStreamer_part1
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
         r[idx] = input[0];
-        /* u[idx] = input[1]; */
-        /* v[idx] = input[2]; */
-        /* w[idx] = input[3]; */
-        /* e[idx] = input[4]; */
-        /* G[idx] = input[5]; */
-        /* P[idx] = input[6]; */
     }
 
     static const char * getAttributeName() { return "Save_Data_Part1"; }
@@ -505,26 +493,14 @@ struct mySaveStreamer_part2
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* out[0] = r[idx]; */
         out[0] = u[idx];
-        /* out[0] = v[idx]; */
-        /* out[1] = w[idx]; */
-        /* out[0] = e[idx]; */
-        /* out[1] = G[idx]; */
-        /* out[2] = P[idx]; */
     }
 
     void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz)
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* r[idx] = input[0]; */
         u[idx] = input[0];
-        /* v[idx] = input[0]; */
-        /* w[idx] = input[1]; */
-        /* e[idx] = input[0]; */
-        /* G[idx] = input[1]; */
-        /* P[idx] = input[2]; */
     }
 
     static const char * getAttributeName() { return "Save_Data_Part2"; }
@@ -546,26 +522,14 @@ struct mySaveStreamer_part3
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* out[0] = r[idx]; */
-        /* out[1] = u[idx]; */
         out[0] = v[idx];
-        /* out[1] = w[idx]; */
-        /* out[0] = e[idx]; */
-        /* out[1] = G[idx]; */
-        /* out[2] = P[idx]; */
     }
 
     void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz)
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* r[idx] = input[0]; */
-        /* u[idx] = input[1]; */
         v[idx] = input[0];
-        /* w[idx] = input[1]; */
-        /* e[idx] = input[0]; */
-        /* G[idx] = input[1]; */
-        /* P[idx] = input[2]; */
     }
 
     static const char * getAttributeName() { return "Save_Data_Part3"; }
@@ -587,26 +551,14 @@ struct mySaveStreamer_part4
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* out[0] = r[idx]; */
-        /* out[1] = u[idx]; */
-        /* out[0] = v[idx]; */
         out[0] = w[idx];
-        /* out[0] = e[idx]; */
-        /* out[1] = G[idx]; */
-        /* out[0] = P[idx]; */
     }
 
     void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz)
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* r[idx] = input[0]; */
-        /* u[idx] = input[1]; */
-        /* v[idx] = input[0]; */
         w[idx] = input[0];
-        /* e[idx] = input[0]; */
-        /* G[idx] = input[1]; */
-        /* P[idx] = input[0]; */
     }
 
     static const char * getAttributeName() { return "Save_Data_Part4"; }
@@ -622,32 +574,20 @@ struct mySaveStreamer_part5
     typedef Real * const flow_quantity;
     flow_quantity r, u, v, w, e, G, P;
 
-    mySaveStreamer_part4(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
+    mySaveStreamer_part5(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
 
     void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* out[0] = r[idx]; */
-        /* out[1] = u[idx]; */
-        /* out[0] = v[idx]; */
-        /* out[1] = w[idx]; */
         out[0] = e[idx];
-        /* out[1] = G[idx]; */
-        /* out[0] = P[idx]; */
     }
 
     void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz)
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* r[idx] = input[0]; */
-        /* u[idx] = input[1]; */
-        /* v[idx] = input[0]; */
-        /* w[idx] = input[1]; */
         e[idx] = input[0];
-        /* G[idx] = input[1]; */
-        /* P[idx] = input[0]; */
     }
 
     static const char * getAttributeName() { return "Save_Data_Part5"; }
@@ -663,32 +603,20 @@ struct mySaveStreamer_part6
     typedef Real * const flow_quantity;
     flow_quantity r, u, v, w, e, G, P;
 
-    mySaveStreamer_part4(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
+    mySaveStreamer_part6(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
 
     void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* out[0] = r[idx]; */
-        /* out[1] = u[idx]; */
-        /* out[0] = v[idx]; */
-        /* out[1] = w[idx]; */
-        /* out[0] = e[idx]; */
         out[0] = G[idx];
-        /* out[0] = P[idx]; */
     }
 
     void operate(const Real input[NCHANNELS], const int ix, const int iy, const int iz)
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* r[idx] = input[0]; */
-        /* u[idx] = input[1]; */
-        /* v[idx] = input[0]; */
-        /* w[idx] = input[1]; */
-        /* e[idx] = input[0]; */
         G[idx] = input[0];
-        /* P[idx] = input[0]; */
     }
 
     static const char * getAttributeName() { return "Save_Data_Part6"; }
@@ -704,18 +632,12 @@ struct mySaveStreamer_part7
     typedef Real * const flow_quantity;
     flow_quantity r, u, v, w, e, G, P;
 
-    mySaveStreamer_part4(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
+    mySaveStreamer_part7(const std::vector<Real *>& ptr) : r(ptr[0]), u(ptr[1]), v(ptr[2]), w(ptr[3]), e(ptr[4]), G(ptr[5]), P(ptr[6]) {}
 
     void operate(const int ix, const int iy, const int iz, Real out[NCHANNELS]) const
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* out[0] = r[idx]; */
-        /* out[1] = u[idx]; */
-        /* out[0] = v[idx]; */
-        /* out[1] = w[idx]; */
-        /* out[0] = e[idx]; */
-        /* out[1] = G[idx]; */
         out[0] = P[idx];
     }
 
@@ -723,12 +645,6 @@ struct mySaveStreamer_part7
     {
         const int idx = ID3(ix,iy,iz,NX,NY);
         assert(idx < NX * NY * NZ);
-        /* r[idx] = input[0]; */
-        /* u[idx] = input[1]; */
-        /* v[idx] = input[0]; */
-        /* w[idx] = input[1]; */
-        /* e[idx] = input[0]; */
-        /* G[idx] = input[1]; */
         P[idx] = input[0];
     }
 
