@@ -212,7 +212,7 @@ inline void _char_vel_einfeldt(const Real rm, const Real rp,
         const Real pm, const Real pp,
         const Real Gm, const Real Gp,
         const Real Pm, const Real Pp,
-        Real& outm, Real& outp) // (23 MUL/ADD/SUB + 6 DIV) = 29 FLOP
+        Real& outm, Real& outp) // (23 MUL/ADD/SUB + 7 DIV) = 30 FLOP
 {
     /* *
      * Compute upper and lower bounds of signal velocities for the Riemann
@@ -789,7 +789,7 @@ _HLLC_X(DevicePointer recon_m, DevicePointer recon_p)
         assert(Pm >= 0.0f); assert(Pp >= 0.0f);
 
         Real sm, sp;
-        _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+        _char_vel_einfeldt(rm, rp, um, up, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 30 FLOP (6 DIV)
         const Real ss = _char_vel_star(rm, rp, um, up, pm, pp, sm, sp); // 11 FLOP (1 DIV)
         assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
 
@@ -879,7 +879,7 @@ _HLLC_Y(DevicePointer recon_m, DevicePointer recon_p, DevicePointer divF,
             assert(Pm >= 0.0f); assert(Pp >= 0.0f);
 
             Real sm, sp;
-            _char_vel_einfeldt(rm, rp, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+            _char_vel_einfeldt(rm, rp, vm, vp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 30 FLOP (6 DIV)
             const Real ss = _char_vel_star(rm, rp, vm, vp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
             assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
 
@@ -974,7 +974,7 @@ _HLLC_Z(DevicePointer recon_m, DevicePointer recon_p, DevicePointer divF,
             assert(Pm >= 0.0f); assert(Pp >= 0.0f);
 
             Real sm, sp;
-            _char_vel_einfeldt(rm, rp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 29 FLOP (6 DIV)
+            _char_vel_einfeldt(rm, rp, wm, wp, pm, pp, Gm, Gp, Pm, Pp, sm, sp); // 30 FLOP (6 DIV)
             const Real ss = _char_vel_star(rm, rp, wm, wp, pm, pp, sm, sp); // 11 FLOP (1 DIV)
             assert(!isnan(sm)); assert(!isnan(sp)); assert(!isnan(ss));
 
@@ -1434,6 +1434,11 @@ void GPU::compute_pipe_divF(const uint_t nslices, const uint_t global_iz,
     _WENO_Y<6><<<Y_grid, Y_blocks, 0, stream[s_id]>>>(d_recon_m[6], d_recon_p[6], mybuf->d_ygl[6], mybuf->d_ygr[6]);
 
     // hllc fluxes
+    /* TODO: (Wed 03 Dec 2014 04:27:21 PM CET) shouldn't here the kernel grid
+     * be like:
+     * const dim3 Y_grid((NX + _WARPSIZE_ - 1)/_WARPSIZE_, NY, (nslices + 4 - 1)/4);
+     * ?????
+     * */
     _HLLC_Y<<<Y_grid, Y_blocks, 0, stream[s_id]>>>(recon_m, recon_p, inout, d_sumG, d_sumP, d_divU);
 
     // ========================================================================
