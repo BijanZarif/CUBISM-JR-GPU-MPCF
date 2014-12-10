@@ -115,6 +115,8 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
     fprintf(f, "%d %e %e %e %e %e %e %e %e\n", LSRK3_DataMPI::step,
             COPY, DT, H2D, RHS, D2H, UP, SYNC,
             COPY+DT+H2D+RHS+D2H+UP);
+    fflush(f);
+    fclose(f);
 
     return dt;
 }
