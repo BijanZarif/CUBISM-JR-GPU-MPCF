@@ -21,6 +21,8 @@
 #include <vector>
 #include <utility>
 #include <string>
+#include <map>
+#include <string>
 
 #ifdef _USE_HDF_
 #include <hdf5.h>
@@ -32,6 +34,8 @@
 #define _MPI_REAL_ MPI_DOUBLE
 #endif
 
+
+extern std::map<string, double> rkstep_timecollector;
 
 class GPUlabMPI
 {
@@ -67,6 +71,7 @@ class GPUlabMPI
 
         /* TODO: (Thu 13 Nov 2014 04:27:32 PM CET) temporary */
         double t_COPY_data_all;
+        double t_SYNC_all;
 
         ///////////////////////////////////////////////////////////////////////
         // HALOS / MPI COMMUNICATION
@@ -307,6 +312,7 @@ class GPUlabMPI
             double t_UP_chunk = 0.0;
 
             double t_COPY_data = 0.0;
+            double t_SYNC_chunk = 0.0;
 
             ///////////////////////////////////////////////////////////////////////////
             // 1.)
@@ -324,8 +330,10 @@ class GPUlabMPI
             {
                 case INTERMEDIATE:
                 case LAST:
+                    timer.start();
                     Kupdate update(a, b, dtinvh);
                     GPU::wait_d2h(prev_chunk_id);
+                    t_SYNC_chunk = timer.stop();
                     /* GPU::wait_d2h(0); // stream 0 */
 
                     timer.start();
@@ -419,6 +427,7 @@ class GPUlabMPI
             }
 
             t_COPY_data_all += t_COPY_data;
+            t_SYNC_all += t_SYNC_chunk;
             return t_UP_chunk;
         }
 
@@ -492,6 +501,7 @@ class GPUlabMPI
             real_vector_t& tmp = grid.ptmp();
 
             t_COPY_data_all = 0.0;
+            t_SYNC_all = 0.0;
 
             Timer tall;
             tall.start();
@@ -557,8 +567,10 @@ class GPUlabMPI
             ///////////////////////////////////////////////////////////////
             // 5.)
             ///////////////////////////////////////////////////////////////
+            timer.start();
             Kupdate update(a, b, dtinvh);
             GPU::wait_d2h(prev_chunk_id);
+            t_SYNC_all += timer.stop();
             /* GPU::wait_d2h(0); // stream 0 */
 
             timer.start();
@@ -578,6 +590,9 @@ class GPUlabMPI
             t_PCI.push_back(t_RHS);
             t_PCI.push_back(t_UP);
             t_PCI.push_back(t_ALL);
+
+            rkstep_timecollector["COPY"] += t_COPY_data_all;
+            rkstep_timecollector["SYNC"] += t_SYNC_all;
 
             /* TODO: (Thu 13 Nov 2014 04:29:42 PM CET) temporary */
             /* printf("Time for all data copies = %f s\n", t_COPY_data_all); */

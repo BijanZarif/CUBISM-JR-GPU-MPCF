@@ -54,6 +54,14 @@ static double _maxSOS(const GridMPI * const grid, float& sos)
 
 double LSRK3_IntegratorMPI::operator()(const double dt_max)
 {
+    rkstep_timecollector["COPY"] = 0.0;
+    rkstep_timecollector["DT"]   = 0.0;
+    rkstep_timecollector["RHS"]  = 0.0;
+    rkstep_timecollector["H2D"]  = 0.0;
+    rkstep_timecollector["D2H"]  = 0.0;
+    rkstep_timecollector["UP"]   = 0.0;
+    rkstep_timecollector["SYNC"] = 0.0;
+
     double tsos;
     if (SOSkernel == "cuda") tsos = GPU->max_sos(sos);
     else if (SOSkernel == "cpp") tsos = _maxSOS<MaxSpeedOfSound_CPP>(grid, sos);
@@ -66,6 +74,8 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
         abort();
     }
     assert(sos > 0);
+
+    rkstep_timecollector["DT"] = tsos;
 
     MPI_Allreduce(MPI_IN_PLACE, &sos, 1, MPI_FLOAT, MPI_MAX, MPI_COMM_WORLD);
 
@@ -93,6 +103,18 @@ double LSRK3_IntegratorMPI::operator()(const double dt_max)
     }
 
     if (isroot) printf("netto step takes %f sec\n", tsos + trk3);
+
+    FILE* f = fopen("rkstep_time.dat", "a");
+    const double COPY = rkstep_timecollector["COPY"];
+    const double DT   = rkstep_timecollector["DT"];
+    const double H2D  = rkstep_timecollector["H2D"];
+    const double RHS  = rkstep_timecollector["RHS"];
+    const double D2H  = rkstep_timecollector["D2H"];
+    const double UP   = rkstep_timecollector["UP"];
+    const double SYNC = rkstep_timecollector["SYNC"];
+    fprintf(f, "%d %e %e %e %e %e %e %e %e\n", LSRK3_DataMPI::step,
+            COPY, DT, H2D, RHS, D2H, UP, SYNC,
+            COPY+DT+H2D+RHS+D2H+UP);
 
     return dt;
 }

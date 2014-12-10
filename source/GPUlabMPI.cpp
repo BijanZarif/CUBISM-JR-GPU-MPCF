@@ -20,6 +20,8 @@ using namespace std;
 #endif
 
 
+std::map<string, double> rkstep_timecollector;
+
 GPUlabMPI::GPUlabMPI(GridMPI& G, const uint_t nslices_, const int verbosity, const bool isroot_, const bool state_) :
     isroot(isroot_), update_state(state_),
     GPU_input_size( SLICE_GPU * (nslices_+6) ),

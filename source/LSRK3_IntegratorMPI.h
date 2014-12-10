@@ -101,6 +101,11 @@ class LSRK3_IntegratorMPI
             if (isroot && verbosity) printf("Correction update takes %f sec\n", t_correction);
         }
 
+        rkstep_timecollector["H2D"] += t_main[0][0] + t_main[1][0] + t_main[2][0] + t_main[0][1] + t_main[1][1] + t_main[2][1];
+        rkstep_timecollector["D2H"] += t_main[0][2] + t_main[1][2] + t_main[2][2];
+        rkstep_timecollector["RHS"] += t_main[0][3] + t_main[1][3] + t_main[2][3];
+        rkstep_timecollector["UP"]  += t_main[0][4] + t_main[1][4] + t_main[2][4];
+
         if (bhist)
         {
             const double avg_MPI_comm = (t_ghosts[0].first  + t_ghosts[1].first  + t_ghosts[2].first) / 3.0;
