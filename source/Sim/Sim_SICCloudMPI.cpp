@@ -681,7 +681,7 @@ void Sim_SICCloudMPI::run()
 
         const uint_t step_start = LSRK3_DataMPI::step; // such that -nsteps is a relative measure (only relevant for restarts)
 
-        /* _dump_statistics(LSRK3_DataMPI::step, LSRK3_DataMPI::time, 0.0); */
+        _dump_statistics(LSRK3_DataMPI::step, LSRK3_DataMPI::time, 0.0);
 
         while (LSRK3_DataMPI::time < tend)
         {
