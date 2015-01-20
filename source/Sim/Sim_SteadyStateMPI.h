@@ -16,7 +16,35 @@
 #include "LSRK3_IntegratorMPI.h"
 #include "BoundaryConditions.h"
 #include "SubGridWrapper.h"
+///////////////////////////////////////////////////////////////////////////////
+// Wavelet dumper only works in single precision
+#ifdef _FLOAT_PRECISION_
 #include "SerializerIO_WaveletCompression_MPI_Simple.h"
+#else
+
+#ifndef _SUBBLOCKSIZE_
+#define _SUBBLOCKSIZE_ 16
+#endif
+
+// Dummy class, fakes the wavelet dumper interface
+template <typename TGrid, typename TStreamer>
+class SerializerIO_WaveletCompression_MPI_SimpleBlocking
+{
+public:
+    void set_threshold(const Real threshold) {}
+    void float16() {}
+    void verbose() {}
+
+    template< int channel >
+    void Write(const TGrid& inputGrid, string fileName, TStreamer streamer = TStreamer()) {}
+    void Read(string fileName, TStreamer streamer = TStreamer()) {}
+};
+
+template<typename GridType, typename IterativeStreamer>
+class SerializerIO_WaveletCompression_MPI_Simple : public SerializerIO_WaveletCompression_MPI_SimpleBlocking<GridType, IterativeStreamer> {};
+#endif
+///////////////////////////////////////////////////////////////////////////////
+
 
 class Sim_SteadyStateData
 {

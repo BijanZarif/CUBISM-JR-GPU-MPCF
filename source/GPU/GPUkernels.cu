@@ -55,6 +55,7 @@ extern cudaEvent_t *pipe_start;
 extern cudaEvent_t *pipe_stop;
 
 // texture references, for each variable one
+// check for double precision texture fetch https://developer.nvidia.com/cuda-faq
 texture<float, 3, cudaReadModeElementType> tex00;
 texture<float, 3, cudaReadModeElementType> tex01;
 texture<float, 3, cudaReadModeElementType> tex02;

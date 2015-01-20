@@ -103,7 +103,9 @@ VPATH := ../source/ ../source/WaveletCompression ../source/IO ../source/GPU ../s
 # core
 OBJECTS = main.o Types.o NodeBlock.o SubGridWrapper.o GPUlabMPI.o LSRK3_IntegratorMPI.o Histogram.o
 # wavelets
-OBJECTS += WaveletCompressor.o
+ifeq "$(ap)" "float"
+	OBJECTS += WaveletCompressor.o
+endif
 # CPP kernel drivers
 OBJECTS += MaxSpeedOfSound.o MaxSpeedOfSound_CUDA.o Convection_CUDA.o Update_CPP.o
 # Simulations

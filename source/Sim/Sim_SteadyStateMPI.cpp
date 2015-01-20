@@ -354,6 +354,11 @@ void Sim_SteadyStateMPI::run()
 
     if (parser("-printargs").asBool(true) && isroot) parser.print_options();
 
+#ifndef _FLOAT_PRECISION_
+    bVP = false;
+    if (isroot) printf("WARNING: VP dumps disabled due to double precision run!\n");
+#endif
+
     // log dumps
     FILE* fp;
     if (bIO) fp = fopen("dump.log", "a");
