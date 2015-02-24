@@ -32,6 +32,13 @@ void copy_kernel(float * const __restrict__ in, float * const __restrict__ out,
 
 int main()
 {
+    int dev;
+    cudaGetDevice(&dev);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, dev);
+    printf("Device ID: %d\n", dev);
+    printf("Device: %s\n", prop.name);
+
     const int size_x = 2048;
     const int size_y = 2048;
     /* const int size_x = 4096; */

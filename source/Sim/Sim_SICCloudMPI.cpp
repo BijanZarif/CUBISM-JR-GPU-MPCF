@@ -14,8 +14,19 @@
 #include <iostream>
 #include <cstdlib>
 #include <cmath>
+#include <cstring>
 #include <sstream>
+#include <mpi.h>
 using namespace std;
+
+#define _BUBBLECENTIPEDE_X_ 1
+#define _MPI_Y2_ 0
+
+#ifdef _FLOAT_PRECISION_
+#define _MPIREAL_ MPI_FLOAT
+#else
+#define _MPIREAL_ MPI_DOUBLE
+#endif
 
 
 namespace SICCloudData
@@ -104,14 +115,131 @@ void Sim_SICCloudMPI::_dump_statistics(const int step_id, const Real t, const Re
         p_max    = max(p_max, pressure);
     }
 
+#if _BUBBLECENTIPEDE_X_
+    // Only if leading dimension is X !!!!
+
+    vector<Real> mycenterline_r(_BLOCKSIZEX_);
+    vector<Real> mycenterline_p(_BLOCKSIZEX_);
+    vector<Real> mycenterline_u(_BLOCKSIZEX_);
+    vector<Real> mycenterline_v(_BLOCKSIZEX_);
+    vector<Real> mycenterline_w(_BLOCKSIZEX_);
+    vector<Real> mycenterline_G(_BLOCKSIZEX_);
+    vector<Real> mycenterline_P(_BLOCKSIZEX_);
+
+    // copy the shit
+    int mypeidx[3];
+    mygrid->peindex(mypeidx);
+#if _MPI_Y2_
+    const size_t idx_start0 = ID3(0, _BLOCKSIZEY_-1, _BLOCKSIZEZ_/2, _BLOCKSIZEX_, _BLOCKSIZEY_);
+    const size_t idx_start1 = ID3(0, 0,              _BLOCKSIZEZ_/2, _BLOCKSIZEX_, _BLOCKSIZEY_);
+    const size_t my_idxstart = idx_start0*(1-mypeidx[1]) + idx_start1*mypeidx[1];
+#else
+    const size_t my_idxstart = ID3(0, _BLOCKSIZEY_/2, _BLOCKSIZEZ_/2, _BLOCKSIZEX_, _BLOCKSIZEY_);
+#endif
+    memcpy(&mycenterline_r.front(), &r[my_idxstart], _BLOCKSIZEX_*sizeof(Real));
+    memcpy(&mycenterline_p.front(), &e[my_idxstart], _BLOCKSIZEX_*sizeof(Real));
+    memcpy(&mycenterline_G.front(), &G[my_idxstart], _BLOCKSIZEX_*sizeof(Real));
+    memcpy(&mycenterline_P.front(), &P[my_idxstart], _BLOCKSIZEX_*sizeof(Real));
+    memcpy(&mycenterline_u.front(), &u[my_idxstart], _BLOCKSIZEX_*sizeof(Real));
+    memcpy(&mycenterline_v.front(), &v[my_idxstart], _BLOCKSIZEX_*sizeof(Real));
+    memcpy(&mycenterline_w.front(), &w[my_idxstart], _BLOCKSIZEX_*sizeof(Real));
+
+    // convert to primitives
+    for (int i=0; i < _BLOCKSIZEX_; ++i)
+    {
+        const Real ui = mycenterline_u[i] / mycenterline_r[i];
+        const Real vi = mycenterline_v[i] / mycenterline_r[i];
+        const Real wi = mycenterline_w[i] / mycenterline_r[i];
+        const Real pi = (mycenterline_p[i] - 0.5*mycenterline_r[i]*(ui*ui + vi*vi + wi*wi) - mycenterline_P[i]) / mycenterline_G[i];
+        mycenterline_u[i] = ui;
+        mycenterline_v[i] = vi;
+        mycenterline_w[i] = wi;
+        mycenterline_p[i] = pi;
+    }
+
+    // gather the shit ONLY WORKS FOR TOPOLOGY WITH 2 PROCESSES IN Y
+    int gsize;
+    MPI_Comm_size(MPI_COMM_WORLD, &gsize);
+    vector<Real> centerline_r(gsize * _BLOCKSIZEX_);
+    vector<Real> centerline_p(gsize * _BLOCKSIZEX_);
+    vector<Real> centerline_u(gsize * _BLOCKSIZEX_);
+    vector<Real> centerline_v(gsize * _BLOCKSIZEX_);
+    vector<Real> centerline_w(gsize * _BLOCKSIZEX_);
+
+    const MPI_Comm cartcomm = mygrid->getCartComm();
+    MPI_Gather(&mycenterline_r.front(), _BLOCKSIZEX_, _MPIREAL_, &centerline_r.front(), _BLOCKSIZEX_, _MPIREAL_, 0, cartcomm);
+    MPI_Gather(&mycenterline_p.front(), _BLOCKSIZEX_, _MPIREAL_, &centerline_p.front(), _BLOCKSIZEX_, _MPIREAL_, 0, cartcomm);
+    MPI_Gather(&mycenterline_u.front(), _BLOCKSIZEX_, _MPIREAL_, &centerline_u.front(), _BLOCKSIZEX_, _MPIREAL_, 0, cartcomm);
+    MPI_Gather(&mycenterline_v.front(), _BLOCKSIZEX_, _MPIREAL_, &centerline_v.front(), _BLOCKSIZEX_, _MPIREAL_, 0, cartcomm);
+    MPI_Gather(&mycenterline_w.front(), _BLOCKSIZEX_, _MPIREAL_, &centerline_w.front(), _BLOCKSIZEX_, _MPIREAL_, 0, cartcomm);
+#endif
+
+    // reduce MPI
+    double g_rInt=0., g_uInt=0., g_vInt=0., g_wInt=0., g_eInt=0., g_vol=0., g_ke=0., g_r2Int=0., g_mach_max=-HUGE_VAL, g_p_max=-HUGE_VAL, g_p_avg=0.;
+    MPI_Reduce(&rInt,     &g_rInt,     1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&uInt,     &g_uInt,     1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&vInt,     &g_vInt,     1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&wInt,     &g_wInt,     1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&eInt,     &g_eInt,     1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&vol,      &g_vol,      1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&r2Int,    &g_r2Int,    1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&ke,       &g_ke,       1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&mach_max, &g_mach_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&p_max,    &g_p_max,    1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&p_avg,    &g_p_avg,    1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
     double extent[3];
     mygrid->get_gextent(extent);
     const double volume = extent[0] * extent[1] * extent[2];
 
-    FILE * f = fopen("integrals.dat", "a");
-    fprintf(f, "%d %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n", step_id, t, dt, rInt*h3, uInt*h3,
-            vInt*h3, wInt*h3, eInt*h3, vol*h3, ke*h3, r2Int*h3, mach_max, p_max, pow(0.75*vol*h3/M_PI,1./3.), p_avg*h3/volume);
-    fclose(f);
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if (0 == rank)
+    {
+        FILE * f = fopen("integrals.dat", "a");
+        fprintf(f, "%d %e %e %e %e %e %e %e %e %e %e %e %e %e %e\n",
+                step_id, t, dt, g_rInt*h3, g_uInt*h3, g_vInt*h3, g_wInt*h3,
+                g_eInt*h3, g_vol*h3, g_ke*h3, g_r2Int*h3, g_mach_max, g_p_max,
+                pow(0.75*g_vol*h3/M_PI,1./3.), g_p_avg*h3/volume);
+        fclose(f);
+
+#if _BUBBLECENTIPEDE_X_
+        char fname[256];
+        sprintf(fname, "centerline_%05d.dat", step_id);
+        f = fopen(fname, "w");
+        fprintf(f, "# Step: %d\n", step_id);
+        fprintf(f, "# Time: %e\n", t);
+        fprintf(f, "# dt:   %e\n", dt);
+        fprintf(f, "# h:    %e\n", h);
+
+        Real* cr = &centerline_r.front();
+        Real* cp = &centerline_p.front();
+        Real* cu = &centerline_u.front();
+        Real* cv = &centerline_v.front();
+        Real* cw = &centerline_w.front();
+#if _MPI_Y2_
+        for (int j=0; j < gsize/2; ++j)
+        {
+            for (int i=0; i < _BLOCKSIZEX_; ++i)
+                fprintf(f, "%e %e %e %e %e\n",
+                        0.5*(cr[i] + cr[i+_BLOCKSIZEX_]),
+                        0.5*(cp[i] + cp[i+_BLOCKSIZEX_]),
+                        0.5*(cu[i] + cu[i+_BLOCKSIZEX_]),
+                        0.5*(cv[i] + cv[i+_BLOCKSIZEX_]),
+                        0.5*(cw[i] + cw[i+_BLOCKSIZEX_]));
+            cr += 2*_BLOCKSIZEX_;
+            cp += 2*_BLOCKSIZEX_;
+            cu += 2*_BLOCKSIZEX_;
+            cv += 2*_BLOCKSIZEX_;
+            cw += 2*_BLOCKSIZEX_;
+        }
+#else
+        for (int i=0; i < centerline_r.size(); ++i)
+            fprintf(f, "%e %e %e %e %e\n", cr[i], cp[i], cu[i], cv[i], cw[i]);
+#endif
+        fclose(f);
+#endif
+    }
 }
 
 void Sim_SICCloudMPI::_dump_sensors(const int step_id, const Real t, const Real dt)
@@ -302,14 +430,14 @@ void Sim_SICCloudMPI::_set_cloud(Seed<shape> **seed)
      * cloud_config file? n_shapes yes  */
     if(isroot) _initialize_cloud(); // requires file cloud_config.dat
 
-    MPI_Bcast(&SICCloudData::n_shapes,    1, MPI::INT,    0, cart_world);
-    MPI_Bcast(&SICCloudData::n_small,     1, MPI::INT,    0, cart_world);
-    MPI_Bcast(&SICCloudData::small_count, 1, MPI::INT,    0, cart_world);
-    MPI_Bcast(&SICCloudData::min_rad,     1, MPI::DOUBLE, 0, cart_world);
-    MPI_Bcast(&SICCloudData::max_rad,     1, MPI::DOUBLE, 0, cart_world);
-    MPI_Bcast(SICCloudData::seed_s,       3, MPI::DOUBLE, 0, cart_world);
-    MPI_Bcast(SICCloudData::seed_e,       3, MPI::DOUBLE, 0, cart_world);
-    MPI_Bcast(&SICCloudData::n_sensors,   1, MPI::INT,    0, cart_world);
+    MPI_Bcast(&SICCloudData::n_shapes,    1, MPI_INT,    0, cart_world);
+    MPI_Bcast(&SICCloudData::n_small,     1, MPI_INT,    0, cart_world);
+    MPI_Bcast(&SICCloudData::small_count, 1, MPI_INT,    0, cart_world);
+    MPI_Bcast(&SICCloudData::min_rad,     1, MPI_DOUBLE, 0, cart_world);
+    MPI_Bcast(&SICCloudData::max_rad,     1, MPI_DOUBLE, 0, cart_world);
+    MPI_Bcast(SICCloudData::seed_s,       3, MPI_DOUBLE, 0, cart_world);
+    MPI_Bcast(SICCloudData::seed_e,       3, MPI_DOUBLE, 0, cart_world);
+    MPI_Bcast(&SICCloudData::n_sensors,   1, MPI_INT,    0, cart_world);
 
     Seed<shape> * const newseed = new Seed<shape>(SICCloudData::seed_s, SICCloudData::seed_e);
     assert(newseed != NULL);
@@ -523,7 +651,7 @@ void Sim_SICCloudMPI::run()
     /* TODO: (Thu 30 Oct 2014 02:02:50 PM CET) Analysis is currently only
      * implemented for this case */
     parser.set_strict_mode();
-    const uint_t analysisperiod = parser("-analysisperiod").asInt();
+    int analysisperiod = parser("-analysisperiod").asInt();
     parser.unset_strict_mode();
 
     if (parser("-printargs").asBool(true) && isroot) parser.print_options();
@@ -531,6 +659,16 @@ void Sim_SICCloudMPI::run()
     // log dumps
     FILE* fp;
     if (bIO) fp = fopen("dump.log", "a");
+
+    // dynamic settings file
+    ofstream current_setting("parameter.dat");
+    current_setting << tend << endl;
+    current_setting << CFL << endl;
+    current_setting << saveperiod << endl;
+    current_setting << analysisperiod << endl;
+    current_setting << nsteps << endl;
+    current_setting.close();
+
 
     if (dryrun)
     {
@@ -543,7 +681,7 @@ void Sim_SICCloudMPI::run()
 
         const uint_t step_start = LSRK3_DataMPI::step; // such that -nsteps is a relative measure (only relevant for restarts)
 
-        /* _dump_statistics(LSRK3_DataMPI::step, LSRK3_DataMPI::time, 0.0); */
+        _dump_statistics(LSRK3_DataMPI::step, LSRK3_DataMPI::time, 0.0);
 
         while (LSRK3_DataMPI::time < tend)
         {
@@ -554,7 +692,7 @@ void Sim_SICCloudMPI::run()
             profiler.push_start("EVOLVE");
             dt_max = dt_final;
             if (bIO) dt_max = dt_max < dt_dump ? dt_max : dt_dump;
-            dt = (*stepper)(dt_max); // step ahead
+            dt = (*stepper)(dt_max); // step ahead, sucka
             profiler.pop_stop();
 
             // post processings
@@ -563,7 +701,9 @@ void Sim_SICCloudMPI::run()
             if (bIO && (float)LSRK3_DataMPI::time == (float)tnextdump)
             {
                 fprintf(fp, "step=%d\ttime=%e\n", LSRK3_DataMPI::step, LSRK3_DataMPI::time);
+                fflush(fp);
                 tnextdump += dumpinterval;
+                if (isroot) printf("I have to take a dump...\n");
                 _take_a_dump();
             }
 
@@ -579,12 +719,34 @@ void Sim_SICCloudMPI::run()
             {
                 profiler.push_start("ANALYSIS");
                 if (isroot) printf("Running analysis...\n");
-                _dump_statistics(LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt); // TODO: make this work with MPI
+                _dump_statistics(LSRK3_DataMPI::step, LSRK3_DataMPI::time, dt);
                 profiler.pop_stop();
             }
 
-            if (isroot && LSRK3_DataMPI::step % 10 == 0)
-                profiler.printSummary();
+            if (LSRK3_DataMPI::step % 20 == 0)
+            {
+                if (isroot)
+                {
+                    ifstream new_settings("parameter.dat");
+                    new_settings >> tend;
+                    new_settings >> CFL;
+                    new_settings >> saveperiod;
+                    new_settings >> analysisperiod;
+                    new_settings >> nsteps;
+                    new_settings.close();
+                }
+
+                const MPI_Comm cart_world = mygrid->getCartComm();
+                MPI_Bcast(&tend, 1, MPI_DOUBLE, 0, cart_world);
+                MPI_Bcast(&CFL,  1, MPI_DOUBLE, 0, cart_world);
+                MPI_Bcast(&saveperiod,     1, MPI_INT, 0, cart_world);
+                MPI_Bcast(&analysisperiod, 1, MPI_INT, 0, cart_world);
+                MPI_Bcast(&nsteps,         1, MPI_INT, 0, cart_world);
+
+                stepper->set_CFL(CFL);
+
+                if (isroot) profiler.printSummary();
+            }
 
             if ((LSRK3_DataMPI::step - step_start) == nsteps) break;
         }

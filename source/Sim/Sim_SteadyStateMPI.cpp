@@ -17,6 +17,14 @@
 
 using namespace std;
 
+Real Sim_SteadyStateData::r = 0.0;
+Real Sim_SteadyStateData::u = 0.0;
+Real Sim_SteadyStateData::v = 0.0;
+Real Sim_SteadyStateData::w = 0.0;
+Real Sim_SteadyStateData::e = 0.0;
+Real Sim_SteadyStateData::G = 0.0;
+Real Sim_SteadyStateData::P = 0.0;
+
 
 Sim_SteadyStateMPI::Sim_SteadyStateMPI(const int argc, const char ** argv, const int isroot_)
     : isroot(isroot_), fcount(0), save_flipflop(0), mygrid(NULL), myGPU(NULL), parser(argc, argv), profiler(GPUlabMPI::get_profiler())
@@ -156,6 +164,13 @@ void Sim_SteadyStateMPI::_ic()
     const double G  = 1.0/(g - 1.0);
     const double P  = g*pc*G;
     const double e  = G*p + P + 0.5*r*(u*u + v*v + w*w);
+    Sim_SteadyStateData::r = r;
+    Sim_SteadyStateData::u = ru;
+    Sim_SteadyStateData::v = rv;
+    Sim_SteadyStateData::w = rw;
+    Sim_SteadyStateData::e = e;
+    Sim_SteadyStateData::G = G;
+    Sim_SteadyStateData::P = P;
 
     typedef GridMPI::PRIM var;
     GridMPI& icgrid = *mygrid;
@@ -180,8 +195,8 @@ void Sim_SteadyStateMPI::_dump(const string basename)
 {
     const string dump_path = parser("-fpath").asString(".");
 
-    sprintf(fname, "%s_%04d", basename.c_str(), fcount);
-    if (isroot) printf("Dumping file %s at step %d, time %f\n", fname, LSRK3_DataMPI::step, LSRK3_DataMPI::time);
+    sprintf(fname, "%s_%05d", basename.c_str(), fcount);
+    if (isroot) printf("Dumping HDF file %s at step %d, time %f\n", fname, LSRK3_DataMPI::step, LSRK3_DataMPI::time);
     DumpHDF5_MPI<GridMPI, myTensorialStreamer>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
     ++fcount;
 }
@@ -189,7 +204,7 @@ void Sim_SteadyStateMPI::_dump(const string basename)
 
 void Sim_SteadyStateMPI::_vp(const std::string basename)
 {
-    if (isroot) cout << "dumping MPI VP ...\n" ;
+    if (isroot) cout << "Dumping MPI VP...\n" ;
 
     const string path = parser("-fpath").asString(".");
 
@@ -244,7 +259,7 @@ void Sim_SteadyStateMPI::_save()
     }
     /* DumpHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, LSRK3_DataMPI::step, "save.data", dump_path); */
 
-    // save in 4 parts to allow data sets exceeding 2GB for a single process
+    // save in 7 parts to allow data sets exceeding 2GB for a single process
     // http://www.hdfgroup.org/hdf5-quest.html#p2gb
     sprintf(fname, "save.data%d.part%d", save_flipflop, 1);
     DumpHDF5_MPI<GridMPI, mySaveStreamer_part1>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
@@ -254,6 +269,12 @@ void Sim_SteadyStateMPI::_save()
     DumpHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
     sprintf(fname, "save.data%d.part%d", save_flipflop, 4);
     DumpHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
+    sprintf(fname, "save.data%d.part%d", save_flipflop, 5);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part5>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
+    sprintf(fname, "save.data%d.part%d", save_flipflop, 6);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part6>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
+    sprintf(fname, "save.data%d.part%d", save_flipflop, 7);
+    DumpHDF5_MPI<GridMPI, mySaveStreamer_part7>(*mygrid, LSRK3_DataMPI::step, fname, dump_path);
 
     // next
     save_flipflop = 1 - save_flipflop;
@@ -280,7 +301,7 @@ bool Sim_SteadyStateMPI::_restart()
         saveinfo >> save_flipflop;
         /* ReadHDF5_MPI<GridMPI, mySaveStreamer>(*mygrid, "save.data", dump_path); */
 
-        // 4 parts
+        // 7 parts
         sprintf(fname, "save.data%d.part%d", save_flipflop, 1);
         ReadHDF5_MPI<GridMPI, mySaveStreamer_part1>(*mygrid, fname, dump_path);
         sprintf(fname, "save.data%d.part%d", save_flipflop, 2);
@@ -289,6 +310,12 @@ bool Sim_SteadyStateMPI::_restart()
         ReadHDF5_MPI<GridMPI, mySaveStreamer_part3>(*mygrid, fname, dump_path);
         sprintf(fname, "save.data%d.part%d", save_flipflop, 4);
         ReadHDF5_MPI<GridMPI, mySaveStreamer_part4>(*mygrid, fname, dump_path);
+        sprintf(fname, "save.data%d.part%d", save_flipflop, 5);
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part5>(*mygrid, fname, dump_path);
+        sprintf(fname, "save.data%d.part%d", save_flipflop, 6);
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part6>(*mygrid, fname, dump_path);
+        sprintf(fname, "save.data%d.part%d", save_flipflop, 7);
+        ReadHDF5_MPI<GridMPI, mySaveStreamer_part7>(*mygrid, fname, dump_path);
 
         // dont overwrite this save data for next save
         save_flipflop = 1 - save_flipflop;
@@ -348,7 +375,8 @@ void Sim_SteadyStateMPI::run()
 
             // here is where the stuff happens
             profiler.push_start("EVOLVE");
-            dt_max = dt_final < dt_dump ? dt_final : dt_dump;
+            dt_max = dt_final;
+            if (bIO) dt_max = dt_max < dt_dump ? dt_max : dt_dump;
             dt = (*stepper)(dt_max); // step ahead
             profiler.pop_stop();
 

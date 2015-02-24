@@ -39,6 +39,11 @@ typedef double Real;
 #error "Processor is not defined"
 #endif
 
+#ifdef SINGLE_PRECISION
+#define my_fma(x,y,z) __fmaf_rd(x,y,z)
+#else
+#define my_fma(x,y,z) __fma_rd(x,y,z)
+#endif
 
 __global__
 void fma_kernel(Real * const store)
@@ -51,10 +56,10 @@ void fma_kernel(Real * const store)
 #pragma unroll 256
     for (unsigned int i = 0; i < NLOOP; ++i)
     {
-        y1 = x1 + y1*x2;
-        y2 = x2 + y2*x3;
-        y3 = x3 + y3*x1;
-        y4 = x4 + y4*x2;
+        y1 = my_fma(y1,x2,x1);
+        y2 = my_fma(y2,x3,x2);
+        y3 = my_fma(y3,x1,x3);
+        y4 = my_fma(y4,x2,x4);
     }
 
     store[tid] = y1+y2+y3+y4;
