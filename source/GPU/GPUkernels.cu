@@ -56,6 +56,20 @@ extern cudaEvent_t *pipe_stop;
 
 // texture references, for each variable one
 // check for double precision texture fetch https://developer.nvidia.com/cuda-faq
+#ifndef _FLOAT_PRECISION_
+// DP texture hack
+// https://developer.nvidia.com/cuda-faq
+// (Q: Can I read double precision floats from texture?)
+texture<int2, 3, cudaReadModeElementType> tex00;
+texture<int2, 3, cudaReadModeElementType> tex01;
+texture<int2, 3, cudaReadModeElementType> tex02;
+texture<int2, 3, cudaReadModeElementType> tex03;
+texture<int2, 3, cudaReadModeElementType> tex04;
+texture<int2, 3, cudaReadModeElementType> tex05;
+texture<int2, 3, cudaReadModeElementType> tex06;
+
+#else
+// SP
 texture<float, 3, cudaReadModeElementType> tex00;
 texture<float, 3, cudaReadModeElementType> tex01;
 texture<float, 3, cudaReadModeElementType> tex02;
@@ -63,6 +77,7 @@ texture<float, 3, cudaReadModeElementType> tex03;
 texture<float, 3, cudaReadModeElementType> tex04;
 texture<float, 3, cudaReadModeElementType> tex05;
 texture<float, 3, cudaReadModeElementType> tex06;
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 //                             DEVICE FUNCTIONS                              //
@@ -489,6 +504,19 @@ void _CONV(DevicePointer data)
 }
 
 
+#ifndef _FLOAT_PRECISION_
+// double precision texture hack
+template <int texID> __device__ inline double myTex3D(const int ix, const int iy, const int iz);
+template <> __device__ inline double myTex3D<0>(const int ix, const int iy, const int iz) { int2 v = tex3D(tex00, ix, iy, iz); return __hiloint2double(v.y, v.x);}
+template <> __device__ inline double myTex3D<1>(const int ix, const int iy, const int iz) { int2 v = tex3D(tex01, ix, iy, iz); return __hiloint2double(v.y, v.x);}
+template <> __device__ inline double myTex3D<2>(const int ix, const int iy, const int iz) { int2 v = tex3D(tex02, ix, iy, iz); return __hiloint2double(v.y, v.x);}
+template <> __device__ inline double myTex3D<3>(const int ix, const int iy, const int iz) { int2 v = tex3D(tex03, ix, iy, iz); return __hiloint2double(v.y, v.x);}
+template <> __device__ inline double myTex3D<4>(const int ix, const int iy, const int iz) { int2 v = tex3D(tex04, ix, iy, iz); return __hiloint2double(v.y, v.x);}
+template <> __device__ inline double myTex3D<5>(const int ix, const int iy, const int iz) { int2 v = tex3D(tex05, ix, iy, iz); return __hiloint2double(v.y, v.x);}
+template <> __device__ inline double myTex3D<6>(const int ix, const int iy, const int iz) { int2 v = tex3D(tex06, ix, iy, iz); return __hiloint2double(v.y, v.x);}
+
+#else
+// single precision
 template <int texID> __device__ inline float myTex3D(const int ix, const int iy, const int iz);
 template <> __device__ inline float myTex3D<0>(const int ix, const int iy, const int iz) { return tex3D(tex00, ix, iy, iz); }
 template <> __device__ inline float myTex3D<1>(const int ix, const int iy, const int iz) { return tex3D(tex01, ix, iy, iz); }
@@ -497,6 +525,7 @@ template <> __device__ inline float myTex3D<3>(const int ix, const int iy, const
 template <> __device__ inline float myTex3D<4>(const int ix, const int iy, const int iz) { return tex3D(tex04, ix, iy, iz); }
 template <> __device__ inline float myTex3D<5>(const int ix, const int iy, const int iz) { return tex3D(tex05, ix, iy, iz); }
 template <> __device__ inline float myTex3D<6>(const int ix, const int iy, const int iz) { return tex3D(tex06, ix, iy, iz); }
+#endif
 
 template <int texID, int gid0, int tid0, int gmap0, int tmap0, int ng> __device__
 inline void _load_boundary_X(const uint_t iy, const uint_t iz,
@@ -1276,15 +1305,15 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 
         for (uint_t iz = 0; iz < nslices; ++iz)
         {
-            const Real r = tex3D(tex00, ix, iy, iz);
-            const Real G = tex3D(tex05, ix, iy, iz);
-            const Real u = tex3D(tex01, ix, iy, iz);
-            const Real v = tex3D(tex02, ix, iy, iz);
+            const Real r = myTex3D<0>(ix, iy, iz);
+            const Real G = myTex3D<5>(ix, iy, iz);
+            const Real u = myTex3D<1>(ix, iy, iz);
+            const Real v = myTex3D<2>(ix, iy, iz);
             const Real invr = 1.0f / r;
             const Real invG = 1.0f / G;
-            const Real w = tex3D(tex03, ix, iy, iz);
-            const Real e = tex3D(tex04, ix, iy, iz);
-            const Real P = tex3D(tex06, ix, iy, iz);
+            const Real w = myTex3D<3>(ix, iy, iz);
+            const Real e = myTex3D<4>(ix, iy, iz);
+            const Real P = myTex3D<6>(ix, iy, iz);
 
             const Real p = (e - 0.5f*(u*u + v*v + w*w)*invr - P)*invG;
             const Real c = sqrtf(((p + P)*invG + p)*invr);
@@ -1307,7 +1336,12 @@ void _maxSOS(const uint_t nslices, int* g_maxSOS)
 ///////////////////////////////////////////////////////////////////////////////
 //                              KERNEL WRAPPERS                              //
 ///////////////////////////////////////////////////////////////////////////////
+// ugly!
+#ifndef _FLOAT_PRECISION_
+static void _bindTexture(texture<int2, 3, cudaReadModeElementType> * const tex, cudaArray_t d_ptr)
+#else
 static void _bindTexture(texture<float, 3, cudaReadModeElementType> * const tex, cudaArray_t d_ptr)
+#endif
 {
     cudaChannelFormatDesc fmt = cudaCreateChannelDesc<Real>();
     tex->addressMode[0]       = cudaAddressModeClamp;
